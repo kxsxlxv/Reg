@@ -142,10 +142,18 @@ void VulkanContext::selectPhysicalDevice() {
         const auto presentIt = std::ranges::find_if(families, [](const QueueFamilyCandidate& family) {
             return family.present;
         });
-        const auto videoIt = std::ranges::find_if(families, [](const QueueFamilyCandidate& family) {
-            return (family.flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) != 0 &&
+        auto videoIt = std::ranges::find_if(families, [graphicsIt](const QueueFamilyCandidate& family) {
+            return family.index != graphicsIt->index &&
+                   (family.flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) != 0 &&
                    (family.videoCodecOperations & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) != 0;
         });
+
+        if (videoIt == families.end()) {
+            videoIt = std::ranges::find_if(families, [](const QueueFamilyCandidate& family) {
+                return (family.flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) != 0 &&
+                       (family.videoCodecOperations & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) != 0;
+            });
+        }
 
         if (graphicsIt == families.end() || presentIt == families.end() || videoIt == families.end()) {
             continue;
@@ -177,6 +185,10 @@ void VulkanContext::selectPhysicalDevice() {
     std::cout << "[vulkan] graphics queue family: " << graphicsQueue_.familyIndex << "\n";
     std::cout << "[vulkan] present queue family: " << presentQueue_.familyIndex << "\n";
     std::cout << "[vulkan] video decode queue family: " << videoDecodeQueue_.familyIndex << "\n";
+    if (videoDecodeQueue_.familyIndex == graphicsQueue_.familyIndex) {
+        std::cerr << "[vulkan] warning: video decode and graphics share one queue family; "
+                     "a dedicated video queue family is preferred for cross-thread submission\n";
+    }
 }
 
 void VulkanContext::createDevice() {
