@@ -265,8 +265,11 @@ void Swapchain::destroySwapchain() {
 }
 
 VkSurfaceFormatKHR Swapchain::chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const {
+    // Vulkan YCbCr conversion produces already non-linear R'G'B' values for the
+    // SDR video path. Prefer an UNORM swapchain so the color attachment does not
+    // apply a second automatic sRGB encoding step.
     const auto preferred = std::ranges::find_if(formats, [](const VkSurfaceFormatKHR& format) {
-        return format.format == VK_FORMAT_B8G8R8A8_SRGB &&
+        return format.format == VK_FORMAT_B8G8R8A8_UNORM &&
                format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     });
     if (preferred != formats.end()) {
@@ -274,10 +277,16 @@ VkSurfaceFormatKHR Swapchain::chooseSurfaceFormat(const std::vector<VkSurfaceFor
     }
 
     const auto rgba = std::ranges::find_if(formats, [](const VkSurfaceFormatKHR& format) {
-        return format.format == VK_FORMAT_R8G8B8A8_SRGB &&
+        return format.format == VK_FORMAT_R8G8B8A8_UNORM &&
                format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     });
-    return rgba != formats.end() ? *rgba : formats.front();
+    if (rgba != formats.end()) {
+        return *rgba;
+    }
+
+    // The renderer can still operate on another color-attachment format, but
+    // exact transfer-function handling for non-UNORM surfaces is outside Phase A.
+    return formats.front();
 }
 
 VkPresentModeKHR Swapchain::choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const {
