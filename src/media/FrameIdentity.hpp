@@ -24,9 +24,6 @@ struct FrameKeyHash {
             (key.frameId + 0x9e3779b97f4a7c15ULL +
              (key.streamEpoch << 6U) +
              (key.streamEpoch >> 2U));
-        if constexpr (sizeof(std::size_t) >= sizeof(std::uint64_t)) {
-            return static_cast<std::size_t>(mixed);
-        }
         return static_cast<std::size_t>(mixed ^ (mixed >> 32U));
     }
 };
