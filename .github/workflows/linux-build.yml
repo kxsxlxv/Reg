@@ -79,3 +79,6 @@ jobs:
 
       - name: Build Reg
         run: cmake --build build --verbose
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure
