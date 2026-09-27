@@ -29,6 +29,7 @@ VulkanHwDevice::VulkanHwDevice(const vulkan::VulkanContext& vulkan) {
     vkContext->phys_dev = vulkan.physicalDevice();
     vkContext->act_dev = vulkan.device();
     vkContext->device_features = vulkan.enabledFeatures();
+    vkContext->queue_flags = vulkan.queueCreateFlags();
 
     instanceExtensionPtrs_.reserve(vulkan.enabledInstanceExtensions().size());
     for (const auto& extension : vulkan.enabledInstanceExtensions()) {
