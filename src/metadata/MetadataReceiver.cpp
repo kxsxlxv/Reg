@@ -20,7 +20,6 @@ MetadataReceiver::MetadataReceiver(
           config_.receiveBufferBytes) {}
 
 void MetadataReceiver::run() {
-    stopRequested_.store(false, std::memory_order_release);
     resetSequenceTracking();
 
     std::array<std::uint8_t, kReceiveDatagramBufferSize> buffer{};
