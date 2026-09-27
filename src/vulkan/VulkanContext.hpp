@@ -12,6 +12,8 @@ namespace reg::vulkan {
 
 struct QueueInfo {
     std::uint32_t familyIndex{VK_QUEUE_FAMILY_IGNORED};
+    std::uint32_t queueIndex{0};
+    std::uint32_t familyQueueCount{0};
     VkQueue handle{VK_NULL_HANDLE};
     VkQueueFlags flags{};
     VkVideoCodecOperationFlagsKHR videoCodecOperations{};
@@ -44,6 +46,7 @@ public:
 private:
     struct QueueFamilyCandidate {
         std::uint32_t index{};
+        std::uint32_t queueCount{};
         VkQueueFlags flags{};
         VkVideoCodecOperationFlagsKHR videoCodecOperations{};
         bool present{};
