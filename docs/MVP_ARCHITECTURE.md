@@ -94,6 +94,8 @@ Required GPU properties for the MVP:
 - `VK_KHR_video_decode_h264`
 - timeline semaphores
 - synchronization2
+- sampler YCbCr conversion
+- dynamic rendering
 
 ## Raw policy
 
@@ -184,7 +186,7 @@ The source encoder should use no B-frames and regular IDRs, initially about one 
 
 ## Development phases
 
-### Phase A.1 — implemented by the first probe foundation
+### Phase A.1 — implemented
 
 - SDL3 Vulkan-only bootstrap window
 - NVIDIA Vulkan 1.3 device selection
@@ -200,9 +202,26 @@ The source encoder should use no B-frames and regular IDRs, initially about one 
 - SEI frame identity parsing
 - latest-frame Raw mailbox
 
-### Phase A.2 — next
+### Phase A.2 — implemented in source; hardware validation pending
 
-Render the decoded `AVVkFrame` directly to a swapchain using Vulkan YCbCr sampling. This phase must introduce the central `VulkanVideoFrameAccess` synchronization component and GPU retirement queue before any decoded image is sampled.
+The probe now renders the decoded `AVVkFrame` directly to a swapchain using Vulkan YCbCr sampling.
+
+Implemented pieces:
+
+- `Swapchain` with Raw-oriented IMMEDIATE -> MAILBOX -> FIFO preference;
+- direct single-multiplanar NV12 `VkImage` sampling;
+- `VkSamplerYcbcrConversion` for YCbCr matrix/range conversion;
+- central `VulkanVideoFrameAccess` for FFmpeg timeline semaphore/layout state;
+- `lock_frame()` / `unlock_frame()` around graphics submission;
+- per-render-slot fences that retain `VideoFramePtr` until GPU completion;
+- dynamic rendering and aspect-fit viewport;
+- decode surface image-view/descriptor cache;
+- swapchain recreation without intentionally stalling the decode queue;
+- queue-handle isolation between FFmpeg and the application when internally synchronized queues are unavailable.
+
+The current Phase A path deliberately rejects separate VkImage-per-plane output rather than inserting a conversion/copy.
+
+The acceptance gate is documented in `docs/PHASE_A_SMOKE_TEST.md`.
 
 ### Later phases
 
@@ -215,7 +234,7 @@ Render the decoded `AVVkFrame` directly to a swapchain using Vulkan YCbCr sampli
 - watchdog/reconnect/device-lost recovery
 - measured latency tuning
 
-## `AVVkFrame` synchronization rule for Phase A.2
+## `AVVkFrame` synchronization rule
 
 Rendering code must not take only `AVVkFrame::img[0]` and ignore FFmpeg state. It must honor:
 
