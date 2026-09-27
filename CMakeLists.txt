@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(REG_FETCH_SDL3 "Fetch a pinned SDL3 release instead of using a system package" ON)
 option(REG_ENABLE_VALIDATION "Enable Vulkan validation-layer integration in development builds" ON)
+option(REG_BUILD_TESTS "Build Reg core unit tests" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -80,7 +81,11 @@ add_executable(reg_probe
     src/media/FrameIdentity.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
+    src/metadata/Protocol.cpp
+    src/metadata/MetadataStore.cpp
     src/video/VideoFrame.cpp
+    src/video/OverlayFrameBuffer.cpp
+    src/video/FrameSynchronizer.cpp
 )
 
 add_dependencies(reg_probe reg_shaders)
@@ -104,4 +109,33 @@ if(MSVC)
     target_compile_options(reg_probe PRIVATE /W4 /permissive- /EHsc)
 else()
     target_compile_options(reg_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
+
+if(REG_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(reg_core_tests
+        tests/MetadataProtocolTests.cpp
+        src/metadata/Protocol.cpp
+        src/metadata/MetadataStore.cpp
+    )
+
+    target_include_directories(reg_core_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+
+    if(MSVC)
+        target_compile_options(reg_core_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_core_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wconversion
+            -Wshadow
+        )
+    endif()
+
+    add_test(NAME reg_core_tests COMMAND reg_core_tests)
 endif()
