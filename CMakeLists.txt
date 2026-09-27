@@ -74,6 +74,7 @@ add_executable(reg_probe
     src/main.cpp
     src/app/CommandLine.cpp
     src/platform/SDLPlatform.cpp
+    src/platform/UdpSocket.cpp
     src/vulkan/VulkanContext.cpp
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
@@ -83,6 +84,7 @@ add_executable(reg_probe
     src/media/RtspDecoder.cpp
     src/metadata/Protocol.cpp
     src/metadata/MetadataStore.cpp
+    src/metadata/MetadataReceiver.cpp
     src/video/VideoFrame.cpp
     src/video/OverlayFrameBuffer.cpp
     src/video/FrameSynchronizer.cpp
@@ -99,6 +101,10 @@ target_link_libraries(reg_probe PRIVATE
     FFmpeg::avformat
     FFmpeg::avutil
 )
+
+if(WIN32)
+    target_link_libraries(reg_probe PRIVATE ws2_32)
+endif()
 
 target_compile_definitions(reg_probe PRIVATE
     REG_ENABLE_VALIDATION=$<BOOL:${REG_ENABLE_VALIDATION}>
