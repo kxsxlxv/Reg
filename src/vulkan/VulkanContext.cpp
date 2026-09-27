@@ -7,7 +7,7 @@
 #include <array>
 #include <cstring>
 #include <iostream>
-#include <set>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -168,14 +168,17 @@ void VulkanContext::selectPhysicalDevice() {
         deviceProperties_ = properties;
 
         graphicsQueue_.familyIndex = graphicsIt->index;
+        graphicsQueue_.familyQueueCount = graphicsIt->queueCount;
         graphicsQueue_.flags = graphicsIt->flags;
         graphicsQueue_.videoCodecOperations = graphicsIt->videoCodecOperations;
 
         presentQueue_.familyIndex = presentIt->index;
+        presentQueue_.familyQueueCount = presentIt->queueCount;
         presentQueue_.flags = presentIt->flags;
         presentQueue_.videoCodecOperations = presentIt->videoCodecOperations;
 
         videoDecodeQueue_.familyIndex = videoIt->index;
+        videoDecodeQueue_.familyQueueCount = videoIt->queueCount;
         videoDecodeQueue_.flags = videoIt->flags;
         videoDecodeQueue_.videoCodecOperations = videoIt->videoCodecOperations;
         break;
@@ -383,6 +386,7 @@ std::vector<VulkanContext::QueueFamilyCandidate> VulkanContext::queryQueueFamili
 
         result.push_back(QueueFamilyCandidate{
             .index = i,
+            .queueCount = properties[i].queueFamilyProperties.queueCount,
             .flags = properties[i].queueFamilyProperties.queueFlags,
             .videoCodecOperations = videoProperties[i].videoCodecOperations,
             .present = presentSupported == VK_TRUE,
