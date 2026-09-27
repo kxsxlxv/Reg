@@ -153,4 +153,18 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME metadata_protocol COMMAND reg_metadata_protocol_tests)
+
+    add_executable(reg_packet_sequence_tests
+        tests/packet_sequence_tests.cpp
+        src/metadata/PacketSequenceTracker.cpp
+    )
+    target_include_directories(reg_packet_sequence_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+    if(MSVC)
+        target_compile_options(reg_packet_sequence_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_packet_sequence_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME packet_sequence COMMAND reg_packet_sequence_tests)
 endif()
