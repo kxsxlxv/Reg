@@ -187,25 +187,36 @@ void VulkanContext::createDevice() {
         VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
     };
 
+    VkPhysicalDeviceVulkan11Features available11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
     VkPhysicalDeviceVulkan12Features available12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceVulkan13Features available13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceFeatures2 availableFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    availableFeatures.pNext = &available12;
+    availableFeatures.pNext = &available11;
+    available11.pNext = &available12;
     available12.pNext = &available13;
     vkGetPhysicalDeviceFeatures2(physicalDevice_, &availableFeatures);
 
+    if (available11.samplerYcbcrConversion != VK_TRUE) {
+        throw std::runtime_error("The selected GPU does not expose samplerYcbcrConversion");
+    }
     if (available12.timelineSemaphore != VK_TRUE) {
         throw std::runtime_error("The selected GPU does not expose timelineSemaphore");
     }
     if (available13.synchronization2 != VK_TRUE) {
         throw std::runtime_error("The selected GPU does not expose synchronization2");
     }
+    if (available13.dynamicRendering != VK_TRUE) {
+        throw std::runtime_error("The selected GPU does not expose dynamicRendering");
+    }
 
     enabledFeatures_.features = {};
-    enabledFeatures_.pNext = &enabledVulkan12Features_;
+    enabledFeatures_.pNext = &enabledVulkan11Features_;
+    enabledVulkan11Features_.samplerYcbcrConversion = VK_TRUE;
+    enabledVulkan11Features_.pNext = &enabledVulkan12Features_;
     enabledVulkan12Features_.timelineSemaphore = VK_TRUE;
     enabledVulkan12Features_.pNext = &enabledVulkan13Features_;
     enabledVulkan13Features_.synchronization2 = VK_TRUE;
+    enabledVulkan13Features_.dynamicRendering = VK_TRUE;
 
     std::set<std::uint32_t> uniqueFamilies{
         graphicsQueue_.familyIndex,
