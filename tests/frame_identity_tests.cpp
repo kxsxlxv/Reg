@@ -4,6 +4,7 @@ extern "C" {
 #include <libavutil/frame.h>
 }
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
