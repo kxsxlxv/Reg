@@ -58,7 +58,6 @@ jobs:
             --disable-avfilter \
             --disable-swscale \
             --disable-swresample \
-            --disable-postproc \
             --enable-vulkan
 
           grep -E '^#define CONFIG_H264_VULKAN_HWACCEL 1$' config.h
