@@ -6,6 +6,10 @@ on:
     branches:
       - mvp/metadata-udp-receiver
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   core:
     runs-on: windows-latest
