@@ -124,7 +124,21 @@ bool Swapchain::recreate() {
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     createInfo.preTransform = capabilities.currentTransform;
+
+    constexpr VkCompositeAlphaFlagBitsKHR compositeAlphaPreference[]{
+        VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+    };
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    for (const auto mode : compositeAlphaPreference) {
+        if ((capabilities.supportedCompositeAlpha & mode) != 0) {
+            createInfo.compositeAlpha = mode;
+            break;
+        }
+    }
+
     createInfo.presentMode = newPresentMode;
     createInfo.clipped = VK_TRUE;
     createInfo.oldSwapchain = swapchain_;
