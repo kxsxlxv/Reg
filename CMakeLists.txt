@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(REG_FETCH_SDL3 "Fetch a pinned SDL3 release instead of using a system package" ON)
 option(REG_ENABLE_VALIDATION "Enable Vulkan validation-layer integration in development builds" ON)
+option(REG_BUILD_TESTS "Build lightweight unit tests" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -104,4 +105,24 @@ if(MSVC)
     target_compile_options(reg_probe PRIVATE /W4 /permissive- /EHsc)
 else()
     target_compile_options(reg_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
+
+if(REG_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(reg_frame_identity_tests
+        tests/frame_identity_tests.cpp
+        src/media/FrameIdentity.cpp
+    )
+    target_include_directories(reg_frame_identity_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_frame_identity_tests PRIVATE FFmpeg::avutil)
+
+    if(MSVC)
+        target_compile_options(reg_frame_identity_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_frame_identity_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
 endif()
