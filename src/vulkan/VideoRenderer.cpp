@@ -17,6 +17,7 @@ extern "C" {
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef REG_SHADER_DIR
@@ -243,7 +244,7 @@ void VideoRenderer::ensureVideoResources(const video::VideoFrame& frame) {
 }
 
 void VideoRenderer::createVideoResources(
-    const video::VideoFrame&,
+    const video::VideoFrame& frame,
     const VideoFormat& format) {
     VkSamplerYcbcrConversionCreateInfo conversionInfo{
         VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
@@ -298,12 +299,33 @@ void VideoRenderer::createVideoResources(
                 vulkan_.device(), &layoutInfo, nullptr, &descriptorSetLayout_),
             "vkCreateDescriptorSetLayout(video)");
 
+    VkSamplerYcbcrConversionImageFormatProperties ycbcrProperties{
+        VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES};
+    VkImageFormatProperties2 imageProperties{VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2};
+    imageProperties.pNext = &ycbcrProperties;
+
+    VkPhysicalDeviceImageFormatInfo2 formatInfo{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2};
+    formatInfo.format = format.format;
+    formatInfo.type = VK_IMAGE_TYPE_2D;
+    formatInfo.tiling = frame.vkFrame()->tiling;
+    formatInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+
+    checkVk(
+        vkGetPhysicalDeviceImageFormatProperties2(
+            vulkan_.physicalDevice(),
+            &formatInfo,
+            &imageProperties),
+        "vkGetPhysicalDeviceImageFormatProperties2(video)");
+
+    if (ycbcrProperties.combinedImageSamplerDescriptorCount == 0) {
+        throw std::runtime_error("Vulkan reported zero descriptors for YCbCr combined sampler");
+    }
+
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    // Multi-planar YCbCr implementations may consume multiple underlying
-    // descriptors per combined sampler. Four per cached surface is a safe
-    // upper bound for the formats supported by this MVP.
-    poolSize.descriptorCount = kMaxCachedVideoSurfaces * 4;
+    poolSize.descriptorCount =
+        kMaxCachedVideoSurfaces * ycbcrProperties.combinedImageSamplerDescriptorCount;
 
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     poolInfo.maxSets = kMaxCachedVideoSurfaces;
