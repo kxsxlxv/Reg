@@ -34,10 +34,28 @@ Raw presentation already uses newest-frame-only semantics.
 
 Phase A source implementation is ready for the mandatory hardware smoke test. It has not been declared hardware-validated from this development environment.
 
+A stacked Phase C/D branch now also contains the frame-accurate metadata control plane:
+
+```text
+Jetson UDP
+    -> binary V1 validation + CRC32C
+    -> MetadataStore(FrameKey)
+                         ^
+                         |
+decoded SEI-tagged frame -> 150 ms bounded OverlayFrameBuffer
+                         |
+                         v
+                  exact FrameSynchronizer
+                  Present or Drop
+```
+
+When `--metadata-port` is enabled, `reg_probe` logs exact synchronized frames and deadline drops. It does not yet draw the second-monitor overlay.
+
 See:
 
 - [MVP architecture](docs/MVP_ARCHITECTURE.md)
 - [Build notes](docs/BUILD.md)
 - [Phase A hardware smoke test](docs/PHASE_A_SMOKE_TEST.md)
+- [CV metadata protocol V1](docs/METADATA_PROTOCOL_V1.md)
 
-After Phase A passes on the target NVIDIA machines, the next implementation milestone is source SEI frame identity plus the delayed exact-frame Overlay buffer.
+The next visual milestone is a second Vulkan output with bbox/line/text overlay rendering. Source SEI insertion and Jetson extraction still need to use the FrameKey contract documented by the project.
