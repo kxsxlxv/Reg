@@ -261,6 +261,15 @@ void VulkanContext::createDevice() {
     }
 #endif
 
+    if (queueCreateFlags_ == 0 &&
+        videoDecodeQueue_.familyIndex == graphicsQueue_.familyIndex) {
+        throw std::runtime_error(
+            "Video decode and graphics share a Vulkan queue family, but "
+            "VK_KHR_internally_synchronized_queues is unavailable. "
+            "Phase A requires either a dedicated video-decode queue family or "
+            "internally synchronized queues to avoid cross-thread queue submission races.");
+    }
+
     std::set<std::uint32_t> uniqueFamilies{
         graphicsQueue_.familyIndex,
         presentQueue_.familyIndex,
