@@ -264,30 +264,61 @@ void VulkanContext::createDevice() {
     }
 #endif
 
-    if (queueCreateFlags_ == 0 &&
-        videoDecodeQueue_.familyIndex == graphicsQueue_.familyIndex) {
-        throw std::runtime_error(
-            "Video decode and graphics share a Vulkan queue family, but "
-            "VK_KHR_internally_synchronized_queues is unavailable. "
-            "Phase A requires either a dedicated video-decode queue family or "
-            "internally synchronized queues to avoid cross-thread queue submission races.");
+    if (queueCreateFlags_ == 0) {
+        // FFmpeg is given queue index 0 for both the decode and graphics
+        // families. Keep renderer/WSI submissions on a distinct queue handle
+        // whenever those families overlap with application work. This avoids
+        // Vulkan's external VkQueue synchronization requirement without
+        // requiring a mutex shared with FFmpeg internals.
+        const auto requireSecondQueue = [](const QueueInfo& queue, const char* purpose) {
+            if (queue.familyQueueCount < 2) {
+                throw std::runtime_error(
+                    std::string("Vulkan queue family ") +
+                    std::to_string(queue.familyIndex) +
+                    " exposes only one queue, but a second queue is required for " +
+                    purpose +
+                    " because VK_KHR_internally_synchronized_queues is unavailable.");
+            }
+        };
+
+        requireSecondQueue(graphicsQueue_, "renderer/FFmpeg isolation");
+        graphicsQueue_.queueIndex = 1;
+
+        if (presentQueue_.familyIndex == graphicsQueue_.familyIndex ||
+            presentQueue_.familyIndex == videoDecodeQueue_.familyIndex) {
+            requireSecondQueue(presentQueue_, "presentation/FFmpeg isolation");
+            presentQueue_.queueIndex = 1;
+        }
     }
 
-    std::set<std::uint32_t> uniqueFamilies{
-        graphicsQueue_.familyIndex,
-        presentQueue_.familyIndex,
-        videoDecodeQueue_.familyIndex,
-    };
+    // FFmpeg owns queue index 0 in the decode family. The application stores
+    // this handle for diagnostics/device lifetime only and does not submit
+    // decode work itself.
+    videoDecodeQueue_.queueIndex = 0;
 
-    constexpr float queuePriority = 1.0F;
+    std::map<std::uint32_t, std::uint32_t> requestedQueueCounts;
+    const auto requireQueue = [&requestedQueueCounts](const QueueInfo& queue) {
+        auto& count = requestedQueueCounts[queue.familyIndex];
+        count = std::max(count, queue.queueIndex + 1);
+    };
+    requireQueue(graphicsQueue_);
+    requireQueue(presentQueue_);
+    requireQueue(videoDecodeQueue_);
+
+    std::vector<std::vector<float>> queuePriorities;
+    queuePriorities.reserve(requestedQueueCounts.size());
+
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    queueCreateInfos.reserve(uniqueFamilies.size());
-    for (const auto familyIndex : uniqueFamilies) {
+    queueCreateInfos.reserve(requestedQueueCounts.size());
+
+    for (const auto& [familyIndex, queueCount] : requestedQueueCounts) {
+        queuePriorities.emplace_back(queueCount, 1.0F);
+
         VkDeviceQueueCreateInfo queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
         queueInfo.flags = queueCreateFlags_;
         queueInfo.queueFamilyIndex = familyIndex;
-        queueInfo.queueCount = 1;
-        queueInfo.pQueuePriorities = &queuePriority;
+        queueInfo.queueCount = queueCount;
+        queueInfo.pQueuePriorities = queuePriorities.back().data();
         queueCreateInfos.push_back(queueInfo);
     }
 
@@ -307,22 +338,30 @@ void VulkanContext::createDevice() {
 
     checkVk(vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_), "vkCreateDevice");
 
-    const auto getQueue = [this](std::uint32_t familyIndex, VkQueue* queue) {
+    const auto getQueue = [this](QueueInfo& queue) {
         if (queueCreateFlags_ == 0) {
-            vkGetDeviceQueue(device_, familyIndex, 0, queue);
+            vkGetDeviceQueue(
+                device_,
+                queue.familyIndex,
+                queue.queueIndex,
+                &queue.handle);
             return;
         }
 
         VkDeviceQueueInfo2 queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2};
         queueInfo.flags = queueCreateFlags_;
-        queueInfo.queueFamilyIndex = familyIndex;
-        queueInfo.queueIndex = 0;
-        vkGetDeviceQueue2(device_, &queueInfo, queue);
+        queueInfo.queueFamilyIndex = queue.familyIndex;
+        queueInfo.queueIndex = queue.queueIndex;
+        vkGetDeviceQueue2(device_, &queueInfo, &queue.handle);
     };
 
-    getQueue(graphicsQueue_.familyIndex, &graphicsQueue_.handle);
-    getQueue(presentQueue_.familyIndex, &presentQueue_.handle);
-    getQueue(videoDecodeQueue_.familyIndex, &videoDecodeQueue_.handle);
+    getQueue(graphicsQueue_);
+    getQueue(presentQueue_);
+    getQueue(videoDecodeQueue_);
+
+    std::cout << "[vulkan] graphics queue index: " << graphicsQueue_.queueIndex << "\n";
+    std::cout << "[vulkan] present queue index: " << presentQueue_.queueIndex << "\n";
+    std::cout << "[vulkan] FFmpeg video queue index: " << videoDecodeQueue_.queueIndex << "\n";
 }
 
 bool VulkanContext::hasInstanceLayer(const char* layerName) const {
