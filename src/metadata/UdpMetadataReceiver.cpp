@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -52,7 +53,18 @@ UdpMetadataReceiver::UdpMetadataReceiver(
             "UDP metadata receive timeout must be greater than zero");
     }
 
-    initializeSocket();
+    try {
+        initializeSocket();
+    } catch (...) {
+        closeSocket();
+#ifdef _WIN32
+        if (winsockInitialized_) {
+            WSACleanup();
+            winsockInitialized_ = false;
+        }
+#endif
+        throw;
+    }
 }
 
 UdpMetadataReceiver::~UdpMetadataReceiver() {
