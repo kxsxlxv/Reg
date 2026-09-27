@@ -39,6 +39,7 @@ public:
     const std::vector<std::string>& enabledDeviceExtensions() const noexcept { return enabledDeviceExtensions_; }
 
     const VkPhysicalDeviceProperties& physicalDeviceProperties() const noexcept { return deviceProperties_; }
+    VkDeviceQueueCreateFlags queueCreateFlags() const noexcept { return queueCreateFlags_; }
 
 private:
     struct QueueFamilyCandidate {
@@ -77,6 +78,11 @@ private:
     VkPhysicalDeviceVulkan11Features enabledVulkan11Features_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
     VkPhysicalDeviceVulkan12Features enabledVulkan12Features_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceVulkan13Features enabledVulkan13Features_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+#ifdef VK_KHR_internally_synchronized_queues
+    VkPhysicalDeviceInternallySynchronizedQueuesFeaturesKHR enabledInternalQueueSyncFeatures_{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INTERNALLY_SYNCHRONIZED_QUEUES_FEATURES_KHR};
+#endif
+    VkDeviceQueueCreateFlags queueCreateFlags_{0};
 };
 
 } // namespace reg::vulkan
