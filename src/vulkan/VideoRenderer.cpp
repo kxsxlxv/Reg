@@ -84,8 +84,8 @@ VideoRenderer::VideoRenderer(const VulkanContext& vulkan)
 }
 
 VideoRenderer::~VideoRenderer() {
-    if (vulkan_.device() != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(vulkan_.device());
+    if (vulkan_.graphicsQueue().handle != VK_NULL_HANDLE) {
+        vkQueueWaitIdle(vulkan_.graphicsQueue().handle);
     }
     destroyVideoResources();
     destroyCommandResources();
@@ -603,10 +603,10 @@ void VideoRenderer::recordSwapchainToColorBarrier(
     VkImage image,
     VkImageLayout oldLayout) const {
     VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-    barrier.srcStageMask =
-        oldLayout == VK_IMAGE_LAYOUT_UNDEFINED
-            ? VK_PIPELINE_STAGE_2_NONE
-            : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    // Availability from the presentation engine is established by waiting on
+    // imageAvailable in the submission. There is no prior Vulkan pipeline stage
+    // to wait on for PRESENT_SRC_KHR.
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
     barrier.srcAccessMask = 0;
     barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
