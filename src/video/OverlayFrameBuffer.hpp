@@ -39,7 +39,7 @@ public:
     void setDelay(std::chrono::milliseconds delay);
     std::chrono::milliseconds delay() const;
 
-    void clear() noexcept;
+    void clear();
     std::size_t size() const;
     std::size_t maxFrames() const noexcept { return maxFrames_; }
 
