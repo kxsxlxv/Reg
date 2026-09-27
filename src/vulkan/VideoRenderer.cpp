@@ -231,7 +231,7 @@ void VideoRenderer::ensureVideoResources(const video::VideoFrame& frame) {
         return;
     }
 
-    checkVk(vkDeviceWaitIdle(vulkan_.device()), "vkDeviceWaitIdle(video format change)");
+    checkVk(vkQueueWaitIdle(vulkan_.graphicsQueue().handle), "vkQueueWaitIdle(video format change)");
     destroyVideoResources();
     createVideoResources(frame, format);
 
@@ -379,7 +379,7 @@ void VideoRenderer::ensureGraphicsPipeline(VkFormat swapchainFormat) {
     }
 
     if (pipeline_ != VK_NULL_HANDLE || pipelineLayout_ != VK_NULL_HANDLE) {
-        checkVk(vkDeviceWaitIdle(vulkan_.device()), "vkDeviceWaitIdle(pipeline recreate)");
+        checkVk(vkQueueWaitIdle(vulkan_.graphicsQueue().handle), "vkQueueWaitIdle(pipeline recreate)");
         destroyGraphicsPipeline();
     }
 
