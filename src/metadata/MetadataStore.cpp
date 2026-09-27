@@ -90,13 +90,13 @@ void MetadataStore::eraseEpoch(std::uint64_t streamEpoch) {
     });
 }
 
-void MetadataStore::clear() noexcept {
+void MetadataStore::clear() {
     std::scoped_lock lock(mutex_);
     entries_.clear();
     insertionOrder_.clear();
 }
 
-std::size_t MetadataStore::size() const noexcept {
+std::size_t MetadataStore::size() const {
     std::scoped_lock lock(mutex_);
     return entries_.size();
 }
