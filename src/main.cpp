@@ -74,38 +74,47 @@ int main(int argc, char** argv) {
             decoderFinished.store(true, std::memory_order_release);
         });
 
+        const auto stopDecoderAndJoin = [&] {
+            decoder.requestStop();
+            if (decodeThread.joinable()) {
+                decodeThread.join();
+            }
+        };
+
         reg::video::VideoFramePtr lastPresented;
 
-        while (!decoderFinished.load(std::memory_order_acquire)) {
-            if (platform.pollQuitRequested()) {
-                decoder.requestStop();
-                break;
-            }
-
-            const auto latest = rawMailbox.latest();
-            if (latest && latest != lastPresented) {
-                if (renderer.render(latest, swapchain)) {
-                    lastPresented = latest;
-                    const auto count =
-                        presentedFrames.fetch_add(1, std::memory_order_relaxed) + 1;
-                    if (count == 1 || count % 120 == 0) {
-                        std::cout << "[renderer] presented=" << count
-                                  << " source=" << latest->width()
-                                  << 'x' << latest->height()
-                                  << " output=" << swapchain.extent().width
-                                  << 'x' << swapchain.extent().height
-                                  << '\n';
-                    }
+        try {
+            while (!decoderFinished.load(std::memory_order_acquire)) {
+                if (platform.pollQuitRequested()) {
+                    decoder.requestStop();
+                    break;
                 }
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+                const auto latest = rawMailbox.latest();
+                if (latest && latest != lastPresented) {
+                    if (renderer.render(latest, swapchain)) {
+                        lastPresented = latest;
+                        const auto count =
+                            presentedFrames.fetch_add(1, std::memory_order_relaxed) + 1;
+                        if (count == 1 || count % 120 == 0) {
+                            std::cout << "[renderer] presented=" << count
+                                      << " source=" << latest->width()
+                                      << 'x' << latest->height()
+                                      << " output=" << swapchain.extent().width
+                                      << 'x' << swapchain.extent().height
+                                      << '\n';
+                        }
+                    }
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
             }
+        } catch (...) {
+            stopDecoderAndJoin();
+            throw;
         }
 
-        decoder.requestStop();
-        if (decodeThread.joinable()) {
-            decodeThread.join();
-        }
+        stopDecoderAndJoin();
 
         {
             std::scoped_lock lock(errorMutex);
