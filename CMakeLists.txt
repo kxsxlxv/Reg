@@ -167,4 +167,50 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME packet_sequence COMMAND reg_packet_sequence_tests)
+
+    find_package(Threads REQUIRED)
+
+    add_executable(reg_udp_metadata_receiver_tests
+        tests/udp_metadata_receiver_tests.cpp
+        src/metadata/UdpMetadataReceiver.cpp
+        src/metadata/MetadataProtocol.cpp
+        src/metadata/PacketSequenceTracker.cpp
+    )
+    target_include_directories(reg_udp_metadata_receiver_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_udp_metadata_receiver_tests PRIVATE Threads::Threads)
+
+    if(WIN32)
+        target_link_libraries(reg_udp_metadata_receiver_tests PRIVATE ws2_32)
+    endif()
+
+    if(MSVC)
+        target_compile_options(reg_udp_metadata_receiver_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_udp_metadata_receiver_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME udp_metadata_receiver COMMAND reg_udp_metadata_receiver_tests)
+endif()
+
+
+find_package(Threads REQUIRED)
+
+add_executable(reg_metadata_probe
+    src/tools/metadata_udp_probe.cpp
+    src/metadata/UdpMetadataReceiver.cpp
+    src/metadata/MetadataProtocol.cpp
+    src/metadata/PacketSequenceTracker.cpp
+)
+
+target_include_directories(reg_metadata_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(reg_metadata_probe PRIVATE Threads::Threads)
+
+if(WIN32)
+    target_link_libraries(reg_metadata_probe PRIVATE ws2_32)
+endif()
+
+if(MSVC)
+    target_compile_options(reg_metadata_probe PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(reg_metadata_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 endif()

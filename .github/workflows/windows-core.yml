@@ -1,0 +1,54 @@
+name: Windows core build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - mvp/metadata-udp-receiver
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Configure MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build and run frame sync tests
+        shell: cmd
+        run: |
+          cl /nologo /std:c++latest /EHsc /W4 /I src tests\frame_sync_tests.cpp src\metadata\MetadataStore.cpp /Fe:frame_sync_tests.exe
+          frame_sync_tests.exe
+
+      - name: Build and run metadata protocol tests
+        shell: cmd
+        run: |
+          cl /nologo /std:c++latest /EHsc /W4 /I src tests\metadata_protocol_tests.cpp src\metadata\MetadataProtocol.cpp /Fe:metadata_protocol_tests.exe
+          metadata_protocol_tests.exe
+
+      - name: Build and run packet sequence tests
+        shell: cmd
+        run: |
+          cl /nologo /std:c++latest /EHsc /W4 /I src tests\packet_sequence_tests.cpp src\metadata\PacketSequenceTracker.cpp /Fe:packet_sequence_tests.exe
+          packet_sequence_tests.exe
+
+      - name: Build and run UDP receiver loopback test
+        shell: cmd
+        run: |
+          cl /nologo /std:c++latest /EHsc /W4 /I src tests\udp_metadata_receiver_tests.cpp src\metadata\UdpMetadataReceiver.cpp src\metadata\MetadataProtocol.cpp src\metadata\PacketSequenceTracker.cpp ws2_32.lib /Fe:udp_metadata_receiver_tests.exe
+          udp_metadata_receiver_tests.exe
+
+      - name: Build metadata probe
+        shell: cmd
+        run: |
+          cl /nologo /std:c++latest /EHsc /W4 /I src src\tools\metadata_udp_probe.cpp src\metadata\UdpMetadataReceiver.cpp src\metadata\MetadataProtocol.cpp src\metadata\PacketSequenceTracker.cpp ws2_32.lib /Fe:reg_metadata_probe.exe
+          reg_metadata_probe.exe --help
