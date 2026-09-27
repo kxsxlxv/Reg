@@ -142,6 +142,11 @@ void VulkanContext::selectPhysicalDevice() {
         const auto presentIt = std::ranges::find_if(families, [](const QueueFamilyCandidate& family) {
             return family.present;
         });
+
+        if (graphicsIt == families.end() || presentIt == families.end()) {
+            continue;
+        }
+
         auto videoIt = std::ranges::find_if(families, [graphicsIt](const QueueFamilyCandidate& family) {
             return family.index != graphicsIt->index &&
                    (family.flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) != 0 &&
@@ -155,7 +160,7 @@ void VulkanContext::selectPhysicalDevice() {
             });
         }
 
-        if (graphicsIt == families.end() || presentIt == families.end() || videoIt == families.end()) {
+        if (videoIt == families.end()) {
             continue;
         }
 
@@ -199,6 +204,19 @@ void VulkanContext::createDevice() {
         VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
     };
 
+#ifdef VK_KHR_internally_synchronized_queues
+    const bool internalQueueSyncExtension = deviceSupportsExtensions(
+        physicalDevice_,
+        std::vector<const char*>{VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME});
+    if (internalQueueSyncExtension) {
+        enabledDeviceExtensions_.emplace_back(
+            VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME);
+    }
+
+    VkPhysicalDeviceInternallySynchronizedQueuesFeaturesKHR availableInternalQueueSync{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INTERNALLY_SYNCHRONIZED_QUEUES_FEATURES_KHR};
+#endif
+
     VkPhysicalDeviceVulkan11Features available11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
     VkPhysicalDeviceVulkan12Features available12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceVulkan13Features available13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
@@ -206,6 +224,9 @@ void VulkanContext::createDevice() {
     availableFeatures.pNext = &available11;
     available11.pNext = &available12;
     available12.pNext = &available13;
+#ifdef VK_KHR_internally_synchronized_queues
+    available13.pNext = internalQueueSyncExtension ? &availableInternalQueueSync : nullptr;
+#endif
     vkGetPhysicalDeviceFeatures2(physicalDevice_, &availableFeatures);
 
     if (available11.samplerYcbcrConversion != VK_TRUE) {
@@ -230,6 +251,16 @@ void VulkanContext::createDevice() {
     enabledVulkan13Features_.synchronization2 = VK_TRUE;
     enabledVulkan13Features_.dynamicRendering = VK_TRUE;
 
+#ifdef VK_KHR_internally_synchronized_queues
+    if (internalQueueSyncExtension &&
+        availableInternalQueueSync.internallySynchronizedQueues == VK_TRUE) {
+        enabledVulkan13Features_.pNext = &enabledInternalQueueSyncFeatures_;
+        enabledInternalQueueSyncFeatures_.internallySynchronizedQueues = VK_TRUE;
+        queueCreateFlags_ = VK_DEVICE_QUEUE_CREATE_INTERNALLY_SYNCHRONIZED_BIT_KHR;
+        std::cout << "[vulkan] internally synchronized queues enabled\n";
+    }
+#endif
+
     std::set<std::uint32_t> uniqueFamilies{
         graphicsQueue_.familyIndex,
         presentQueue_.familyIndex,
@@ -241,6 +272,7 @@ void VulkanContext::createDevice() {
     queueCreateInfos.reserve(uniqueFamilies.size());
     for (const auto familyIndex : uniqueFamilies) {
         VkDeviceQueueCreateInfo queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+        queueInfo.flags = queueCreateFlags_;
         queueInfo.queueFamilyIndex = familyIndex;
         queueInfo.queueCount = 1;
         queueInfo.pQueuePriorities = &queuePriority;
@@ -263,9 +295,22 @@ void VulkanContext::createDevice() {
 
     checkVk(vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_), "vkCreateDevice");
 
-    vkGetDeviceQueue(device_, graphicsQueue_.familyIndex, 0, &graphicsQueue_.handle);
-    vkGetDeviceQueue(device_, presentQueue_.familyIndex, 0, &presentQueue_.handle);
-    vkGetDeviceQueue(device_, videoDecodeQueue_.familyIndex, 0, &videoDecodeQueue_.handle);
+    const auto getQueue = [this](std::uint32_t familyIndex, VkQueue* queue) {
+        if (queueCreateFlags_ == 0) {
+            vkGetDeviceQueue(device_, familyIndex, 0, queue);
+            return;
+        }
+
+        VkDeviceQueueInfo2 queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2};
+        queueInfo.flags = queueCreateFlags_;
+        queueInfo.queueFamilyIndex = familyIndex;
+        queueInfo.queueIndex = 0;
+        vkGetDeviceQueue2(device_, &queueInfo, queue);
+    };
+
+    getQueue(graphicsQueue_.familyIndex, &graphicsQueue_.handle);
+    getQueue(presentQueue_.familyIndex, &presentQueue_.handle);
+    getQueue(videoDecodeQueue_.familyIndex, &videoDecodeQueue_.handle);
 }
 
 bool VulkanContext::hasInstanceLayer(const char* layerName) const {
