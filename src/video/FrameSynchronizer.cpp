@@ -36,7 +36,7 @@ SyncResult FrameSynchronizer::next(Clock::time_point now) {
     };
 }
 
-void FrameSynchronizer::clear() noexcept {
+void FrameSynchronizer::clear() {
     videoFrames_.clear();
     metadataStore_.clear();
 }
