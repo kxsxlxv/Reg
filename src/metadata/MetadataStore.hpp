@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <deque>
+#include <mutex>
 #include <unordered_map>
 
 namespace reg::metadata {
@@ -26,7 +27,7 @@ public:
     void eraseEpoch(std::uint64_t streamEpoch);
     void clear() noexcept;
 
-    std::size_t size() const noexcept { return entries_.size(); }
+    std::size_t size() const noexcept;
     std::size_t capacity() const noexcept { return capacity_; }
 
 private:
@@ -34,9 +35,10 @@ private:
         std::size_t operator()(const media::FrameKey& key) const noexcept;
     };
 
-    void evictOldest();
+    void evictOldestLocked();
 
-    std::size_t capacity_{};
+    const std::size_t capacity_{};
+    mutable std::mutex mutex_;
     std::unordered_map<media::FrameKey, FrameMetadataPtr, FrameKeyHash> entries_;
     std::deque<media::FrameKey> insertionOrder_;
 };
