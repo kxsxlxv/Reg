@@ -95,7 +95,7 @@ public:
         return frames_.front();
     }
 
-    void clear() noexcept {
+    void clear() {
         std::scoped_lock lock(mutex_);
         frames_.clear();
     }
@@ -114,12 +114,12 @@ public:
         }
     }
 
-    std::chrono::milliseconds playoutDelay() const noexcept {
+    std::chrono::milliseconds playoutDelay() const {
         std::scoped_lock lock(mutex_);
         return playoutDelay_;
     }
 
-    std::size_t size() const noexcept {
+    std::size_t size() const {
         std::scoped_lock lock(mutex_);
         return frames_.size();
     }
