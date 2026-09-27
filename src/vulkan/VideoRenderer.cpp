@@ -15,6 +15,7 @@ extern "C" {
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <utility>
