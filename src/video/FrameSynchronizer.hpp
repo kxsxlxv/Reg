@@ -3,9 +3,7 @@
 #include "metadata/MetadataStore.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 
-#include <chrono>
 #include <memory>
-#include <optional>
 
 namespace reg::video {
 
@@ -36,33 +34,25 @@ public:
           metadata_(metadata) {}
 
     Result next(TimePoint now) {
-        const typename Buffer::Entry* front = video_.front();
-        if (front == nullptr) {
+        auto entry = video_.popReady(now);
+        if (!entry) {
             return {};
         }
 
-        if (now < front->deadline) {
-            return Result{
-                .action = SyncAction::Wait,
-                .key = front->key,
-            };
-        }
-
-        auto entry = video_.popFront();
-        auto frameMetadata = metadata_.take(entry.key);
+        auto frameMetadata = metadata_.take(entry->key);
 
         if (!frameMetadata) {
             return Result{
                 .action = SyncAction::Drop,
-                .key = entry.key,
-                .frame = std::move(entry.payload),
+                .key = entry->key,
+                .frame = std::move(entry->payload),
             };
         }
 
         return Result{
             .action = SyncAction::Present,
-            .key = entry.key,
-            .frame = std::move(entry.payload),
+            .key = entry->key,
+            .frame = std::move(entry->payload),
             .metadata = std::move(frameMetadata),
         };
     }
