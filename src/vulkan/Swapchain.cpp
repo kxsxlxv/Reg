@@ -284,9 +284,17 @@ VkSurfaceFormatKHR Swapchain::chooseSurfaceFormat(const std::vector<VkSurfaceFor
         return *rgba;
     }
 
-    // The renderer can still operate on another color-attachment format, but
-    // exact transfer-function handling for non-UNORM surfaces is outside Phase A.
-    return formats.front();
+    const auto anyUnorm = std::ranges::find_if(formats, [](const VkSurfaceFormatKHR& format) {
+        return format.format == VK_FORMAT_B8G8R8A8_UNORM ||
+               format.format == VK_FORMAT_R8G8B8A8_UNORM;
+    });
+    if (anyUnorm != formats.end()) {
+        return *anyUnorm;
+    }
+
+    throw std::runtime_error(
+        "The Vulkan surface exposes no 8-bit UNORM BGRA/RGBA format; "
+        "Phase A refuses an implicit/double transfer-function path");
 }
 
 VkPresentModeKHR Swapchain::choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const {
