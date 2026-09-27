@@ -18,8 +18,6 @@ std::size_t MetadataStore::FrameKeyHash::operator()(
     const std::size_t epochHash = std::hash<std::uint64_t>{}(key.streamEpoch);
     const std::size_t frameHash = std::hash<std::uint64_t>{}(key.frameId);
 
-    // 64-bit hash-combine constant. std::size_t truncation on 32-bit targets is
-    // harmless for correctness because equality remains authoritative.
     return epochHash ^
            (frameHash + static_cast<std::size_t>(0x9e3779b97f4a7c15ULL) +
             (epochHash << 6U) + (epochHash >> 2U));
@@ -30,18 +28,21 @@ MetadataInsertResult MetadataStore::insert(FrameMetadataPtr metadata) {
         throw std::invalid_argument("MetadataStore::insert received null metadata");
     }
 
+    std::scoped_lock lock(mutex_);
+
     if (entries_.contains(metadata->key)) {
         return MetadataInsertResult::Duplicate;
     }
 
     bool evicted = false;
     if (entries_.size() >= capacity_) {
-        evictOldest();
+        evictOldestLocked();
         evicted = true;
     }
 
-    insertionOrder_.push_back(metadata->key);
-    entries_.emplace(metadata->key, std::move(metadata));
+    const media::FrameKey key = metadata->key;
+    insertionOrder_.push_back(key);
+    entries_.emplace(key, std::move(metadata));
 
     return evicted
         ? MetadataInsertResult::EvictedOldestAndInserted
@@ -49,11 +50,14 @@ MetadataInsertResult MetadataStore::insert(FrameMetadataPtr metadata) {
 }
 
 FrameMetadataPtr MetadataStore::find(media::FrameKey key) const {
+    std::scoped_lock lock(mutex_);
     const auto it = entries_.find(key);
     return it == entries_.end() ? FrameMetadataPtr{} : it->second;
 }
 
 FrameMetadataPtr MetadataStore::take(media::FrameKey key) {
+    std::scoped_lock lock(mutex_);
+
     const auto it = entries_.find(key);
     if (it == entries_.end()) {
         return {};
@@ -71,6 +75,8 @@ FrameMetadataPtr MetadataStore::take(media::FrameKey key) {
 }
 
 void MetadataStore::eraseEpoch(std::uint64_t streamEpoch) {
+    std::scoped_lock lock(mutex_);
+
     for (auto it = entries_.begin(); it != entries_.end();) {
         if (it->first.streamEpoch == streamEpoch) {
             it = entries_.erase(it);
@@ -85,11 +91,17 @@ void MetadataStore::eraseEpoch(std::uint64_t streamEpoch) {
 }
 
 void MetadataStore::clear() noexcept {
+    std::scoped_lock lock(mutex_);
     entries_.clear();
     insertionOrder_.clear();
 }
 
-void MetadataStore::evictOldest() {
+std::size_t MetadataStore::size() const noexcept {
+    std::scoped_lock lock(mutex_);
+    return entries_.size();
+}
+
+void MetadataStore::evictOldestLocked() {
     if (insertionOrder_.empty()) {
         throw std::logic_error(
             "MetadataStore insertion order lost synchronization with entries");
