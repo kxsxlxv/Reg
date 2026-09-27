@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <deque>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -51,6 +53,8 @@ public:
             throw std::invalid_argument("OverlayFrameBuffer::push received null payload");
         }
 
+        std::scoped_lock lock(mutex_);
+
         bool evicted = false;
         if (frames_.size() >= capacity_) {
             frames_.pop_front();
@@ -69,13 +73,13 @@ public:
             : PushResult::Inserted;
     }
 
-    const Entry* front() const noexcept {
-        return frames_.empty() ? nullptr : &frames_.front();
-    }
-
-    Entry popFront() {
-        if (frames_.empty()) {
-            throw std::logic_error("OverlayFrameBuffer::popFront on empty buffer");
+    // Atomically checks the front deadline and removes the frame only if it is
+    // ready for a synchronization decision. This avoids a race with producer
+    // eviction when decoder and renderer run on different threads.
+    std::optional<Entry> popReady(TimePoint now) {
+        std::scoped_lock lock(mutex_);
+        if (frames_.empty() || now < frames_.front().deadline) {
+            return std::nullopt;
         }
 
         Entry result = std::move(frames_.front());
@@ -83,7 +87,16 @@ public:
         return result;
     }
 
+    std::optional<Entry> peekFront() const {
+        std::scoped_lock lock(mutex_);
+        if (frames_.empty()) {
+            return std::nullopt;
+        }
+        return frames_.front();
+    }
+
     void clear() noexcept {
+        std::scoped_lock lock(mutex_);
         frames_.clear();
     }
 
@@ -92,22 +105,22 @@ public:
             throw std::invalid_argument("Overlay playout delay must be non-negative");
         }
 
+        std::scoped_lock lock(mutex_);
         const auto delta = delay - playoutDelay_;
         playoutDelay_ = delay;
 
-        // Existing frames retain their relative arrival time but follow the new
-        // configured playout target. This is deterministic and will support a
-        // future adaptive-delay controller without reconstructing the queue.
         for (auto& frame : frames_) {
             frame.deadline += delta;
         }
     }
 
     std::chrono::milliseconds playoutDelay() const noexcept {
+        std::scoped_lock lock(mutex_);
         return playoutDelay_;
     }
 
     std::size_t size() const noexcept {
+        std::scoped_lock lock(mutex_);
         return frames_.size();
     }
 
@@ -116,8 +129,9 @@ public:
     }
 
 private:
+    mutable std::mutex mutex_;
     std::chrono::milliseconds playoutDelay_{};
-    std::size_t capacity_{};
+    const std::size_t capacity_{};
     std::deque<Entry> frames_;
 };
 
