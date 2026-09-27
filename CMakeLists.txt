@@ -125,4 +125,18 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
+
+    add_executable(reg_frame_sync_tests
+        tests/frame_sync_tests.cpp
+        src/metadata/MetadataStore.cpp
+    )
+    target_include_directories(reg_frame_sync_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+    if(MSVC)
+        target_compile_options(reg_frame_sync_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_frame_sync_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME frame_sync COMMAND reg_frame_sync_tests)
 endif()
