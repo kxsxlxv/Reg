@@ -135,11 +135,17 @@ if(REG_BUILD_TESTS)
         tests/MetadataProtocolTests.cpp
         src/metadata/Protocol.cpp
         src/metadata/MetadataStore.cpp
+        src/metadata/MetadataReceiver.cpp
+        src/platform/UdpSocket.cpp
     )
 
     target_include_directories(reg_core_tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
+
+    if(WIN32)
+        target_link_libraries(reg_core_tests PRIVATE ws2_32)
+    endif()
 
     if(MSVC)
         target_compile_options(reg_core_tests PRIVATE /W4 /permissive- /EHsc)
