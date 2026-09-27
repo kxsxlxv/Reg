@@ -25,9 +25,9 @@ public:
     FrameMetadataPtr take(media::FrameKey key);
 
     void eraseEpoch(std::uint64_t streamEpoch);
-    void clear() noexcept;
+    void clear();
 
-    std::size_t size() const noexcept;
+    std::size_t size() const;
     std::size_t capacity() const noexcept { return capacity_; }
 
 private:
