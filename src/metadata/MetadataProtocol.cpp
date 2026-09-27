@@ -4,7 +4,9 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <limits>
+#include <string>
 #include <stdexcept>
 
 namespace reg::metadata::wire {
@@ -167,7 +169,7 @@ std::vector<std::uint8_t> encodeFrameMetadata(const FrameMetadata& metadata) {
         appendF32(out, target.bbox.height);
     }
 
-    appendU32(out, crc32c(out));
+    appendU32(out, crc32c(std::span<const std::uint8_t>(out)));
     return out;
 }
 
