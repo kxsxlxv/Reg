@@ -82,7 +82,7 @@ std::chrono::milliseconds OverlayFrameBuffer::delay() const {
     return delay_;
 }
 
-void OverlayFrameBuffer::clear() noexcept {
+void OverlayFrameBuffer::clear() {
     std::scoped_lock lock(mutex_);
     frames_.clear();
 }
