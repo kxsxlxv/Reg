@@ -54,10 +54,17 @@ jobs:
             --prefix="$FFMPEG_PREFIX" \
             --disable-programs \
             --disable-doc \
+            --enable-shared \
+            --disable-static \
             --disable-avdevice \
             --disable-avfilter \
             --disable-swscale \
             --disable-swresample \
+            --disable-encoders \
+            --disable-muxers \
+            --disable-decoders \
+            --enable-decoder=h264 \
+            --enable-hwaccel=h264_vulkan \
             --enable-vulkan
 
           grep -E '^#define CONFIG_H264_VULKAN_HWACCEL 1$' config_components.h
@@ -82,4 +89,6 @@ jobs:
         run: cmake --build build --verbose
 
       - name: Run unit tests
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/ffmpeg-install/lib
         run: ctest --test-dir build --output-on-failure
