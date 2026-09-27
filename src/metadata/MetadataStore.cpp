@@ -1,0 +1,99 @@
+#include "metadata/MetadataStore.hpp"
+
+#include <functional>
+#include <stdexcept>
+
+namespace reg::metadata {
+
+MetadataStore::MetadataStore(std::size_t capacity)
+    : capacity_(capacity) {
+    if (capacity_ == 0) {
+        throw std::invalid_argument("MetadataStore capacity must be greater than zero");
+    }
+}
+
+std::size_t MetadataStore::FrameKeyHash::operator()(
+    const media::FrameKey& key) const noexcept {
+    const std::size_t epochHash = std::hash<std::uint64_t>{}(key.streamEpoch);
+    const std::size_t frameHash = std::hash<std::uint64_t>{}(key.frameId);
+
+    // 64-bit hash-combine constant. std::size_t truncation on 32-bit targets is
+    // harmless for correctness because equality remains authoritative.
+    return epochHash ^
+           (frameHash + static_cast<std::size_t>(0x9e3779b97f4a7c15ULL) +
+            (epochHash << 6U) + (epochHash >> 2U));
+}
+
+MetadataInsertResult MetadataStore::insert(FrameMetadataPtr metadata) {
+    if (!metadata) {
+        throw std::invalid_argument("MetadataStore::insert received null metadata");
+    }
+
+    if (entries_.contains(metadata->key)) {
+        return MetadataInsertResult::Duplicate;
+    }
+
+    bool evicted = false;
+    if (entries_.size() >= capacity_) {
+        evictOldest();
+        evicted = true;
+    }
+
+    insertionOrder_.push_back(metadata->key);
+    entries_.emplace(metadata->key, std::move(metadata));
+
+    return evicted
+        ? MetadataInsertResult::EvictedOldestAndInserted
+        : MetadataInsertResult::Inserted;
+}
+
+FrameMetadataPtr MetadataStore::find(media::FrameKey key) const {
+    const auto it = entries_.find(key);
+    return it == entries_.end() ? FrameMetadataPtr{} : it->second;
+}
+
+FrameMetadataPtr MetadataStore::take(media::FrameKey key) {
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return {};
+    }
+
+    FrameMetadataPtr result = std::move(it->second);
+    entries_.erase(it);
+
+    // Leave the tombstoned key in insertionOrder_. It will be skipped by
+    // evictOldest(). This keeps take() O(1) even for out-of-order metadata.
+    return result;
+}
+
+void MetadataStore::eraseEpoch(std::uint64_t streamEpoch) {
+    for (auto it = entries_.begin(); it != entries_.end();) {
+        if (it->first.streamEpoch == streamEpoch) {
+            it = entries_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void MetadataStore::clear() noexcept {
+    entries_.clear();
+    insertionOrder_.clear();
+}
+
+void MetadataStore::evictOldest() {
+    while (!insertionOrder_.empty()) {
+        const media::FrameKey key = insertionOrder_.front();
+        insertionOrder_.pop_front();
+
+        const auto erased = entries_.erase(key);
+        if (erased != 0) {
+            return;
+        }
+    }
+
+    throw std::logic_error(
+        "MetadataStore insertion order lost synchronization with entries");
+}
+
+} // namespace reg::metadata
