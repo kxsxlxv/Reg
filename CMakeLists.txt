@@ -37,16 +37,53 @@ else()
     find_package(SDL3 CONFIG REQUIRED)
 endif()
 
+if(Vulkan_GLSLC_EXECUTABLE)
+    set(REG_GLSLC_EXECUTABLE "${Vulkan_GLSLC_EXECUTABLE}")
+else()
+    find_program(
+        REG_GLSLC_EXECUTABLE
+        NAMES glslc
+        HINTS "$ENV{VULKAN_SDK}"
+        PATH_SUFFIXES Bin bin
+        REQUIRED
+    )
+endif()
+
+set(REG_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+file(MAKE_DIRECTORY "${REG_SHADER_OUTPUT_DIR}")
+
+set(REG_SHADER_OUTPUTS)
+foreach(_shader IN ITEMS video.vert video.frag)
+    set(_source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${_shader}")
+    set(_output "${REG_SHADER_OUTPUT_DIR}/${_shader}.spv")
+
+    add_custom_command(
+        OUTPUT "${_output}"
+        COMMAND "${REG_GLSLC_EXECUTABLE}" "${_source}" -o "${_output}"
+        DEPENDS "${_source}"
+        COMMENT "Compiling Vulkan shader ${_shader}"
+        VERBATIM
+    )
+    list(APPEND REG_SHADER_OUTPUTS "${_output}")
+endforeach()
+
+add_custom_target(reg_shaders DEPENDS ${REG_SHADER_OUTPUTS})
+
 add_executable(reg_probe
     src/main.cpp
     src/app/CommandLine.cpp
     src/platform/SDLPlatform.cpp
     src/vulkan/VulkanContext.cpp
+    src/vulkan/Swapchain.cpp
+    src/vulkan/VulkanVideoFrameAccess.cpp
+    src/vulkan/VideoRenderer.cpp
     src/media/FrameIdentity.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
     src/video/VideoFrame.cpp
 )
+
+add_dependencies(reg_probe reg_shaders)
 
 target_include_directories(reg_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -60,6 +97,7 @@ target_link_libraries(reg_probe PRIVATE
 
 target_compile_definitions(reg_probe PRIVATE
     REG_ENABLE_VALIDATION=$<BOOL:${REG_ENABLE_VALIDATION}>
+    REG_SHADER_DIR="\"${REG_SHADER_OUTPUT_DIR}\""
 )
 
 if(MSVC)
