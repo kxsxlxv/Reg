@@ -1,5 +1,6 @@
 #include "metadata/MetadataStore.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <stdexcept>
 
@@ -61,8 +62,11 @@ FrameMetadataPtr MetadataStore::take(media::FrameKey key) {
     FrameMetadataPtr result = std::move(it->second);
     entries_.erase(it);
 
-    // Leave the tombstoned key in insertionOrder_. It will be skipped by
-    // evictOldest(). This keeps take() O(1) even for out-of-order metadata.
+    const auto orderIt = std::find(insertionOrder_.begin(), insertionOrder_.end(), key);
+    if (orderIt != insertionOrder_.end()) {
+        insertionOrder_.erase(orderIt);
+    }
+
     return result;
 }
 
@@ -74,6 +78,10 @@ void MetadataStore::eraseEpoch(std::uint64_t streamEpoch) {
             ++it;
         }
     }
+
+    std::erase_if(insertionOrder_, [streamEpoch](const media::FrameKey& key) {
+        return key.streamEpoch == streamEpoch;
+    });
 }
 
 void MetadataStore::clear() noexcept {
@@ -82,18 +90,18 @@ void MetadataStore::clear() noexcept {
 }
 
 void MetadataStore::evictOldest() {
-    while (!insertionOrder_.empty()) {
-        const media::FrameKey key = insertionOrder_.front();
-        insertionOrder_.pop_front();
-
-        const auto erased = entries_.erase(key);
-        if (erased != 0) {
-            return;
-        }
+    if (insertionOrder_.empty()) {
+        throw std::logic_error(
+            "MetadataStore insertion order lost synchronization with entries");
     }
 
-    throw std::logic_error(
-        "MetadataStore insertion order lost synchronization with entries");
+    const media::FrameKey key = insertionOrder_.front();
+    insertionOrder_.pop_front();
+
+    if (entries_.erase(key) == 0) {
+        throw std::logic_error(
+            "MetadataStore insertion order lost synchronization with entries");
+    }
 }
 
 } // namespace reg::metadata
