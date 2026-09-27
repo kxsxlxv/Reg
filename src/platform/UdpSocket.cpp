@@ -87,6 +87,13 @@ UdpSocket::UdpSocket(
         const int clampedBuffer =
             std::min(receiveBufferBytes, std::numeric_limits<int>::max());
 
+#ifdef _WIN32
+        const int receiveBufferOptionSize = static_cast<int>(sizeof(clampedBuffer));
+#else
+        const socklen_t receiveBufferOptionSize =
+            static_cast<socklen_t>(sizeof(clampedBuffer));
+#endif
+
         if (::setsockopt(
                 nativeSocket(socket_),
                 SOL_SOCKET,
@@ -96,7 +103,7 @@ UdpSocket::UdpSocket(
 #else
                 &clampedBuffer,
 #endif
-                static_cast<socklen_t>(sizeof(clampedBuffer))) != 0) {
+                receiveBufferOptionSize) != 0) {
 #ifdef _WIN32
             throw socketError("setsockopt(SO_RCVBUF)", WSAGetLastError());
 #else
