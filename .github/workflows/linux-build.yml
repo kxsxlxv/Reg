@@ -28,7 +28,16 @@ jobs:
             pkg-config \
             nasm \
             glslc \
-            libvulkan-dev
+            libvulkan-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxss-dev \
+            libxtst-dev \
+            libxkbcommon-dev
 
       - name: Install current Vulkan headers
         run: |
