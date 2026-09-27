@@ -43,7 +43,7 @@ public:
 
     SyncResult next(Clock::time_point now);
 
-    void clear() noexcept;
+    void clear();
     SynchronizerStats stats() const noexcept;
 
 private:
