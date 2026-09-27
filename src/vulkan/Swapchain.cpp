@@ -194,7 +194,9 @@ AcquireStatus Swapchain::acquire(VkSemaphore imageAvailable, std::uint32_t& imag
         &imageIndex);
 
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
-        return result == VK_SUBOPTIMAL_KHR ? AcquireStatus::Recreate : AcquireStatus::Ready;
+        // SUBOPTIMAL still acquires an image and signals imageAvailable. Consume it
+        // normally; vkQueuePresentKHR will request recreation if it remains necessary.
+        return AcquireStatus::Ready;
     }
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         return AcquireStatus::Recreate;
