@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
