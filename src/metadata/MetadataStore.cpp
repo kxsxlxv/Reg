@@ -94,7 +94,7 @@ std::size_t MetadataStore::purgeExpiredUnlocked(Clock::time_point now) {
     return removed;
 }
 
-void MetadataStore::clear() noexcept {
+void MetadataStore::clear() {
     std::scoped_lock lock(mutex_);
     entries_.clear();
 }
