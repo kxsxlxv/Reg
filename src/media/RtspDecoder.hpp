@@ -10,6 +10,8 @@
 struct AVBufferRef;
 struct AVCodecContext;
 struct AVFormatContext;
+struct AVFrame;
+struct AVPacket;
 
 namespace reg::media {
 
@@ -37,7 +39,7 @@ private:
     void openInput();
     void openDecoder();
     void close() noexcept;
-    void decodePacket(const FrameCallback& onFrame, struct AVPacket* packet, struct AVFrame* frame);
+    void decodePacket(const FrameCallback& onFrame, AVPacket* packet, AVFrame* frame);
 
     static int interruptCallback(void* opaque);
 
