@@ -26,7 +26,8 @@ MetadataInsertResult MetadataStore::insert(FrameMetadata metadata) {
         metadata.receivedAt = Clock::now();
     }
 
-    purgeExpired(metadata.receivedAt);
+    std::scoped_lock lock(mutex_);
+    purgeExpiredUnlocked(metadata.receivedAt);
 
     const auto existing = entries_.find(metadata.key);
     if (existing != entries_.end()) {
@@ -37,7 +38,7 @@ MetadataInsertResult MetadataStore::insert(FrameMetadata metadata) {
 
     bool evicted = false;
     if (entries_.size() >= capacity_) {
-        const auto oldest = oldestEntry();
+        const auto oldest = oldestEntryUnlocked();
         if (oldest != entries_.end()) {
             entries_.erase(oldest);
             evicted = true;
@@ -53,11 +54,13 @@ MetadataInsertResult MetadataStore::insert(FrameMetadata metadata) {
 }
 
 MetadataStore::MetadataPtr MetadataStore::find(media::FrameKey key) const {
+    std::scoped_lock lock(mutex_);
     const auto found = entries_.find(key);
     return found == entries_.end() ? nullptr : found->second;
 }
 
 MetadataStore::MetadataPtr MetadataStore::take(media::FrameKey key) {
+    std::scoped_lock lock(mutex_);
     const auto found = entries_.find(key);
     if (found == entries_.end()) {
         return nullptr;
@@ -69,6 +72,11 @@ MetadataStore::MetadataPtr MetadataStore::take(media::FrameKey key) {
 }
 
 std::size_t MetadataStore::purgeExpired(Clock::time_point now) {
+    std::scoped_lock lock(mutex_);
+    return purgeExpiredUnlocked(now);
+}
+
+std::size_t MetadataStore::purgeExpiredUnlocked(Clock::time_point now) {
     std::size_t removed = 0;
 
     for (auto it = entries_.begin(); it != entries_.end();) {
@@ -87,10 +95,16 @@ std::size_t MetadataStore::purgeExpired(Clock::time_point now) {
 }
 
 void MetadataStore::clear() noexcept {
+    std::scoped_lock lock(mutex_);
     entries_.clear();
 }
 
-MetadataStore::Map::iterator MetadataStore::oldestEntry() {
+std::size_t MetadataStore::size() const {
+    std::scoped_lock lock(mutex_);
+    return entries_.size();
+}
+
+MetadataStore::Map::iterator MetadataStore::oldestEntryUnlocked() {
     return std::min_element(
         entries_.begin(),
         entries_.end(),
