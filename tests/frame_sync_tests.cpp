@@ -164,7 +164,8 @@ void buffersRemainBounded() {
             Buffer::PushResult::EvictedOldestAndInserted,
         "video buffer did not report bounded eviction");
     require(video.size() == 2, "video buffer exceeded capacity");
-    require(video.front() && video.front()->key.frameId == 2, "video buffer evicted wrong frame");
+    const auto front = video.peekFront();
+    require(front && front->key.frameId == 2, "video buffer evicted wrong frame");
 
     reg::metadata::MetadataStore metadata(2);
     metadata.insert(metadataFor({1, 1}, 1));
@@ -184,8 +185,9 @@ void changingDelayRetimesBufferedFrames() {
 
     video.setPlayoutDelay(120ms);
 
-    require(video.front() != nullptr, "retimed frame disappeared");
-    require(video.front()->deadline == t0 + 120ms, "existing frame deadline was not retimed");
+    const auto front = video.peekFront();
+    require(front.has_value(), "retimed frame disappeared");
+    require(front->deadline == t0 + 120ms, "existing frame deadline was not retimed");
 }
 
 } // namespace
