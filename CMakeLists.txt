@@ -87,7 +87,10 @@ if(REG_BUILD_PROBE)
         src/metadata/Protocol.cpp
         src/metadata/MetadataStore.cpp
         src/metadata/MetadataReceiver.cpp
+        src/overlay/PatternedLine.cpp
+        src/overlay/TrackHistory.cpp
         src/video/VideoFrame.cpp
+        src/video/VideoTransform.cpp
         src/video/OverlayFrameBuffer.cpp
         src/video/FrameSynchronizer.cpp
     )
@@ -160,4 +163,29 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME reg_core_tests COMMAND reg_core_tests)
+
+    add_executable(reg_geometry_tests
+        tests/OverlayGeometryTests.cpp
+        src/overlay/PatternedLine.cpp
+        src/overlay/TrackHistory.cpp
+        src/video/VideoTransform.cpp
+    )
+
+    target_include_directories(reg_geometry_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+
+    if(MSVC)
+        target_compile_options(reg_geometry_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_geometry_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wconversion
+            -Wshadow
+        )
+    endif()
+
+    add_test(NAME reg_geometry_tests COMMAND reg_geometry_tests)
 endif()
