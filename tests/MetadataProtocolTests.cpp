@@ -1,3 +1,4 @@
+#include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
 #include "metadata/Protocol.hpp"
 
@@ -9,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace {
 
@@ -139,6 +141,61 @@ void testInvalidBoundingBoxRejected() {
     require(rejected, "out-of-range bbox was not rejected");
 }
 
+void testMetadataReceiverLifecycle() {
+    using namespace std::chrono_literals;
+
+    reg::metadata::MetadataStore store;
+
+    {
+        reg::metadata::MetadataReceiver receiver(
+            store,
+            reg::metadata::MetadataReceiverConfig{
+                .bindAddress = "127.0.0.1",
+                .port = 0,
+                .receiveTimeout = 10ms,
+                .receiveBufferBytes = 64 * 1024,
+            });
+
+        require(receiver.localPort() != 0, "UDP receiver did not bind an ephemeral port");
+
+        std::jthread thread([&] {
+            receiver.run();
+        });
+
+        std::this_thread::sleep_for(20ms);
+        receiver.requestStop();
+
+        if (thread.joinable()) {
+            thread.join();
+        }
+
+        require(
+            receiver.stats().receivedDatagrams == 0,
+            "idle UDP receiver unexpectedly received a datagram");
+    }
+
+    {
+        reg::metadata::MetadataReceiver receiver(
+            store,
+            reg::metadata::MetadataReceiverConfig{
+                .bindAddress = "127.0.0.1",
+                .port = 0,
+                .receiveTimeout = 10ms,
+                .receiveBufferBytes = 64 * 1024,
+            });
+
+        receiver.requestStop();
+
+        const auto start = std::chrono::steady_clock::now();
+        receiver.run();
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+
+        require(
+            elapsed < 50ms,
+            "stop-before-run request was lost");
+    }
+}
+
 void testMetadataStoreSemantics() {
     using namespace std::chrono_literals;
 
@@ -188,6 +245,7 @@ int main() {
         testProtocolRoundTrip();
         testCorruptionRejected();
         testInvalidBoundingBoxRejected();
+        testMetadataReceiverLifecycle();
         testMetadataStoreSemantics();
 
         std::cout << "reg_core_tests: all tests passed\n";
