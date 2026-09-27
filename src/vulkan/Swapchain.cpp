@@ -47,7 +47,10 @@ bool Swapchain::recreate() {
         return false;
     }
 
-    checkVk(vkDeviceWaitIdle(vulkan_.device()), "vkDeviceWaitIdle(swapchain recreate)");
+    checkVk(vkQueueWaitIdle(vulkan_.graphicsQueue().handle), "vkQueueWaitIdle(graphics)");
+    if (vulkan_.presentQueue().handle != vulkan_.graphicsQueue().handle) {
+        checkVk(vkQueueWaitIdle(vulkan_.presentQueue().handle), "vkQueueWaitIdle(present)");
+    }
 
     VkSurfaceCapabilitiesKHR capabilities{};
     checkVk(
