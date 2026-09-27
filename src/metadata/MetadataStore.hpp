@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 namespace reg::metadata {
@@ -33,7 +34,7 @@ public:
     std::size_t purgeExpired(Clock::time_point now);
     void clear() noexcept;
 
-    std::size_t size() const noexcept { return entries_.size(); }
+    std::size_t size() const;
     std::size_t capacity() const noexcept { return capacity_; }
 
 private:
@@ -42,10 +43,12 @@ private:
         MetadataPtr,
         media::FrameKeyHash>;
 
-    Map::iterator oldestEntry();
+    Map::iterator oldestEntryUnlocked();
+    std::size_t purgeExpiredUnlocked(Clock::time_point now);
 
     std::size_t capacity_{};
     std::chrono::milliseconds maxAge_{};
+    mutable std::mutex mutex_;
     Map entries_;
 };
 
