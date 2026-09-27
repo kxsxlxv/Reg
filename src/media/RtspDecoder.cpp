@@ -66,7 +66,6 @@ RtspDecoder::~RtspDecoder() {
 }
 
 void RtspDecoder::run(const FrameCallback& onFrame) {
-    stopRequested_.store(false, std::memory_order_release);
     openInput();
     openDecoder();
 
