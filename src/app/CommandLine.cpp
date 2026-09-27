@@ -49,6 +49,17 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         } else if (arg == "--extra-hw-frames") {
             options.extraHwFrames = parseInteger<int>(
                 requireValue(i, argc, argv, "--extra-hw-frames"), "--extra-hw-frames");
+        } else if (arg == "--metadata-bind") {
+            options.metadataBind = requireValue(i, argc, argv, "--metadata-bind");
+        } else if (arg == "--metadata-port") {
+            options.metadataPort = parseInteger<int>(
+                requireValue(i, argc, argv, "--metadata-port"), "--metadata-port");
+        } else if (arg == "--overlay-delay-ms") {
+            options.overlayDelayMs = parseInteger<int>(
+                requireValue(i, argc, argv, "--overlay-delay-ms"), "--overlay-delay-ms");
+        } else if (arg == "--overlay-max-frames") {
+            options.overlayMaxFrames = parseInteger<int>(
+                requireValue(i, argc, argv, "--overlay-max-frames"), "--overlay-max-frames");
         } else if (arg == "--no-validation") {
             options.validation = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -71,6 +82,15 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.extraHwFrames < 0) {
         throw std::runtime_error("--extra-hw-frames must be >= 0");
     }
+    if (options.metadataPort < 0 || options.metadataPort > 65535) {
+        throw std::runtime_error("--metadata-port must be in [0, 65535]");
+    }
+    if (options.overlayDelayMs < 0) {
+        throw std::runtime_error("--overlay-delay-ms must be >= 0");
+    }
+    if (options.overlayMaxFrames <= 0) {
+        throw std::runtime_error("--overlay-max-frames must be > 0");
+    }
 
     return options;
 }
@@ -82,6 +102,10 @@ void printUsage(const char* executableName) {
         << "  --max-delay-us N         FFmpeg RTSP demux max_delay (default: 0)\n"
         << "  --reorder-queue-size N   RTP packet reorder queue size (default: 0)\n"
         << "  --extra-hw-frames N      Extra Vulkan decode surfaces (default: 32)\n"
+        << "  --metadata-bind IPv4     Metadata UDP bind address (default: 0.0.0.0)\n"
+        << "  --metadata-port N        Enable metadata receive on UDP port N; 0 disables it\n"
+        << "  --overlay-delay-ms N     Exact-sync playout delay (default: 150)\n"
+        << "  --overlay-max-frames N   Bounded delayed-frame capacity (default: 32)\n"
         << "  --no-validation          Do not request VK_LAYER_KHRONOS_validation\n"
         << "  -h, --help               Show this help\n";
 }
