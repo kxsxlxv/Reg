@@ -104,6 +104,10 @@ int main(int argc, char** argv) {
                                       << 'x' << swapchain.extent().height
                                       << '\n';
                         }
+                    } else {
+                        // Preserve newest-frame semantics without burning an entire
+                        // CPU core while both render slots or WSI are temporarily busy.
+                        std::this_thread::yield();
                     }
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
