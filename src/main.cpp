@@ -3,6 +3,8 @@
 #include "media/VulkanHwDevice.hpp"
 #include "platform/SDLPlatform.hpp"
 #include "video/RawFrameMailbox.hpp"
+#include "vulkan/Swapchain.hpp"
+#include "vulkan/VideoRenderer.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 #include <atomic>
@@ -25,6 +27,7 @@ int main(int argc, char** argv) {
             720);
 
         reg::vulkan::VulkanContext vulkan(window, options.validation);
+        reg::vulkan::Swapchain swapchain(vulkan, window);
         reg::media::VulkanHwDevice hwDevice(vulkan);
 
         reg::media::RtspDecoder decoder(
@@ -37,7 +40,10 @@ int main(int argc, char** argv) {
             });
 
         reg::video::RawFrameMailbox rawMailbox;
+        reg::vulkan::VideoRenderer renderer(vulkan);
+
         std::atomic_uint64_t decodedFrames{0};
+        std::atomic_uint64_t presentedFrames{0};
         std::atomic_bool decoderFinished{false};
         std::mutex errorMutex;
         std::exception_ptr decoderError;
@@ -68,12 +74,32 @@ int main(int argc, char** argv) {
             decoderFinished.store(true, std::memory_order_release);
         });
 
+        reg::video::VideoFramePtr lastPresented;
+
         while (!decoderFinished.load(std::memory_order_acquire)) {
             if (platform.pollQuitRequested()) {
                 decoder.requestStop();
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+            const auto latest = rawMailbox.latest();
+            if (latest && latest != lastPresented) {
+                if (renderer.render(latest, swapchain)) {
+                    lastPresented = latest;
+                    const auto count =
+                        presentedFrames.fetch_add(1, std::memory_order_relaxed) + 1;
+                    if (count == 1 || count % 120 == 0) {
+                        std::cout << "[renderer] presented=" << count
+                                  << " source=" << latest->width()
+                                  << 'x' << latest->height()
+                                  << " output=" << swapchain.extent().width
+                                  << 'x' << swapchain.extent().height
+                                  << '\n';
+                    }
+                }
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
         }
 
         decoder.requestStop();
@@ -90,6 +116,8 @@ int main(int argc, char** argv) {
 
         std::cout << "[probe] decoded Vulkan frames: "
                   << decodedFrames.load(std::memory_order_relaxed) << '\n';
+        std::cout << "[probe] presented raw frames: "
+                  << presentedFrames.load(std::memory_order_relaxed) << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "fatal: " << error.what() << '\n';
