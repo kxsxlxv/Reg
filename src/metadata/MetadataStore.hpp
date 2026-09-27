@@ -32,7 +32,7 @@ public:
     MetadataPtr take(media::FrameKey key);
 
     std::size_t purgeExpired(Clock::time_point now);
-    void clear() noexcept;
+    void clear();
 
     std::size_t size() const;
     std::size_t capacity() const noexcept { return capacity_; }
