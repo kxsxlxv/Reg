@@ -103,3 +103,38 @@ Otherwise, Reg requests a second queue from any queue family shared with rendere
 ## Validation gate
 
 Follow [PHASE_A_SMOKE_TEST.md](PHASE_A_SMOKE_TEST.md) before starting the frame-accurate Overlay implementation.
+
+
+## Core-only tests
+
+The metadata protocol, bounded store, UDP receiver, and receiver lifecycle can be compiled/tested without Vulkan, FFmpeg, or SDL:
+
+```bash
+cmake -S . -B build-core \
+  -DREG_BUILD_PROBE=OFF \
+  -DREG_BUILD_TESTS=ON
+
+cmake --build build-core --config Release
+ctest --test-dir build-core -C Release --output-on-failure
+```
+
+GitHub Actions runs this core test configuration on both Linux and Windows.
+
+## Enable metadata exact-sync probing
+
+Once the source stream contains the Reg SEI `(stream_epoch, frame_id)` payload and Jetson sends CV Metadata Protocol V1 packets:
+
+```bash
+./build/reg_probe \
+  --url rtsp://HOST/path \
+  --metadata-bind 0.0.0.0 \
+  --metadata-port 5600 \
+  --overlay-delay-ms 150 \
+  --overlay-max-frames 32
+```
+
+The Raw window remains latest-frame-wins. In parallel, SEI-tagged decoded frames enter the delayed buffer and are matched against validated UDP metadata by exact FrameKey.
+
+The current sync probe logs matches and drops. It does not yet render a second Overlay swapchain.
+
+See `METADATA_PROTOCOL_V1.md` for the Jetson wire contract.
