@@ -745,6 +745,103 @@ int main(int argc, char** argv) {
                     }
                 }
 
+                const auto telemetryNow =
+                    std::chrono::steady_clock::now();
+
+                if (options.telemetryEnabled &&
+                    telemetryWindow &&
+                    telemetryRenderer &&
+                    telemetryNow >= nextTelemetryRenderAt) {
+                    reg::metadata::MetadataReceiverStats
+                        receiverStats{};
+
+                    if (metadataReceiver) {
+                        receiverStats =
+                            metadataReceiver->stats();
+                    }
+
+                    reg::recorder::BlackboxRecorderStats
+                        recorderStats{};
+
+                    if (blackboxRecorder) {
+                        recorderStats =
+                            blackboxRecorder->stats();
+
+                        if (recorderStats.failed &&
+                            !recorderFailureLogged) {
+                            recorderFailureLogged = true;
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Error,
+                                std::string("Blackbox recorder degraded: ") +
+                                    blackboxRecorder->lastError());
+                        }
+                    }
+
+                    telemetryModel.updateCounters(
+                        reg::telemetry::Counters{
+                            .rtspConnected =
+                                decoderConnected.load(
+                                    std::memory_order_relaxed),
+                            .decoderSessions =
+                                decoderSessionGeneration.load(
+                                    std::memory_order_relaxed),
+                            .reconnects =
+                                decoderReconnects.load(
+                                    std::memory_order_relaxed),
+                            .decodedFrames =
+                                decodedFrames.load(
+                                    std::memory_order_relaxed),
+                            .rawPresentedFrames =
+                                rawPresentedFrames.load(
+                                    std::memory_order_relaxed),
+                            .overlayPresentedFrames =
+                                overlayPresentedFrames.load(
+                                    std::memory_order_relaxed),
+                            .overlayMissingMetadataDrops =
+                                overlayMissingMetadataDrops.load(
+                                    std::memory_order_relaxed),
+                            .metadataPackets =
+                                receiverStats.packetsReceived,
+                            .metadataInvalid =
+                                receiverStats.packetsInvalid,
+                            .metadataDuplicates =
+                                receiverStats.packetDuplicates +
+                                receiverStats.frameDuplicates,
+                            .metadataSequenceGaps =
+                                receiverStats.sequenceGaps,
+                            .recorderPacketsWritten =
+                                recorderStats.packetsWritten,
+                            .recorderQueueDrops =
+                                recorderStats.packetsDroppedQueueFull,
+                            .recorderMetadataWritten =
+                                recorderStats.metadataWritten,
+                            .recorderMetadataQueueDrops =
+                                recorderStats.metadataDroppedQueueFull,
+                            .recorderFailures =
+                                recorderStats.failures,
+                            .overlayBufferDepth =
+                                overlayFrames.size(),
+                            .metadataStoreDepth =
+                                metadataStore.size(),
+                            .recorderQueueDepth =
+                                recorderStats.queueDepth,
+                        },
+                        telemetryNow);
+
+                    const auto telemetrySnapshot =
+                        telemetryModel.snapshot();
+
+                    if (telemetryRenderer->render(
+                            telemetrySnapshot,
+                            telemetryWindow->swapchain())) {
+                        didWork = true;
+                    }
+
+                    nextTelemetryRenderAt =
+                        telemetryNow +
+                        std::chrono::milliseconds{100};
+                }
+
                 if (!didWork) {
                     std::this_thread::sleep_for(
                         std::chrono::milliseconds(1));
