@@ -1,4 +1,5 @@
 #include "media/FrameIdentity.hpp"
+#include "media/FrameIdentitySei.hpp"
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -12,6 +13,7 @@ extern "C" {
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -86,6 +88,210 @@ FramePtr makeFrame(
     }
 
     return frame;
+}
+
+std::vector<std::uint8_t> ebspToRbsp(
+    std::span<const std::uint8_t> ebsp) {
+    std::vector<std::uint8_t> rbsp;
+    rbsp.reserve(ebsp.size());
+
+    unsigned consecutiveZeros = 0;
+
+    for (std::size_t i = 0;
+         i < ebsp.size();
+         ++i) {
+        const std::uint8_t byte =
+            ebsp[i];
+
+        if (consecutiveZeros >= 2U &&
+            byte == 0x03U) {
+            require(
+                i + 1U < ebsp.size() &&
+                    ebsp[i + 1U] <= 0x03U,
+                "invalid emulation-prevention byte");
+
+            consecutiveZeros = 0;
+            continue;
+        }
+
+        rbsp.push_back(byte);
+
+        if (byte == 0x00U) {
+            ++consecutiveZeros;
+        } else {
+            consecutiveZeros = 0;
+        }
+    }
+
+    return rbsp;
+}
+
+void verifySeiNalPayload(
+    std::span<const std::uint8_t> nal,
+    const reg::media::SourceFrameIdentity& expected) {
+    require(
+        !nal.empty() &&
+            (nal[0] & 0x1fU) == 6U,
+        "H264 NAL is not SEI type 6");
+
+    const auto rbsp =
+        ebspToRbsp(
+            nal.subspan(1));
+
+    require(
+        rbsp.size() >=
+            2U +
+            reg::media::kFrameIdentitySeiUuid.size() +
+            reg::media::kFrameIdentityPayloadSize +
+            1U,
+        "SEI RBSP is too short");
+
+    require(
+        rbsp[0] == 5U,
+        "SEI payload type is not user_data_unregistered");
+
+    constexpr std::size_t expectedPayloadSize =
+        reg::media::kFrameIdentitySeiUuid.size() +
+        reg::media::kFrameIdentityPayloadSize;
+
+    require(
+        rbsp[1] == expectedPayloadSize,
+        "SEI payload size mismatch");
+
+    require(
+        std::equal(
+            reg::media::kFrameIdentitySeiUuid.begin(),
+            reg::media::kFrameIdentitySeiUuid.end(),
+            rbsp.begin() + 2),
+        "SEI UUID mismatch");
+
+    const std::size_t payloadOffset =
+        2U +
+        reg::media::kFrameIdentitySeiUuid.size();
+
+    const auto decoded =
+        reg::media::decodeFrameIdentityPayload(
+            std::span<const std::uint8_t>{
+                rbsp.data() + payloadOffset,
+                reg::media::kFrameIdentityPayloadSize});
+
+    require(
+        decoded.has_value(),
+        "SEI FrameIdentity payload did not decode");
+    require(
+        decoded->key == expected.key,
+        "SEI FrameKey mismatch");
+    require(
+        decoded->sourceTimeNs ==
+            expected.sourceTimeNs,
+        "SEI source timestamp mismatch");
+
+    require(
+        rbsp[payloadOffset +
+             reg::media::kFrameIdentityPayloadSize] ==
+            0x80U,
+        "SEI RBSP trailing bits mismatch");
+}
+
+void annexBSeiNalRoundTrips() {
+    const auto source =
+        sampleIdentity();
+
+    const auto annexB =
+        reg::media::buildFrameIdentitySeiNal(
+            source,
+            reg::media::H264NalFraming::AnnexB);
+
+    require(
+        annexB.size() > 5U,
+        "Annex-B SEI is too small");
+    require(
+        annexB[0] == 0x00U &&
+            annexB[1] == 0x00U &&
+            annexB[2] == 0x00U &&
+            annexB[3] == 0x01U,
+        "Annex-B start code mismatch");
+
+    verifySeiNalPayload(
+        std::span<const std::uint8_t>{
+            annexB.data() + 4,
+            annexB.size() - 4U},
+        source);
+}
+
+void avccSeiNalRoundTrips() {
+    const auto source =
+        sampleIdentity();
+
+    const auto avcc =
+        reg::media::buildFrameIdentitySeiNal(
+            source,
+            reg::media::H264NalFraming::
+                Avcc4ByteLength);
+
+    require(
+        avcc.size() > 5U,
+        "AVCC SEI is too small");
+
+    const std::uint32_t declaredSize =
+        (static_cast<std::uint32_t>(
+             avcc[0]) << 24U) |
+        (static_cast<std::uint32_t>(
+             avcc[1]) << 16U) |
+        (static_cast<std::uint32_t>(
+             avcc[2]) << 8U) |
+        static_cast<std::uint32_t>(
+            avcc[3]);
+
+    require(
+        declaredSize ==
+            avcc.size() - 4U,
+        "AVCC NAL length mismatch");
+
+    verifySeiNalPayload(
+        std::span<const std::uint8_t>{
+            avcc.data() + 4,
+            avcc.size() - 4U},
+        source);
+}
+
+void seiNalUsesEmulationPrevention() {
+    const reg::media::SourceFrameIdentity zeroHeavy{
+        .key = {
+            .streamEpoch = 0,
+            .frameId = 1,
+        },
+        .sourceTimeNs = 0,
+    };
+
+    const auto annexB =
+        reg::media::buildFrameIdentitySeiNal(
+            zeroHeavy,
+            reg::media::H264NalFraming::AnnexB);
+
+    const bool hasPreventionByte =
+        std::search(
+            annexB.begin() + 5,
+            annexB.end(),
+            std::array<std::uint8_t, 3>{
+                0x00U,
+                0x00U,
+                0x03U}.begin(),
+            std::array<std::uint8_t, 3>{
+                0x00U,
+                0x00U,
+                0x03U}.end()) !=
+        annexB.end();
+
+    require(
+        hasPreventionByte,
+        "zero-heavy identity did not produce H264 emulation-prevention bytes");
+
+    verifySeiNalPayload(
+        std::span<const std::uint8_t>{
+            annexB.data() + 4,
+            annexB.size() - 4U},
+        zeroHeavy);
 }
 
 void payloadEncodingMatchesGoldenBytes() {
@@ -224,6 +430,9 @@ void truncatedPayloadIsIgnored() {
 
 int main() {
     try {
+        annexBSeiNalRoundTrips();
+        avccSeiNalRoundTrips();
+        seiNalUsesEmulationPrevention();
         payloadEncodingMatchesGoldenBytes();
         payloadRoundTripIsStable();
         validPayloadIsDecodedFromAvFrame();
