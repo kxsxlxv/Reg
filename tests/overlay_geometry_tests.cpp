@@ -236,6 +236,32 @@ void testTrackHistory() {
     require(history.trackCount() == 0, "expired track was not removed");
 }
 
+void testTrackHistorySeparatesEpochsAndRejectsBackwardsFrames() {
+    using namespace std::chrono_literals;
+
+    reg::overlay::TrackHistory history(5s);
+    const auto t0 = std::chrono::steady_clock::time_point{20s};
+
+    history.observe(oneTargetMetadata(10, 0.10F, 0.10F), t0);
+    history.observe(oneTargetMetadata(11, 0.20F, 0.20F), t0 + 10ms);
+
+    auto backwards = oneTargetMetadata(9, 0.90F, 0.90F);
+    history.observe(backwards, t0 + 20ms);
+
+    auto points = history.history(123);
+    require(points.size() == 2, "backwards frame was added to trajectory");
+    require(points.back().key.frameId == 11, "trajectory regressed to an older frame");
+
+    auto nextEpoch = oneTargetMetadata(1, 0.30F, 0.40F);
+    nextEpoch.key.streamEpoch = 8;
+    history.observe(nextEpoch, t0 + 30ms);
+
+    points = history.history(123);
+    require(points.size() == 1, "new stream epoch did not reset target trajectory");
+    require(points.front().key.streamEpoch == 8, "trajectory retained previous stream epoch");
+    require(points.front().key.frameId == 1, "new epoch trajectory retained wrong frame");
+}
+
 } // namespace
 
 int main() {
@@ -248,6 +274,7 @@ int main() {
         testDashDotLine();
         testPolylinePatternContinuity();
         testTrackHistory();
+        testTrackHistorySeparatesEpochsAndRejectsBackwardsFrames();
 
         std::cout << "reg_geometry_tests: all tests passed\n";
         return 0;
