@@ -117,6 +117,11 @@ void RtspDecoder::run(
             continue;
         }
 
+        if (result == AVERROR_EOF &&
+            config_.inputMode == VideoInputMode::File) {
+            break;
+        }
+
         if (result < 0) {
             throwFfmpegError(
                 "av_read_frame",
@@ -180,12 +185,27 @@ VideoStreamDescriptorPtr RtspDecoder::openInput() {
     formatContext_->interrupt_callback.opaque = this;
 
     AVDictionary* options = nullptr;
-    av_dict_set(&options, "rtsp_transport", "udp", 0);
-    av_dict_set(&options, "fflags", "nobuffer", 0);
-    av_dict_set_int(&options, "max_delay", config_.maxDelayUs, 0);
-    av_dict_set_int(&options, "reorder_queue_size", config_.reorderQueueSize, 0);
 
-    const int openResult = avformat_open_input(&formatContext_, config_.url.c_str(), nullptr, &options);
+    if (config_.inputMode == VideoInputMode::RtspUdp) {
+        av_dict_set(&options, "rtsp_transport", "udp", 0);
+        av_dict_set(&options, "fflags", "nobuffer", 0);
+        av_dict_set_int(
+            &options,
+            "max_delay",
+            config_.maxDelayUs,
+            0);
+        av_dict_set_int(
+            &options,
+            "reorder_queue_size",
+            config_.reorderQueueSize,
+            0);
+    }
+
+    const int openResult = avformat_open_input(
+        &formatContext_,
+        config_.url.c_str(),
+        nullptr,
+        &options);
 
     if (options != nullptr) {
         const AVDictionaryEntry* entry = nullptr;
@@ -212,7 +232,12 @@ VideoStreamDescriptorPtr RtspDecoder::openInput() {
         throw std::runtime_error("The MVP accepts H.264 only");
     }
 
-    std::cout << "[rtsp] connected: " << config_.url << '\n';
+    std::cout
+        << (config_.inputMode == VideoInputMode::RtspUdp
+                ? "[rtsp] connected: "
+                : "[replay] opened: ")
+        << config_.url
+        << '\n';
     std::cout << "[rtsp] coded size: " << parameters->width << 'x' << parameters->height << '\n';
 
     const AVStream* videoStream =
