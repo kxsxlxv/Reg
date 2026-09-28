@@ -84,6 +84,14 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         } else if (arg == "--reconnect-max-ms") {
             options.reconnectMaxMs = parseInteger<int>(
                 requireValue(i, argc, argv, "--reconnect-max-ms"), "--reconnect-max-ms");
+        } else if (arg == "--raw-display") {
+            options.rawDisplayIndex = parseInteger<int>(
+                requireValue(i, argc, argv, "--raw-display"), "--raw-display");
+        } else if (arg == "--overlay-display") {
+            options.overlayDisplayIndex = parseInteger<int>(
+                requireValue(i, argc, argv, "--overlay-display"), "--overlay-display");
+        } else if (arg == "--fullscreen-video") {
+            options.fullscreenVideoWindows = true;
         } else if (arg == "--no-validation") {
             options.validation = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -135,6 +143,12 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.reconnectMaxMs < options.reconnectInitialMs) {
         throw std::runtime_error("--reconnect-max-ms must be >= --reconnect-initial-ms");
     }
+    if (options.rawDisplayIndex < 0) {
+        throw std::runtime_error("--raw-display must be >= 0");
+    }
+    if (options.overlayDisplayIndex < 0) {
+        throw std::runtime_error("--overlay-display must be >= 0");
+    }
 
     return options;
 }
@@ -157,6 +171,9 @@ void printUsage(const char* executableName) {
         << "  --disable-recorder       Disable rolling compressed-stream recorder\n"
         << "  --reconnect-initial-ms N Initial RTSP reconnect delay (default: 250)\n"
         << "  --reconnect-max-ms N     Maximum RTSP reconnect delay (default: 2000)\n"
+        << "  --raw-display N          SDL display index for Raw window (default: 0)\n"
+        << "  --overlay-display N      SDL display index for Overlay window (default: 1)\n"
+        << "  --fullscreen-video       Borderless fullscreen video windows\n"
         << "  --no-validation          Do not request VK_LAYER_KHRONOS_validation\n"
         << "  -h, --help               Show this help\n";
 }
