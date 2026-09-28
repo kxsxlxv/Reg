@@ -17,9 +17,18 @@ enum class AcquireStatus {
     NotReady,
 };
 
+enum class PresentPolicy {
+    LowLatencyTearingAllowed,
+    Stable,
+};
+
 class Swapchain final {
 public:
-    Swapchain(const VulkanContext& vulkan, SDL_Window* window);
+    Swapchain(
+        const VulkanContext& vulkan,
+        SDL_Window* window,
+        VkSurfaceKHR surface,
+        PresentPolicy presentPolicy);
     ~Swapchain();
 
     Swapchain(const Swapchain&) = delete;
@@ -37,6 +46,7 @@ public:
     VkImage image(std::uint32_t index) const noexcept { return images_[index]; }
     VkImageView imageView(std::uint32_t index) const noexcept { return imageViews_[index]; }
     std::size_t imageCount() const noexcept { return images_.size(); }
+    VkSurfaceKHR surface() const noexcept { return surface_; }
 
 private:
     void destroySwapchain();
@@ -46,6 +56,8 @@ private:
 
     const VulkanContext& vulkan_;
     SDL_Window* window_{nullptr};
+    VkSurfaceKHR surface_{VK_NULL_HANDLE};
+    PresentPolicy presentPolicy_{PresentPolicy::Stable};
 
     VkSwapchainKHR swapchain_{VK_NULL_HANDLE};
     VkSurfaceFormatKHR surfaceFormat_{};

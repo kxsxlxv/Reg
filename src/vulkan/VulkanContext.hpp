@@ -30,7 +30,6 @@ public:
     VkInstance instance() const noexcept { return instance_; }
     VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
     VkDevice device() const noexcept { return device_; }
-    VkSurfaceKHR bootstrapSurface() const noexcept { return surface_; }
 
     const QueueInfo& graphicsQueue() const noexcept { return graphicsQueue_; }
     const QueueInfo& presentQueue() const noexcept { return presentQueue_; }
@@ -53,17 +52,17 @@ private:
     };
 
     void createInstance(bool requestValidation);
-    void createSurface(SDL_Window* window);
-    void selectPhysicalDevice();
+    void selectPhysicalDevice(VkSurfaceKHR bootstrapSurface);
     void createDevice();
 
     bool hasInstanceLayer(const char* layerName) const;
     bool hasInstanceExtension(const char* extensionName) const;
     bool deviceSupportsExtensions(VkPhysicalDevice device, const std::vector<const char*>& extensions) const;
-    std::vector<QueueFamilyCandidate> queryQueueFamilies(VkPhysicalDevice device) const;
+    std::vector<QueueFamilyCandidate> queryQueueFamilies(
+        VkPhysicalDevice device,
+        VkSurfaceKHR surface) const;
 
     VkInstance instance_{VK_NULL_HANDLE};
-    VkSurfaceKHR surface_{VK_NULL_HANDLE};
     VkPhysicalDevice physicalDevice_{VK_NULL_HANDLE};
     VkDevice device_{VK_NULL_HANDLE};
 

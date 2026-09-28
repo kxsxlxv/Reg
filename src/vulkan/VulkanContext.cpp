@@ -33,19 +33,44 @@ bool containsExtension(const std::vector<VkExtensionProperties>& extensions, con
 } // namespace
 
 VulkanContext::VulkanContext(SDL_Window* window, bool requestValidation) {
+    if (window == nullptr) {
+        throw std::invalid_argument("VulkanContext requires a bootstrap SDL window");
+    }
+
     createInstance(requestValidation);
-    createSurface(window);
-    selectPhysicalDevice();
-    createDevice();
+
+    VkSurfaceKHR bootstrapSurface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &bootstrapSurface)) {
+        vkDestroyInstance(instance_, nullptr);
+        instance_ = VK_NULL_HANDLE;
+        throw std::runtime_error(
+            std::string("SDL_Vulkan_CreateSurface(bootstrap) failed: ") +
+            SDL_GetError());
+    }
+
+    try {
+        selectPhysicalDevice(bootstrapSurface);
+        createDevice();
+    } catch (...) {
+        SDL_Vulkan_DestroySurface(instance_, bootstrapSurface, nullptr);
+        if (device_ != VK_NULL_HANDLE) {
+            vkDestroyDevice(device_, nullptr);
+            device_ = VK_NULL_HANDLE;
+        }
+        if (instance_ != VK_NULL_HANDLE) {
+            vkDestroyInstance(instance_, nullptr);
+            instance_ = VK_NULL_HANDLE;
+        }
+        throw;
+    }
+
+    SDL_Vulkan_DestroySurface(instance_, bootstrapSurface, nullptr);
 }
 
 VulkanContext::~VulkanContext() {
     if (device_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device_);
         vkDestroyDevice(device_, nullptr);
-    }
-    if (surface_ != VK_NULL_HANDLE && instance_ != VK_NULL_HANDLE) {
-        SDL_Vulkan_DestroySurface(instance_, surface_, nullptr);
     }
     if (instance_ != VK_NULL_HANDLE) {
         vkDestroyInstance(instance_, nullptr);
@@ -101,13 +126,7 @@ void VulkanContext::createInstance(bool requestValidation) {
     checkVk(vkCreateInstance(&createInfo, nullptr, &instance_), "vkCreateInstance");
 }
 
-void VulkanContext::createSurface(SDL_Window* window) {
-    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface_)) {
-        throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
-    }
-}
-
-void VulkanContext::selectPhysicalDevice() {
+void VulkanContext::selectPhysicalDevice(VkSurfaceKHR bootstrapSurface) {
     std::uint32_t deviceCount = 0;
     checkVk(vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr), "vkEnumeratePhysicalDevices(count)");
     if (deviceCount == 0) {
@@ -135,7 +154,7 @@ void VulkanContext::selectPhysicalDevice() {
             continue;
         }
 
-        const auto families = queryQueueFamilies(device);
+        const auto families = queryQueueFamilies(device, bootstrapSurface);
         const auto graphicsIt = std::ranges::find_if(families, [](const QueueFamilyCandidate& family) {
             return (family.flags & VK_QUEUE_GRAPHICS_BIT) != 0;
         });
@@ -400,7 +419,9 @@ bool VulkanContext::deviceSupportsExtensions(
     });
 }
 
-std::vector<VulkanContext::QueueFamilyCandidate> VulkanContext::queryQueueFamilies(VkPhysicalDevice device) const {
+std::vector<VulkanContext::QueueFamilyCandidate> VulkanContext::queryQueueFamilies(
+    VkPhysicalDevice device,
+    VkSurfaceKHR surface) const {
     std::uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties2(device, &count, nullptr);
 
@@ -420,7 +441,7 @@ std::vector<VulkanContext::QueueFamilyCandidate> VulkanContext::queryQueueFamili
 
     for (std::uint32_t i = 0; i < count; ++i) {
         VkBool32 presentSupported = VK_FALSE;
-        checkVk(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &presentSupported),
+        checkVk(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupported),
                 "vkGetPhysicalDeviceSurfaceSupportKHR");
 
         result.push_back(QueueFamilyCandidate{

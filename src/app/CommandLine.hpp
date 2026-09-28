@@ -10,6 +10,12 @@ struct CommandLineOptions {
     std::int64_t maxDelayUs{0};
     int reorderQueueSize{0};
     int extraHwFrames{32};
+
+    std::string metadataBindAddress{"0.0.0.0"};
+    std::uint16_t metadataPort{50010};
+    int overlayDelayMs{150};
+    bool overlayEnabled{true};
+
     bool validation{true};
 };
 
