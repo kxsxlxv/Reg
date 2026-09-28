@@ -74,6 +74,10 @@ add_executable(reg_probe
     src/main.cpp
     src/app/CommandLine.cpp
     src/platform/SDLPlatform.cpp
+    src/platform/UdpSocket.cpp
+    src/metadata/MetadataProtocol.cpp
+    src/metadata/MetadataStore.cpp
+    src/metadata/MetadataReceiver.cpp
     src/vulkan/VulkanContext.cpp
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
@@ -100,6 +104,10 @@ target_compile_definitions(reg_probe PRIVATE
     REG_ENABLE_VALIDATION=$<BOOL:${REG_ENABLE_VALIDATION}>
     REG_SHADER_DIR=\"${REG_SHADER_OUTPUT_DIR}\"
 )
+
+if(WIN32)
+    target_link_libraries(reg_probe PRIVATE ws2_32)
+endif()
 
 if(MSVC)
     target_compile_options(reg_probe PRIVATE /W4 /permissive- /EHsc)
