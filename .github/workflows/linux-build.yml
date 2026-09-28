@@ -1,0 +1,107 @@
+name: Linux build
+
+on:
+  push:
+    branches:
+      - master
+      - mvp/**
+  pull_request:
+
+concurrency:
+  group: linux-build-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            nasm \
+            glslc \
+            libvulkan-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxss-dev \
+            libxtst-dev \
+            libxkbcommon-dev
+
+      - name: Install current Vulkan headers
+        run: |
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$RUNNER_TEMP/Vulkan-Headers"
+          cmake -S "$RUNNER_TEMP/Vulkan-Headers" \
+                -B "$RUNNER_TEMP/Vulkan-Headers/build" \
+                -G Ninja \
+                -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/vulkan"
+          cmake --build "$RUNNER_TEMP/Vulkan-Headers/build"
+          cmake --install "$RUNNER_TEMP/Vulkan-Headers/build"
+
+      - name: Build FFmpeg libraries
+        env:
+          VULKAN_HEADERS: ${{ runner.temp }}/vulkan
+          FFMPEG_PREFIX: ${{ runner.temp }}/ffmpeg-install
+        run: |
+          mkdir -p "$RUNNER_TEMP/ffmpeg-build"
+          cd "$RUNNER_TEMP/ffmpeg-build"
+
+          CFLAGS="-I$VULKAN_HEADERS/include" \
+          CPPFLAGS="-I$VULKAN_HEADERS/include" \
+          "$GITHUB_WORKSPACE/ffmpeg/configure" \
+            --prefix="$FFMPEG_PREFIX" \
+            --disable-programs \
+            --disable-doc \
+            --enable-shared \
+            --disable-static \
+            --disable-avdevice \
+            --disable-avfilter \
+            --disable-swscale \
+            --disable-swresample \
+            --disable-encoders \
+            --disable-muxers \
+            --disable-decoders \
+            --enable-decoder=h264 \
+            --enable-hwaccel=h264_vulkan \
+            --enable-vulkan
+
+          grep -E '^#define CONFIG_H264_VULKAN_HWACCEL 1$' config_components.h
+
+          make -j2
+          make install
+
+      - name: Configure Reg
+        env:
+          FFMPEG_ROOT: ${{ runner.temp }}/ffmpeg-install
+          VULKAN_HEADERS: ${{ runner.temp }}/vulkan
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DFFMPEG_ROOT="$FFMPEG_ROOT" \
+            -DREG_ENABLE_VALIDATION=OFF \
+            -DREG_BUILD_TESTS=ON \
+            -DVulkan_INCLUDE_DIR="$VULKAN_HEADERS/include" \
+            -DVulkan_LIBRARY=/usr/lib/x86_64-linux-gnu/libvulkan.so
+
+      - name: Build Reg
+        run: cmake --build build --verbose
+
+      - name: Run unit tests
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/ffmpeg-install/lib
+        run: ctest --test-dir build --output-on-failure
