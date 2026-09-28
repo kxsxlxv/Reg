@@ -91,6 +91,17 @@ int main(int argc, char** argv) {
                                     std::chrono::seconds{
                                         options.recordRetentionSeconds},
                             },
+                        .metadataJournal =
+                            reg::recorder::MetadataJournalConfig{
+                                .directory =
+                                    options.recordDirectory,
+                                .targetSegmentDuration =
+                                    std::chrono::milliseconds{
+                                        options.recordSegmentMs},
+                                .retention =
+                                    std::chrono::seconds{
+                                        options.recordRetentionSeconds},
+                            },
                         .queueCapacity =
                             static_cast<std::size_t>(
                                 options.recordQueueCapacity),
@@ -138,6 +149,13 @@ int main(int argc, char** argv) {
                         .bindAddress = options.metadataBindAddress,
                         .port = options.metadataPort,
                         .receiveTimeoutMs = 100,
+                    },
+                    [&](reg::metadata::FrameMetadata metadata) {
+                        if (blackboxRecorder) {
+                            static_cast<void>(
+                                blackboxRecorder->submitMetadata(
+                                    std::move(metadata)));
+                        }
                     });
         }
 
@@ -454,6 +472,12 @@ int main(int argc, char** argv) {
                 << recorderStats.packetsWaitingForKeyframe
                 << " rotations="
                 << recorderStats.segmentRotations
+                << " metadata_accepted="
+                << recorderStats.metadataAccepted
+                << " metadata_written="
+                << recorderStats.metadataWritten
+                << " metadata_queue_drops="
+                << recorderStats.metadataDroppedQueueFull
                 << " failures="
                 << recorderStats.failures
                 << '\n';
