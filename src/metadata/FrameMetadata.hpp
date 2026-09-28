@@ -10,6 +10,13 @@
 
 namespace reg::metadata {
 
+struct NormalizedPoint {
+    float x{};
+    float y{};
+
+    auto operator<=>(const NormalizedPoint&) const = default;
+};
+
 struct NormalizedRect {
     float x{};
     float y{};
@@ -25,6 +32,11 @@ struct TargetMetadata {
     std::uint16_t flags{};
     float confidence{};
     NormalizedRect bbox{};
+
+    // Optional normalized source-image contour. When present, the Viewer uses
+    // it both as a polygon outline and as a translucent segmentation-mask fill.
+    // Dense pixel masks intentionally remain outside the small UDP frame packet.
+    std::vector<NormalizedPoint> contour;
 
     auto operator<=>(const TargetMetadata&) const = default;
 };
