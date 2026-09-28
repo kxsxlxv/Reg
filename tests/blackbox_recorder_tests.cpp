@@ -10,6 +10,7 @@ extern "C" {
 #include <libavutil/mem.h>
 }
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
