@@ -35,6 +35,20 @@ public:
         : video_(video),
           metadata_(metadata) {}
 
+    typename Buffer::PushResult pushFrame(
+        media::FrameKey key,
+        PayloadPtr frame,
+        TimePoint receivedAt) {
+        auto result =
+            video_.push(key, std::move(frame), receivedAt);
+
+        if (result.evictedKey) {
+            metadata_.discardThrough(*result.evictedKey);
+        }
+
+        return result;
+    }
+
     Result next(TimePoint now) {
         Result result{};
         std::size_t dropped = 0;
