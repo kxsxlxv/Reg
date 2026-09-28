@@ -27,9 +27,9 @@ public:
         TimePoint deadline{};
     };
 
-    enum class PushResult {
-        Inserted,
-        EvictedOldestAndInserted,
+    struct PushResult {
+        bool evicted{};
+        std::optional<media::FrameKey> evictedKey;
     };
 
     OverlayFrameBuffer(
@@ -55,10 +55,11 @@ public:
 
         std::scoped_lock lock(mutex_);
 
-        bool evicted = false;
+        PushResult result{};
         if (frames_.size() >= capacity_) {
+            result.evicted = true;
+            result.evictedKey = frames_.front().key;
             frames_.pop_front();
-            evicted = true;
         }
 
         frames_.push_back(Entry{
@@ -68,9 +69,7 @@ public:
             .deadline = receivedAt + playoutDelay_,
         });
 
-        return evicted
-            ? PushResult::EvictedOldestAndInserted
-            : PushResult::Inserted;
+        return result;
     }
 
     // Atomically checks the front deadline and removes the frame only if it is
