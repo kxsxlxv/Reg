@@ -1,5 +1,7 @@
 #pragma once
 
+#include "media/CompressedVideoPacket.hpp"
+#include "media/VideoStreamDescriptor.hpp"
 #include "video/VideoFrame.hpp"
 
 #include <atomic>
@@ -22,24 +24,47 @@ struct RtspDecoderConfig {
     int extraHwFrames{32};
 };
 
+struct RtspDecoderCallbacks {
+    std::function<void(
+        VideoStreamDescriptorPtr)> onStreamOpened;
+
+    std::function<void(
+        CompressedVideoPacketPtr)> onCompressedPacket;
+
+    std::function<void(
+        video::VideoFramePtr)> onFrame;
+};
+
 class RtspDecoder final {
 public:
-    using FrameCallback = std::function<void(video::VideoFramePtr)>;
+    using FrameCallback =
+        std::function<void(video::VideoFramePtr)>;
 
-    RtspDecoder(AVBufferRef* vulkanDevice, RtspDecoderConfig config);
+    RtspDecoder(
+        AVBufferRef* vulkanDevice,
+        RtspDecoderConfig config);
     ~RtspDecoder();
 
     RtspDecoder(const RtspDecoder&) = delete;
-    RtspDecoder& operator=(const RtspDecoder&) = delete;
+    RtspDecoder& operator=(
+        const RtspDecoder&) = delete;
 
+    void run(const RtspDecoderCallbacks& callbacks);
+
+    // Compatibility convenience for decode-only consumers.
     void run(const FrameCallback& onFrame);
+
     void requestStop() noexcept;
 
 private:
-    void openInput();
+    VideoStreamDescriptorPtr openInput();
     void openDecoder();
     void close() noexcept;
-    void decodePacket(const FrameCallback& onFrame, AVPacket* packet, AVFrame* frame);
+
+    void decodePacket(
+        const FrameCallback& onFrame,
+        AVPacket* packet,
+        AVFrame* frame);
 
     static int interruptCallback(void* opaque);
 

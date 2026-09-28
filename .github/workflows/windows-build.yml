@@ -46,7 +46,7 @@ jobs:
           mkdir -p "$PWD/.ci/ffmpeg-build"
           cd "$PWD/.ci/ffmpeg-build"
 
-          PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig           CFLAGS="-I/ucrt64/include"           CPPFLAGS="-I/ucrt64/include"           LDFLAGS="-L/ucrt64/lib"           "$GITHUB_WORKSPACE/ffmpeg/configure"             --prefix="$FFMPEG_PREFIX"             --disable-programs             --disable-doc             --enable-shared             --disable-static             --disable-avdevice             --disable-avfilter             --disable-swscale             --disable-swresample             --disable-encoders             --disable-muxers             --disable-decoders             --enable-decoder=h264             --enable-hwaccel=h264_vulkan             --enable-vulkan
+          PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig           CFLAGS="-I/ucrt64/include"           CPPFLAGS="-I/ucrt64/include"           LDFLAGS="-L/ucrt64/lib"           "$GITHUB_WORKSPACE/ffmpeg/configure"             --prefix="$FFMPEG_PREFIX"             --disable-programs             --disable-doc             --enable-shared             --disable-static             --disable-avdevice             --disable-avfilter             --disable-swscale             --disable-swresample             --disable-encoders             --disable-muxers             --enable-muxer=matroska             --disable-decoders             --enable-decoder=h264             --enable-hwaccel=h264_vulkan             --enable-vulkan
 
           grep -E '^#define CONFIG_H264_VULKAN_HWACCEL 1$' config_components.h
 

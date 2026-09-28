@@ -64,6 +64,20 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
                 requireValue(i, argc, argv, "--overlay-delay-ms"), "--overlay-delay-ms");
         } else if (arg == "--disable-overlay") {
             options.overlayEnabled = false;
+        } else if (arg == "--record-dir") {
+            options.recordDirectory =
+                requireValue(i, argc, argv, "--record-dir");
+        } else if (arg == "--record-segment-ms") {
+            options.recordSegmentMs = parseInteger<int>(
+                requireValue(i, argc, argv, "--record-segment-ms"), "--record-segment-ms");
+        } else if (arg == "--record-retention-sec") {
+            options.recordRetentionSeconds = parseInteger<int>(
+                requireValue(i, argc, argv, "--record-retention-sec"), "--record-retention-sec");
+        } else if (arg == "--record-queue-capacity") {
+            options.recordQueueCapacity = parseInteger<int>(
+                requireValue(i, argc, argv, "--record-queue-capacity"), "--record-queue-capacity");
+        } else if (arg == "--disable-recorder") {
+            options.recorderEnabled = false;
         } else if (arg == "--no-validation") {
             options.validation = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -92,6 +106,23 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.overlayDelayMs < 0) {
         throw std::runtime_error("--overlay-delay-ms must be >= 0");
     }
+    if (options.recordDirectory.empty()) {
+        throw std::runtime_error("--record-dir must not be empty");
+    }
+    if (options.recordSegmentMs <= 0) {
+        throw std::runtime_error("--record-segment-ms must be > 0");
+    }
+    if (options.recordRetentionSeconds <= 0) {
+        throw std::runtime_error("--record-retention-sec must be > 0");
+    }
+    if (options.recordRetentionSeconds * 1000 <
+        options.recordSegmentMs) {
+        throw std::runtime_error(
+            "record retention must be at least one segment");
+    }
+    if (options.recordQueueCapacity <= 0) {
+        throw std::runtime_error("--record-queue-capacity must be > 0");
+    }
 
     return options;
 }
@@ -107,6 +138,11 @@ void printUsage(const char* executableName) {
         << "  --metadata-port N        UDP metadata port (default: 50010)\n"
         << "  --overlay-delay-ms N     Exact-overlay playout delay (default: 150)\n"
         << "  --disable-overlay        Disable metadata receiver and overlay window\n"
+        << "  --record-dir PATH        Rolling MKV directory (default: blackbox)\n"
+        << "  --record-segment-ms N    Target segment duration (default: 5000)\n"
+        << "  --record-retention-sec N Rolling retention duration (default: 300)\n"
+        << "  --record-queue-capacity N Compressed packet queue bound (default: 2048)\n"
+        << "  --disable-recorder       Disable rolling compressed-stream recorder\n"
         << "  --no-validation          Do not request VK_LAYER_KHRONOS_validation\n"
         << "  -h, --help               Show this help\n";
 }

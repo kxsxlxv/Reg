@@ -7,6 +7,7 @@
 #include "platform/SDLPlatform.hpp"
 #include "render/ImGuiOverlayRenderer.hpp"
 #include "render/TargetOverlayBuilder.hpp"
+#include "recorder/BlackboxRecorder.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 #include "video/RawFrameMailbox.hpp"
@@ -24,6 +25,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <utility>
 
 int main(int argc, char** argv) {
     try {
@@ -69,6 +71,31 @@ int main(int argc, char** argv) {
                 .reorderQueueSize = options.reorderQueueSize,
                 .extraHwFrames = options.extraHwFrames,
             });
+
+        std::unique_ptr<reg::recorder::BlackboxRecorder>
+            blackboxRecorder;
+
+        if (options.recorderEnabled) {
+            blackboxRecorder =
+                std::make_unique<
+                    reg::recorder::BlackboxRecorder>(
+                    reg::recorder::BlackboxRecorderConfig{
+                        .writer =
+                            reg::recorder::SegmentWriterConfig{
+                                .directory =
+                                    options.recordDirectory,
+                                .targetSegmentDuration =
+                                    std::chrono::milliseconds{
+                                        options.recordSegmentMs},
+                                .retention =
+                                    std::chrono::seconds{
+                                        options.recordRetentionSeconds},
+                            },
+                        .queueCapacity =
+                            static_cast<std::size_t>(
+                                options.recordQueueCapacity),
+                    });
+        }
 
         reg::video::RawFrameMailbox rawMailbox;
         reg::video::OverlayFrameBuffer overlayFrames(
@@ -130,7 +157,25 @@ int main(int argc, char** argv) {
 
         std::jthread decodeThread([&] {
             try {
-                decoder.run([&](reg::video::VideoFramePtr frame) {
+                decoder.run(
+                    reg::media::RtspDecoderCallbacks{
+                        .onStreamOpened =
+                            [&](reg::media::VideoStreamDescriptorPtr descriptor) {
+                                if (blackboxRecorder) {
+                                    blackboxRecorder->configure(
+                                        std::move(descriptor));
+                                }
+                            },
+                        .onCompressedPacket =
+                            [&](reg::media::CompressedVideoPacketPtr packet) {
+                                if (blackboxRecorder) {
+                                    static_cast<void>(
+                                        blackboxRecorder->submit(
+                                            std::move(packet)));
+                                }
+                            },
+                        .onFrame =
+                            [&](reg::video::VideoFramePtr frame) {
                     rawMailbox.publish(frame);
 
                     if (options.overlayEnabled) {
@@ -172,7 +217,8 @@ int main(int argc, char** argv) {
                         }
                         std::cout << '\n';
                     }
-                });
+                },
+                    });
             } catch (...) {
                 std::scoped_lock lock(errorMutex);
                 decoderError = std::current_exception();
@@ -212,6 +258,10 @@ int main(int argc, char** argv) {
             }
             if (metadataThread.joinable()) {
                 metadataThread.join();
+            }
+
+            if (blackboxRecorder) {
+                blackboxRecorder->stop();
             }
         };
 
@@ -388,6 +438,33 @@ int main(int argc, char** argv) {
             << "[probe] raw presented frames: "
             << rawPresentedFrames.load(std::memory_order_relaxed)
             << '\n';
+
+        if (blackboxRecorder) {
+            const auto recorderStats =
+                blackboxRecorder->stats();
+
+            std::cout
+                << "[probe] recorder accepted="
+                << recorderStats.packetsAccepted
+                << " written="
+                << recorderStats.packetsWritten
+                << " queue_drops="
+                << recorderStats.packetsDroppedQueueFull
+                << " waiting_keyframe="
+                << recorderStats.packetsWaitingForKeyframe
+                << " rotations="
+                << recorderStats.segmentRotations
+                << " failures="
+                << recorderStats.failures
+                << '\n';
+
+            if (recorderStats.failed) {
+                std::cerr
+                    << "[recorder] degraded: "
+                    << blackboxRecorder->lastError()
+                    << '\n';
+            }
+        }
 
         if (options.overlayEnabled) {
             const auto receiverStats = metadataReceiver->stats();

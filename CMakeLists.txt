@@ -94,7 +94,9 @@ add_executable(reg_probe
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
     src/vulkan/VideoRenderer.cpp
+    src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
+    src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
     src/metadata/Protocol.cpp
@@ -108,6 +110,8 @@ add_executable(reg_probe
     src/video/VideoTransform.cpp
     src/render/TargetOverlayBuilder.cpp
     src/render/ImGuiOverlayRenderer.cpp
+    src/recorder/SegmentedMkvWriter.cpp
+    src/recorder/BlackboxRecorder.cpp
 )
 
 add_dependencies(reg_probe reg_shaders)
@@ -195,4 +199,25 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME overlay_model COMMAND reg_overlay_model_tests)
+
+    add_executable(reg_blackbox_recorder_tests
+        tests/blackbox_recorder_tests.cpp
+        src/media/CompressedVideoPacket.cpp
+        src/media/VideoStreamDescriptor.cpp
+        src/recorder/SegmentedMkvWriter.cpp
+    )
+    target_include_directories(reg_blackbox_recorder_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_blackbox_recorder_tests PRIVATE
+        FFmpeg::avcodec
+        FFmpeg::avformat
+        FFmpeg::avutil
+    )
+
+    if(MSVC)
+        target_compile_options(reg_blackbox_recorder_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_blackbox_recorder_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME blackbox_recorder COMMAND reg_blackbox_recorder_tests)
 endif()
