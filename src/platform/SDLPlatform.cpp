@@ -41,15 +41,33 @@ SDL_Window* SDLPlatform::createVulkanWindow(
     return window;
 }
 
-bool SDLPlatform::pollQuitRequested() {
+PlatformEvents SDLPlatform::pollEvents() {
+    PlatformEvents events{};
+
     SDL_Event event{};
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_EVENT_QUIT ||
             event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-            return true;
+            events.quitRequested = true;
+        }
+
+        if (event.type == SDL_EVENT_DISPLAY_ADDED ||
+            event.type == SDL_EVENT_DISPLAY_REMOVED ||
+            event.type == SDL_EVENT_DISPLAY_MOVED ||
+            event.type == SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED ||
+            event.type == SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED ||
+            event.type == SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED ||
+            event.type == SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED) {
+            events.displayTopologyChanged = true;
+        }
+
+        if (event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED ||
+            event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+            events.windowDisplayChanged = true;
         }
     }
-    return false;
+
+    return events;
 }
 
 } // namespace reg::platform
