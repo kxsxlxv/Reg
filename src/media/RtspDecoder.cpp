@@ -65,45 +65,97 @@ RtspDecoder::~RtspDecoder() {
     avformat_network_deinit();
 }
 
-void RtspDecoder::run(const FrameCallback& onFrame) {
-    stopRequested_.store(false, std::memory_order_release);
-    openInput();
+void RtspDecoder::run(
+    const RtspDecoderCallbacks& callbacks) {
+    if (!callbacks.onFrame) {
+        throw std::invalid_argument(
+            "RtspDecoder requires an onFrame callback");
+    }
+
+    stopRequested_.store(
+        false,
+        std::memory_order_release);
+
+    const VideoStreamDescriptorPtr descriptor =
+        openInput();
     openDecoder();
 
-    std::unique_ptr<AVPacket, PacketDeleter> packet(av_packet_alloc());
-    std::unique_ptr<AVFrame, FrameDeleter> frame(av_frame_alloc());
+    if (callbacks.onStreamOpened) {
+        callbacks.onStreamOpened(descriptor);
+    }
+
+    std::unique_ptr<AVPacket, PacketDeleter>
+        packet(av_packet_alloc());
+    std::unique_ptr<AVFrame, FrameDeleter>
+        frame(av_frame_alloc());
+
     if (!packet || !frame) {
         throw std::bad_alloc{};
     }
 
     std::uint64_t packetCount = 0;
-    while (!stopRequested_.load(std::memory_order_acquire)) {
-        const int result = av_read_frame(formatContext_, packet.get());
-        if (result == AVERROR_EXIT && stopRequested_.load(std::memory_order_acquire)) {
+
+    while (!stopRequested_.load(
+        std::memory_order_acquire)) {
+        const int result =
+            av_read_frame(
+                formatContext_,
+                packet.get());
+
+        if (result == AVERROR_EXIT &&
+            stopRequested_.load(
+                std::memory_order_acquire)) {
             break;
         }
+
         if (result == AVERROR(EAGAIN)) {
             continue;
         }
+
         if (result < 0) {
-            throwFfmpegError("av_read_frame", result);
+            throwFfmpegError(
+                "av_read_frame",
+                result);
         }
 
         ++packetCount;
-        if (packet->stream_index == videoStreamIndex_) {
-            decodePacket(onFrame, packet.get(), frame.get());
+
+        if (packet->stream_index ==
+            videoStreamIndex_) {
+            if (callbacks.onCompressedPacket) {
+                callbacks.onCompressedPacket(
+                    CompressedVideoPacket::cloneFrom(
+                        packet.get(),
+                        descriptor->timeBase()));
+            }
+
+            decodePacket(
+                callbacks.onFrame,
+                packet.get(),
+                frame.get());
         }
+
         av_packet_unref(packet.get());
     }
 
-    std::cout << "[rtsp] stopped after " << packetCount << " demuxed packets\n";
+    std::cout
+        << "[rtsp] stopped after "
+        << packetCount
+        << " demuxed packets\n";
+}
+
+void RtspDecoder::run(
+    const FrameCallback& onFrame) {
+    run(RtspDecoderCallbacks{
+        .onFrame = onFrame,
+    });
 }
 
 void RtspDecoder::requestStop() noexcept {
     stopRequested_.store(true, std::memory_order_release);
 }
 
-void RtspDecoder::openInput() {
+VideoStreamDescriptorPtr RtspDecoder::openInput() {
     close();
 
     formatContext_ = avformat_alloc_context();
@@ -148,6 +200,13 @@ void RtspDecoder::openInput() {
 
     std::cout << "[rtsp] connected: " << config_.url << '\n';
     std::cout << "[rtsp] coded size: " << parameters->width << 'x' << parameters->height << '\n';
+
+    const AVStream* videoStream =
+        formatContext_->streams[videoStreamIndex_];
+
+    return VideoStreamDescriptor::cloneFrom(
+        parameters,
+        videoStream->time_base);
 }
 
 void RtspDecoder::openDecoder() {
