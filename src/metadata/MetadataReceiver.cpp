@@ -3,10 +3,12 @@
 #include "metadata/MetadataProtocol.hpp"
 
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace reg::metadata {
 
@@ -113,7 +115,7 @@ MetadataReceiver::SequenceObservation MetadataReceiver::observeSequence(
     // Unsigned subtraction followed by signed interpretation gives a
     // wrap-aware ordering as long as no discontinuity spans >= 2^31 packets.
     const auto delta =
-        static_cast<std::int32_t>(sequence - highestSequence_);
+        std::bit_cast<std::int32_t>(sequence - highestSequence_);
 
     if (delta == 0) {
         return SequenceObservation::Duplicate;
