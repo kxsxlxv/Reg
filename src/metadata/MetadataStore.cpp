@@ -30,6 +30,10 @@ MetadataInsertResult MetadataStore::insert(FrameMetadataPtr metadata) {
 
     std::scoped_lock lock(mutex_);
 
+    if (discardedThrough_ && metadata->key <= *discardedThrough_) {
+        return MetadataInsertResult::TooLate;
+    }
+
     if (entries_.contains(metadata->key)) {
         return MetadataInsertResult::Duplicate;
     }
@@ -74,6 +78,30 @@ FrameMetadataPtr MetadataStore::take(media::FrameKey key) {
     return result;
 }
 
+void MetadataStore::discardThrough(media::FrameKey key) {
+    std::scoped_lock lock(mutex_);
+
+    if (!discardedThrough_ || *discardedThrough_ < key) {
+        discardedThrough_ = key;
+    }
+
+    if (!discardedThrough_) {
+        return;
+    }
+
+    for (auto it = entries_.begin(); it != entries_.end();) {
+        if (it->first <= *discardedThrough_) {
+            it = entries_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    std::erase_if(insertionOrder_, [this](const media::FrameKey& candidate) {
+        return candidate <= *discardedThrough_;
+    });
+}
+
 void MetadataStore::eraseEpoch(std::uint64_t streamEpoch) {
     std::scoped_lock lock(mutex_);
 
@@ -94,6 +122,7 @@ void MetadataStore::clear() {
     std::scoped_lock lock(mutex_);
     entries_.clear();
     insertionOrder_.clear();
+    discardedThrough_.reset();
 }
 
 std::size_t MetadataStore::size() const {
