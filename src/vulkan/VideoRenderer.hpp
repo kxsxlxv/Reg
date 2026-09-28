@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <vector>
 
+struct AVBufferRef;
+
 namespace reg::render {
 class VideoOverlayRecorder;
 }
@@ -34,6 +36,11 @@ public:
         const video::VideoFramePtr& frame,
         Swapchain& swapchain,
         render::VideoOverlayRecorder* overlay = nullptr);
+
+    // Called on the render thread before an FFmpeg decoder session is
+    // destroyed/reopened. Retires GPU work, releases AVFrame references and
+    // destroys image views that point into the old hardware-frame pool.
+    void resetVideoSession();
 
 private:
     struct VideoFormat {
@@ -98,6 +105,7 @@ private:
 
     VideoFormat videoFormat_{};
     bool videoFormatInitialized_{false};
+    AVBufferRef* retainedFramesContext_{nullptr};
 
     VkSamplerYcbcrConversion ycbcrConversion_{VK_NULL_HANDLE};
     VkSampler sampler_{VK_NULL_HANDLE};

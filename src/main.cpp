@@ -16,14 +16,17 @@
 #include "vulkan/VideoRenderer.hpp"
 #include "vulkan/VulkanContext.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -166,81 +169,254 @@ int main(int argc, char** argv) {
         std::atomic_uint64_t overlayBufferEvictions{0};
         std::atomic_uint64_t overlayMissingMetadataDrops{0};
 
+        std::atomic_bool shutdownRequested{false};
         std::atomic_bool decoderFinished{false};
+        std::atomic_bool decoderConnected{false};
         std::atomic_bool metadataFailed{false};
 
+        std::atomic_uint64_t decoderSessionGeneration{0};
+        std::atomic_uint64_t decoderReconnects{0};
+        std::atomic_uint64_t decoderCleanupRequest{0};
+        std::atomic_uint64_t decoderCleanupAck{0};
+
+        std::mutex cleanupMutex;
+        std::condition_variable cleanupCondition;
+
         std::mutex errorMutex;
-        std::exception_ptr decoderError;
+        std::string lastDecoderError;
         std::exception_ptr metadataError;
 
         std::jthread decodeThread([&] {
-            try {
-                decoder.run(
-                    reg::media::RtspDecoderCallbacks{
-                        .onStreamOpened =
-                            [&](reg::media::VideoStreamDescriptorPtr descriptor) {
-                                if (blackboxRecorder) {
-                                    blackboxRecorder->configure(
-                                        std::move(descriptor));
-                                }
-                            },
-                        .onCompressedPacket =
-                            [&](reg::media::CompressedVideoPacketPtr packet) {
-                                if (blackboxRecorder) {
-                                    static_cast<void>(
-                                        blackboxRecorder->submit(
-                                            std::move(packet)));
-                                }
-                            },
-                        .onFrame =
-                            [&](reg::video::VideoFramePtr frame) {
-                    rawMailbox.publish(frame);
+            int reconnectDelayMs =
+                options.reconnectInitialMs;
 
-                    if (options.overlayEnabled) {
-                        const auto pushResult = overlayFrames.push(frame);
-                        if (pushResult ==
-                            reg::video::OverlayPushResult::MissingIdentity) {
-                            overlayMissingIdentity.fetch_add(
-                                1,
-                                std::memory_order_relaxed);
-                        } else if (
-                            pushResult ==
-                            reg::video::OverlayPushResult::EvictedOldest) {
-                            overlayBufferEvictions.fetch_add(
-                                1,
-                                std::memory_order_relaxed);
-                        }
+            while (!shutdownRequested.load(
+                std::memory_order_acquire)) {
+                bool sessionOpened = false;
+
+                try {
+                    decoder.run(
+                        reg::media::RtspDecoderCallbacks{
+                            .onStreamOpened =
+                                [&](reg::media::VideoStreamDescriptorPtr descriptor) {
+                                    // The new session owns a fresh stream identity
+                                    // domain. Remove stale frame/metadata state before
+                                    // any frame from this session can be published.
+                                    rawMailbox.clear();
+                                    overlayFrames.clear();
+                                    metadataStore.clear();
+
+                                    if (blackboxRecorder) {
+                                        blackboxRecorder->configure(
+                                            std::move(descriptor));
+                                    }
+
+                                    sessionOpened = true;
+                                    reconnectDelayMs =
+                                        options.reconnectInitialMs;
+
+                                    decoderConnected.store(
+                                        true,
+                                        std::memory_order_release);
+
+                                    decoderSessionGeneration.fetch_add(
+                                        1,
+                                        std::memory_order_acq_rel);
+
+                                    std::cout
+                                        << "[watchdog] RTSP session opened\n";
+                                },
+                            .onCompressedPacket =
+                                [&](reg::media::CompressedVideoPacketPtr packet) {
+                                    if (blackboxRecorder) {
+                                        static_cast<void>(
+                                            blackboxRecorder->submit(
+                                                std::move(packet)));
+                                    }
+                                },
+                            .onFrame =
+                                [&](reg::video::VideoFramePtr frame) {
+                                    rawMailbox.publish(frame);
+
+                                    if (options.overlayEnabled) {
+                                        const auto pushResult =
+                                            overlayFrames.push(frame);
+
+                                        if (pushResult ==
+                                            reg::video::OverlayPushResult::
+                                                MissingIdentity) {
+                                            overlayMissingIdentity.fetch_add(
+                                                1,
+                                                std::memory_order_relaxed);
+                                        } else if (
+                                            pushResult ==
+                                            reg::video::OverlayPushResult::
+                                                EvictedOldest) {
+                                            overlayBufferEvictions.fetch_add(
+                                                1,
+                                                std::memory_order_relaxed);
+                                        }
+                                    }
+
+                                    const auto count =
+                                        decodedFrames.fetch_add(
+                                            1,
+                                            std::memory_order_relaxed) +
+                                        1;
+
+                                    if (count == 1 ||
+                                        count % 120 == 0) {
+                                        std::cout
+                                            << "[decoder] frame="
+                                            << count
+                                            << " size="
+                                            << frame->width()
+                                            << 'x'
+                                            << frame->height();
+
+                                        if (const auto identity =
+                                                frame->identity()) {
+                                            std::cout
+                                                << " epoch="
+                                                << identity->key.streamEpoch
+                                                << " source_frame="
+                                                << identity->key.frameId;
+                                        } else {
+                                            std::cout
+                                                << " sei_frame_id=absent";
+                                        }
+
+                                        std::cout << '\n';
+                                    }
+                                },
+                        });
+
+                    decoderConnected.store(
+                        false,
+                        std::memory_order_release);
+
+                    if (shutdownRequested.load(
+                            std::memory_order_acquire)) {
+                        break;
                     }
 
-                    const auto count =
-                        decodedFrames.fetch_add(
+                    {
+                        std::scoped_lock lock(errorMutex);
+                        lastDecoderError =
+                            "RTSP decoder session ended unexpectedly";
+                    }
+                } catch (const std::exception& error) {
+                    decoderConnected.store(
+                        false,
+                        std::memory_order_release);
+
+                    if (shutdownRequested.load(
+                            std::memory_order_acquire)) {
+                        break;
+                    }
+
+                    {
+                        std::scoped_lock lock(errorMutex);
+                        lastDecoderError = error.what();
+                    }
+
+                    std::cerr
+                        << "[watchdog] RTSP session failed: "
+                        << error.what()
+                        << '\n';
+                } catch (...) {
+                    decoderConnected.store(
+                        false,
+                        std::memory_order_release);
+
+                    if (shutdownRequested.load(
+                            std::memory_order_acquire)) {
+                        break;
+                    }
+
+                    {
+                        std::scoped_lock lock(errorMutex);
+                        lastDecoderError =
+                            "unknown RTSP decoder failure";
+                    }
+
+                    std::cerr
+                        << "[watchdog] RTSP session failed: unknown error\n";
+                }
+
+                if (shutdownRequested.load(
+                        std::memory_order_acquire)) {
+                    break;
+                }
+
+                if (sessionOpened) {
+                    const std::uint64_t cleanupToken =
+                        decoderCleanupRequest.fetch_add(
                             1,
-                            std::memory_order_relaxed) +
+                            std::memory_order_acq_rel) +
                         1;
 
-                    if (count == 1 || count % 120 == 0) {
-                        std::cout << "[decoder] frame=" << count
-                                  << " size="
-                                  << frame->width() << 'x'
-                                  << frame->height();
+                    std::unique_lock cleanupLock(
+                        cleanupMutex);
 
-                        if (const auto identity = frame->identity()) {
-                            std::cout
-                                << " epoch="
-                                << identity->key.streamEpoch
-                                << " source_frame="
-                                << identity->key.frameId;
-                        } else {
-                            std::cout << " sei_frame_id=absent";
-                        }
-                        std::cout << '\n';
+                    cleanupCondition.wait(
+                        cleanupLock,
+                        [&] {
+                            return shutdownRequested.load(
+                                       std::memory_order_acquire) ||
+                                   decoderCleanupAck.load(
+                                       std::memory_order_acquire) >=
+                                       cleanupToken;
+                        });
+
+                    if (shutdownRequested.load(
+                            std::memory_order_acquire)) {
+                        break;
                     }
-                },
-                    });
-            } catch (...) {
-                std::scoped_lock lock(errorMutex);
-                decoderError = std::current_exception();
+                }
+
+                const auto reconnectNumber =
+                    decoderReconnects.fetch_add(
+                        1,
+                        std::memory_order_relaxed) +
+                    1;
+
+                std::cerr
+                    << "[watchdog] reconnect="
+                    << reconnectNumber
+                    << " delay_ms="
+                    << reconnectDelayMs
+                    << '\n';
+
+                constexpr int sleepQuantumMs = 25;
+                int sleptMs = 0;
+
+                while (sleptMs < reconnectDelayMs &&
+                       !shutdownRequested.load(
+                           std::memory_order_acquire)) {
+                    const int remaining =
+                        reconnectDelayMs - sleptMs;
+                    const int step =
+                        std::min(
+                            remaining,
+                            sleepQuantumMs);
+
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds{step});
+                    sleptMs += step;
+                }
+
+                if (!sessionOpened) {
+                    reconnectDelayMs =
+                        std::min(
+                            reconnectDelayMs * 2,
+                            options.reconnectMaxMs);
+                }
             }
+
+            decoderConnected.store(
+                false,
+                std::memory_order_release);
 
             decoderFinished.store(
                 true,
@@ -265,7 +441,12 @@ int main(int argc, char** argv) {
         }
 
         const auto stopAndJoin = [&] {
+            shutdownRequested.store(
+                true,
+                std::memory_order_release);
+
             decoder.requestStop();
+            cleanupCondition.notify_all();
 
             if (metadataReceiver) {
                 metadataReceiver->requestStop();
@@ -286,6 +467,7 @@ int main(int argc, char** argv) {
         reg::video::VideoFramePtr lastRawPresented;
         std::optional<reg::video::SynchronizedFrame>
             pendingOverlayFrame;
+        std::uint64_t observedSessionGeneration{0};
 
         try {
             while (!decoderFinished.load(
@@ -300,6 +482,49 @@ int main(int argc, char** argv) {
                 }
 
                 bool didWork = false;
+
+                const std::uint64_t cleanupRequest =
+                    decoderCleanupRequest.load(
+                        std::memory_order_acquire);
+
+                if (cleanupRequest >
+                    decoderCleanupAck.load(
+                        std::memory_order_acquire)) {
+                    // No new decoder session is allowed to open until this
+                    // render-thread cleanup is acknowledged.
+                    rawMailbox.clear();
+                    overlayFrames.clear();
+                    metadataStore.clear();
+
+                    pendingOverlayFrame.reset();
+                    lastRawPresented.reset();
+                    trackHistory.clear();
+
+                    rawRenderer.resetVideoSession();
+                    if (overlayRenderer) {
+                        overlayRenderer->resetVideoSession();
+                    }
+
+                    decoderCleanupAck.store(
+                        cleanupRequest,
+                        std::memory_order_release);
+                    cleanupCondition.notify_all();
+                    didWork = true;
+                }
+
+                const std::uint64_t sessionGeneration =
+                    decoderSessionGeneration.load(
+                        std::memory_order_acquire);
+
+                if (sessionGeneration !=
+                    observedSessionGeneration) {
+                    observedSessionGeneration =
+                        sessionGeneration;
+                    pendingOverlayFrame.reset();
+                    lastRawPresented.reset();
+                    trackHistory.clear();
+                    didWork = true;
+                }
 
                 const auto latest = rawMailbox.latest();
                 if (latest && latest != lastRawPresented) {
@@ -440,11 +665,32 @@ int main(int argc, char** argv) {
 
         {
             std::scoped_lock lock(errorMutex);
-            if (decoderError) {
-                std::rethrow_exception(decoderError);
-            }
             if (metadataError) {
                 std::rethrow_exception(metadataError);
+            }
+        }
+
+        std::cout
+            << "[probe] RTSP sessions="
+            << decoderSessionGeneration.load(
+                std::memory_order_relaxed)
+            << " reconnects="
+            << decoderReconnects.load(
+                std::memory_order_relaxed)
+            << " connected="
+            << (decoderConnected.load(
+                    std::memory_order_relaxed)
+                    ? "yes"
+                    : "no")
+            << '\n';
+
+        {
+            std::scoped_lock lock(errorMutex);
+            if (!lastDecoderError.empty()) {
+                std::cout
+                    << "[probe] last RTSP error: "
+                    << lastDecoderError
+                    << '\n';
             }
         }
 

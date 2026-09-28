@@ -5,6 +5,7 @@
 #include "vulkan/VulkanContext.hpp"
 
 extern "C" {
+#include <libavutil/buffer.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vulkan.h>
 #include <libavutil/pixfmt.h>
@@ -94,6 +95,23 @@ VideoRenderer::~VideoRenderer() {
     }
     destroyVideoResources();
     destroyCommandResources();
+}
+
+void VideoRenderer::resetVideoSession() {
+    if (vulkan_.device() == VK_NULL_HANDLE) {
+        return;
+    }
+
+    checkVk(
+        vkQueueWaitIdle(
+            vulkan_.graphicsQueue().handle),
+        "vkQueueWaitIdle(video session reset)");
+
+    for (auto& slot : frameSlots_) {
+        slot.retainedFrame.reset();
+    }
+
+    destroyVideoResources();
 }
 
 void VideoRenderer::createCommandResources() {
@@ -226,11 +244,27 @@ VideoRenderer::VideoFormat VideoRenderer::describeVideoFormat(
 
 void VideoRenderer::ensureVideoResources(const video::VideoFrame& frame) {
     const VideoFormat format = describeVideoFormat(frame);
-    if (videoFormatInitialized_ && format == videoFormat_) {
+
+    AVFrame* avFrame = frame.avFrame();
+    if (avFrame == nullptr || avFrame->hw_frames_ctx == nullptr) {
+        throw std::runtime_error("Video frame has no hardware-frame pool identity");
+    }
+
+    const bool sameFramePool =
+        retainedFramesContext_ != nullptr &&
+        retainedFramesContext_->data ==
+            avFrame->hw_frames_ctx->data;
+
+    if (videoFormatInitialized_ &&
+        format == videoFormat_ &&
+        sameFramePool) {
         return;
     }
 
-    checkVk(vkQueueWaitIdle(vulkan_.graphicsQueue().handle), "vkQueueWaitIdle(video format change)");
+    checkVk(
+        vkQueueWaitIdle(vulkan_.graphicsQueue().handle),
+        "vkQueueWaitIdle(video frame-pool change)");
+
     destroyVideoResources();
     createVideoResources(frame, format);
 
@@ -245,6 +279,20 @@ void VideoRenderer::ensureVideoResources(const video::VideoFrame& frame) {
 void VideoRenderer::createVideoResources(
     const video::VideoFrame& frame,
     const VideoFormat& format) {
+    if (frame.avFrame() == nullptr ||
+        frame.avFrame()->hw_frames_ctx == nullptr) {
+        throw std::runtime_error(
+            "Cannot retain missing FFmpeg hardware-frame context");
+    }
+
+    retainedFramesContext_ =
+        av_buffer_ref(
+            frame.avFrame()->hw_frames_ctx);
+
+    if (retainedFramesContext_ == nullptr) {
+        throw std::bad_alloc{};
+    }
+
     VkSamplerYcbcrConversionCreateInfo conversionInfo{
         VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
     conversionInfo.format = format.format;
@@ -364,6 +412,10 @@ void VideoRenderer::destroyVideoResources() {
         vkDestroySamplerYcbcrConversion(vulkan_.device(), ycbcrConversion_, nullptr);
         ycbcrConversion_ = VK_NULL_HANDLE;
     }
+
+    // Cached VkImageView objects above reference VkImage objects owned by this
+    // AVHWFramesContext. Release the FFmpeg pool only after all views are gone.
+    av_buffer_unref(&retainedFramesContext_);
 
     videoFormat_ = {};
     videoFormatInitialized_ = false;
