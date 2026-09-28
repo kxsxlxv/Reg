@@ -47,6 +47,12 @@ struct DecodeResult {
 
 std::uint32_t crc32c(std::span<const std::uint8_t> bytes) noexcept;
 
+std::size_t encodedFrameMetadataSize(const FrameMetadata& metadata);
+
+std::size_t encodeFrameMetadataInto(
+    const FrameMetadata& metadata,
+    std::span<std::uint8_t> destination);
+
 std::vector<std::uint8_t> encodeFrameMetadata(const FrameMetadata& metadata);
 
 DecodeResult decodeFrameMetadata(
