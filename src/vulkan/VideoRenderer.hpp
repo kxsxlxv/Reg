@@ -49,7 +49,6 @@ private:
     struct FrameSlot {
         VkCommandBuffer commandBuffer{VK_NULL_HANDLE};
         VkSemaphore imageAvailable{VK_NULL_HANDLE};
-        VkSemaphore renderFinished{VK_NULL_HANDLE};
         VkFence fence{VK_NULL_HANDLE};
         video::VideoFramePtr retainedFrame;
     };
@@ -72,6 +71,7 @@ private:
     VkShaderModule loadShaderModule(const char* filename) const;
 
     void syncSwapchainState(const Swapchain& swapchain);
+    void destroySwapchainSyncResources();
     void recordSwapchainToColorBarrier(
         VkCommandBuffer commandBuffer,
         VkImage image,
@@ -104,6 +104,7 @@ private:
 
     VkSwapchainKHR observedSwapchain_{VK_NULL_HANDLE};
     std::vector<VkImageLayout> swapchainImageLayouts_;
+    std::vector<VkSemaphore> renderFinishedSemaphores_;
 };
 
 } // namespace reg::vulkan
