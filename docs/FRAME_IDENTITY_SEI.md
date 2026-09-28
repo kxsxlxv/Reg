@@ -112,16 +112,52 @@ The first two functions define the project payload wire contract.
 
 Do not hand-build the payload layout in several places.
 
-The UNIGINE/source integration should:
+The source integration must:
 
 1. assign `stream_epoch` once per logical stream session;
-2. increment `frame_id` for each rendered source frame;
-3. call `buildFrameIdentitySeiNal()` using the framing expected by the encoder/packetizer;
+2. increment `frame_id` for each encoded source access unit that is published;
+3. call `buildFrameIdentitySeiNal()` or the shared Annex-B access-unit injector;
 4. insert the returned SEI NAL into the **same H.264 access unit**, before that frame's VCL NAL units;
-5. preserve the identity through the RTSP stream sent to both Viewer and Jetson.
+5. preserve the augmented bitstream through the RTSP stream sent to both Viewer and Jetson.
 
 The builder emits SEI payload type 5 (`user_data_unregistered`), payload size 48 bytes (16-byte UUID + 32-byte Reg payload), RBSP trailing bits, and all required emulation-prevention bytes.
 
+For Annex-B encoded frames, use:
+
+```cpp
+reg::source::FrameIdentityAccessUnitInjector injector;
+std::vector<std::uint8_t> augmented;
+
+const auto identity =
+    injector.injectNext(
+        encoded_access_unit,
+        source_time_ns,
+        augmented);
+```
+
+The injector preserves existing AUD/SPS/PPS/SEI prefix NAL ordering and inserts
+the Reg SEI immediately before the first VCL NAL.
+
 Do not insert the SEI after the following frame has already begun. Exact synchronization assumes the SEI belongs to the same source frame as the VCL NAL units that follow it.
 
-The exact encoder API hook depends on the H.264 encoder/server implementation and is intentionally outside the portable Viewer core.
+### UNIGINE 2.22 RTSPStreamer
+
+The supplied UNIGINE 2.22 documentation establishes a concrete post-encode
+boundary:
+
+`RTSPStreamer::addStreamFrameEncodedCallback()` receives each encoded H.264
+frame as Annex-B bytes plus a presentation timestamp on the encoder thread.
+
+The callback buffer is read-only and valid only during the callback. The public
+API does not document a way to replace the bytes sent by RTSPStreamer's built-in
+live555 server.
+
+Therefore, with the documented public API, a Reg-compliant source must either:
+
+- run RTSPStreamer with its built-in server disabled, inject FrameIdentity in
+  the encoded callback, and republish the augmented Annex-B stream; or
+- use a vendor/plugin implementation hook that inserts the SEI before the
+  built-in live555 queue.
+
+See `docs/UNIGINE_RTSPSTREAMER_INTEGRATION.md` for the exact API boundary and
+integration topology.
