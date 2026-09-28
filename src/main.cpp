@@ -608,8 +608,39 @@ int main(int argc, char** argv) {
         std::uint64_t observedSessionGeneration{0};
 
         try {
-            while (!decoderFinished.load(
-                std::memory_order_acquire)) {
+            while (true) {
+                const bool decodeFinished =
+                    decoderFinished.load(
+                        std::memory_order_acquire);
+
+                if (decodeFinished) {
+                    if (!options.replayMode()) {
+                        break;
+                    }
+
+                    if (replayFailed.load(
+                            std::memory_order_acquire)) {
+                        break;
+                    }
+
+                    const auto finalRaw =
+                        rawMailbox.latest();
+
+                    const bool rawPending =
+                        finalRaw &&
+                        finalRaw != lastRawPresented;
+
+                    const bool overlayPending =
+                        options.overlayEnabled &&
+                        (pendingOverlayFrame.has_value() ||
+                         overlayFrames.size() != 0);
+
+                    if (!rawPending &&
+                        !overlayPending) {
+                        break;
+                    }
+                }
+
                 if (platform.pollQuitRequested()) {
                     break;
                 }
@@ -803,13 +834,24 @@ int main(int argc, char** argv) {
 
         {
             std::scoped_lock lock(errorMutex);
+
             if (metadataError) {
                 std::rethrow_exception(metadataError);
+            }
+
+            if (replayFailed.load(
+                    std::memory_order_acquire)) {
+                throw std::runtime_error(
+                    lastDecoderError.empty()
+                        ? "recorded video replay failed"
+                        : lastDecoderError);
             }
         }
 
         std::cout
-            << "[probe] RTSP sessions="
+            << (options.replayMode()
+                    ? "[probe] replay sessions="
+                    : "[probe] RTSP sessions=")
             << decoderSessionGeneration.load(
                 std::memory_order_relaxed)
             << " reconnects="
