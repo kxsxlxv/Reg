@@ -6,8 +6,10 @@
 #include "metadata/TrackHistory.hpp"
 #include "platform/SDLPlatform.hpp"
 #include "render/ImGuiOverlayRenderer.hpp"
+#include "render/ImGuiTelemetryRenderer.hpp"
 #include "render/TargetOverlayBuilder.hpp"
 #include "recorder/BlackboxRecorder.hpp"
+#include "telemetry/TelemetryModel.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 #include "video/RawFrameMailbox.hpp"
@@ -51,6 +53,7 @@ int main(int argc, char** argv) {
             reg::vulkan::PresentPolicy::LowLatencyTearingAllowed);
 
         std::unique_ptr<reg::vulkan::RenderWindow> overlayWindow;
+        std::unique_ptr<reg::vulkan::RenderWindow> telemetryWindow;
 
         if (options.overlayEnabled) {
             SDL_Window* overlaySdlWindow = platform.createVulkanWindow(
@@ -62,6 +65,21 @@ int main(int argc, char** argv) {
                 vulkan,
                 overlaySdlWindow,
                 reg::vulkan::PresentPolicy::Stable);
+        }
+
+        if (options.telemetryEnabled) {
+            SDL_Window* telemetrySdlWindow =
+                platform.createVulkanWindow(
+                    "Reg - Telemetry",
+                    1280,
+                    720);
+
+            telemetryWindow =
+                std::make_unique<reg::vulkan::RenderWindow>(
+                    vulkan,
+                    telemetrySdlWindow,
+                    reg::vulkan::PresentPolicy::
+                        LowLatencyTearingAllowed);
         }
 
         reg::media::VulkanHwDevice hwDevice(vulkan);
@@ -124,6 +142,16 @@ int main(int argc, char** argv) {
         std::unique_ptr<reg::vulkan::VideoRenderer> overlayRenderer;
         std::unique_ptr<reg::render::ImGuiOverlayRenderer>
             overlaySceneRenderer;
+        std::unique_ptr<reg::render::ImGuiTelemetryRenderer>
+            telemetryRenderer;
+
+        reg::telemetry::TelemetryModel telemetryModel(
+            std::chrono::minutes{5},
+            std::chrono::milliseconds{250},
+            4096);
+        telemetryModel.log(
+            reg::telemetry::Severity::Info,
+            "Application started");
 
         reg::metadata::TrackHistory trackHistory(
             std::chrono::seconds{5},
@@ -141,6 +169,14 @@ int main(int argc, char** argv) {
                     reg::render::ImGuiOverlayRenderer>(
                         vulkan,
                         overlayWindow->swapchain());
+        }
+
+        if (options.telemetryEnabled) {
+            telemetryRenderer =
+                std::make_unique<
+                    reg::render::ImGuiTelemetryRenderer>(
+                        vulkan,
+                        telemetryWindow->swapchain());
         }
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
