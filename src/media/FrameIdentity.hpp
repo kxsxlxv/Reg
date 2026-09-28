@@ -4,6 +4,8 @@
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <cstddef>
+#include <functional>
 
 struct AVFrame;
 
@@ -14,6 +16,14 @@ struct FrameKey {
     std::uint64_t frameId{};
 
     auto operator<=>(const FrameKey&) const = default;
+};
+
+struct FrameKeyHash {
+    std::size_t operator()(const FrameKey& key) const noexcept {
+        const auto h1 = std::hash<std::uint64_t>{}(key.streamEpoch);
+        const auto h2 = std::hash<std::uint64_t>{}(key.frameId);
+        return h1 ^ (h2 + static_cast<std::size_t>(0x9e3779b9U) + (h1 << 6U) + (h1 >> 2U));
+    }
 };
 
 struct SourceFrameIdentity {

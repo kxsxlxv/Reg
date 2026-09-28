@@ -125,4 +125,27 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
+
+    add_executable(reg_frame_sync_tests
+        tests/frame_sync_tests.cpp
+        src/metadata/Protocol.cpp
+        src/metadata/MetadataStore.cpp
+        src/metadata/MetadataReceiver.cpp
+        src/platform/UdpSocket.cpp
+        src/video/OverlayFrameBuffer.cpp
+        src/video/FrameSynchronizer.cpp
+    )
+    target_include_directories(reg_frame_sync_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_frame_sync_tests PRIVATE FFmpeg::avutil Vulkan::Vulkan)
+    if(WIN32)
+        target_link_libraries(reg_frame_sync_tests PRIVATE ws2_32)
+    endif()
+
+    if(MSVC)
+        target_compile_options(reg_frame_sync_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_frame_sync_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME frame_sync COMMAND reg_frame_sync_tests)
 endif()
