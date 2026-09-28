@@ -3,6 +3,7 @@
 #include "metadata/MetadataStore.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 
+#include <cstddef>
 #include <memory>
 
 namespace reg::video {
@@ -25,6 +26,7 @@ public:
         media::FrameKey key{};
         PayloadPtr frame;
         metadata::FrameMetadataPtr metadata;
+        std::size_t droppedFrames{};
     };
 
     FrameSynchronizer(
@@ -34,27 +36,37 @@ public:
           metadata_(metadata) {}
 
     Result next(TimePoint now) {
-        auto entry = video_.popReady(now);
-        if (!entry) {
-            return {};
-        }
+        Result result{};
+        std::size_t dropped = 0;
 
-        auto frameMetadata = metadata_.take(entry->key);
+        while (true) {
+            auto entry = video_.popReady(now);
+            if (!entry) {
+                if (dropped != 0) {
+                    result.action = SyncAction::Drop;
+                    result.droppedFrames = dropped;
+                }
+                return result;
+            }
 
-        if (!frameMetadata) {
+            auto frameMetadata = metadata_.take(entry->key);
+            metadata_.discardThrough(entry->key);
+
+            if (!frameMetadata) {
+                ++dropped;
+                result.key = entry->key;
+                result.frame = std::move(entry->payload);
+                continue;
+            }
+
             return Result{
-                .action = SyncAction::Drop,
+                .action = SyncAction::Present,
                 .key = entry->key,
                 .frame = std::move(entry->payload),
+                .metadata = std::move(frameMetadata),
+                .droppedFrames = dropped,
             };
         }
-
-        return Result{
-            .action = SyncAction::Present,
-            .key = entry->key,
-            .frame = std::move(entry->payload),
-            .metadata = std::move(frameMetadata),
-        };
     }
 
 private:
