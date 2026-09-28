@@ -6,8 +6,10 @@
 #include "metadata/TrackHistory.hpp"
 #include "platform/SDLPlatform.hpp"
 #include "render/ImGuiOverlayRenderer.hpp"
+#include "render/ImGuiTelemetryRenderer.hpp"
 #include "render/TargetOverlayBuilder.hpp"
 #include "recorder/BlackboxRecorder.hpp"
+#include "telemetry/TelemetryModel.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 #include "video/RawFrameMailbox.hpp"
@@ -51,6 +53,7 @@ int main(int argc, char** argv) {
             reg::vulkan::PresentPolicy::LowLatencyTearingAllowed);
 
         std::unique_ptr<reg::vulkan::RenderWindow> overlayWindow;
+        std::unique_ptr<reg::vulkan::RenderWindow> telemetryWindow;
 
         if (options.overlayEnabled) {
             SDL_Window* overlaySdlWindow = platform.createVulkanWindow(
@@ -62,6 +65,21 @@ int main(int argc, char** argv) {
                 vulkan,
                 overlaySdlWindow,
                 reg::vulkan::PresentPolicy::Stable);
+        }
+
+        if (options.telemetryEnabled) {
+            SDL_Window* telemetrySdlWindow =
+                platform.createVulkanWindow(
+                    "Reg - Telemetry",
+                    1280,
+                    720);
+
+            telemetryWindow =
+                std::make_unique<reg::vulkan::RenderWindow>(
+                    vulkan,
+                    telemetrySdlWindow,
+                    reg::vulkan::PresentPolicy::
+                        LowLatencyTearingAllowed);
         }
 
         reg::media::VulkanHwDevice hwDevice(vulkan);
@@ -124,6 +142,16 @@ int main(int argc, char** argv) {
         std::unique_ptr<reg::vulkan::VideoRenderer> overlayRenderer;
         std::unique_ptr<reg::render::ImGuiOverlayRenderer>
             overlaySceneRenderer;
+        std::unique_ptr<reg::render::ImGuiTelemetryRenderer>
+            telemetryRenderer;
+
+        reg::telemetry::TelemetryModel telemetryModel(
+            std::chrono::minutes{5},
+            std::chrono::milliseconds{250},
+            4096);
+        telemetryModel.log(
+            reg::telemetry::Severity::Info,
+            "Application started");
 
         reg::metadata::TrackHistory trackHistory(
             std::chrono::seconds{5},
@@ -141,6 +169,14 @@ int main(int argc, char** argv) {
                     reg::render::ImGuiOverlayRenderer>(
                         vulkan,
                         overlayWindow->swapchain());
+        }
+
+        if (options.telemetryEnabled) {
+            telemetryRenderer =
+                std::make_unique<
+                    reg::render::ImGuiTelemetryRenderer>(
+                        vulkan,
+                        telemetryWindow->swapchain());
         }
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
@@ -222,6 +258,10 @@ int main(int argc, char** argv) {
                                     decoderSessionGeneration.fetch_add(
                                         1,
                                         std::memory_order_acq_rel);
+
+                                    telemetryModel.log(
+                                        reg::telemetry::Severity::Info,
+                                        "RTSP session opened");
 
                                     std::cout
                                         << "[watchdog] RTSP session opened\n";
@@ -305,6 +345,10 @@ int main(int argc, char** argv) {
                         lastDecoderError =
                             "RTSP decoder session ended unexpectedly";
                     }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Warning,
+                        "RTSP decoder session ended unexpectedly");
                 } catch (const std::exception& error) {
                     decoderConnected.store(
                         false,
@@ -319,6 +363,11 @@ int main(int argc, char** argv) {
                         std::scoped_lock lock(errorMutex);
                         lastDecoderError = error.what();
                     }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Warning,
+                        std::string("RTSP session failed: ") +
+                            error.what());
 
                     std::cerr
                         << "[watchdog] RTSP session failed: "
@@ -339,6 +388,10 @@ int main(int argc, char** argv) {
                         lastDecoderError =
                             "unknown RTSP decoder failure";
                     }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Error,
+                        "RTSP session failed: unknown error");
 
                     std::cerr
                         << "[watchdog] RTSP session failed: unknown error\n";
@@ -380,6 +433,14 @@ int main(int argc, char** argv) {
                         1,
                         std::memory_order_relaxed) +
                     1;
+
+                telemetryModel.log(
+                    reg::telemetry::Severity::Info,
+                    std::string("RTSP reconnect attempt ") +
+                        std::to_string(reconnectNumber) +
+                        " after " +
+                        std::to_string(reconnectDelayMs) +
+                        " ms");
 
                 std::cerr
                     << "[watchdog] reconnect="
@@ -429,10 +490,32 @@ int main(int argc, char** argv) {
                 try {
                     metadataReceiver->run();
                 } catch (...) {
+                    const std::exception_ptr error =
+                        std::current_exception();
+
                     {
                         std::scoped_lock lock(errorMutex);
-                        metadataError = std::current_exception();
+                        metadataError = error;
                     }
+
+                    std::string message =
+                        "Metadata receiver failed";
+
+                    try {
+                        if (error) {
+                            std::rethrow_exception(error);
+                        }
+                    } catch (const std::exception& exception) {
+                        message += ": ";
+                        message += exception.what();
+                    } catch (...) {
+                        message += ": unknown error";
+                    }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Error,
+                        std::move(message));
+
                     metadataFailed.store(
                         true,
                         std::memory_order_release);
@@ -468,6 +551,9 @@ int main(int argc, char** argv) {
         std::optional<reg::video::SynchronizedFrame>
             pendingOverlayFrame;
         std::uint64_t observedSessionGeneration{0};
+        bool recorderFailureLogged{false};
+        auto nextTelemetryRenderAt =
+            std::chrono::steady_clock::now();
 
         try {
             while (!decoderFinished.load(
@@ -499,6 +585,10 @@ int main(int argc, char** argv) {
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
                     trackHistory.clear();
+                    telemetryModel.clearTargets();
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Info,
+                        "Retiring Vulkan video session resources");
 
                     rawRenderer.resetVideoSession();
                     if (overlayRenderer) {
@@ -523,6 +613,7 @@ int main(int argc, char** argv) {
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
                     trackHistory.clear();
+                    telemetryModel.clearTargets();
                     didWork = true;
                 }
 
@@ -590,6 +681,9 @@ int main(int argc, char** argv) {
                                     *decision.frame->metadata,
                                     std::chrono::steady_clock::now());
 
+                                telemetryModel.setTargets(
+                                    *decision.frame->metadata);
+
                                 pendingOverlayFrame =
                                     std::move(*decision.frame);
                                 break;
@@ -649,6 +743,103 @@ int main(int argc, char** argv) {
                             didWork = true;
                         }
                     }
+                }
+
+                const auto telemetryNow =
+                    std::chrono::steady_clock::now();
+
+                if (options.telemetryEnabled &&
+                    telemetryWindow &&
+                    telemetryRenderer &&
+                    telemetryNow >= nextTelemetryRenderAt) {
+                    reg::metadata::MetadataReceiverStats
+                        receiverStats{};
+
+                    if (metadataReceiver) {
+                        receiverStats =
+                            metadataReceiver->stats();
+                    }
+
+                    reg::recorder::BlackboxRecorderStats
+                        recorderStats{};
+
+                    if (blackboxRecorder) {
+                        recorderStats =
+                            blackboxRecorder->stats();
+
+                        if (recorderStats.failed &&
+                            !recorderFailureLogged) {
+                            recorderFailureLogged = true;
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Error,
+                                std::string("Blackbox recorder degraded: ") +
+                                    blackboxRecorder->lastError());
+                        }
+                    }
+
+                    telemetryModel.updateCounters(
+                        reg::telemetry::Counters{
+                            .rtspConnected =
+                                decoderConnected.load(
+                                    std::memory_order_relaxed),
+                            .decoderSessions =
+                                decoderSessionGeneration.load(
+                                    std::memory_order_relaxed),
+                            .reconnects =
+                                decoderReconnects.load(
+                                    std::memory_order_relaxed),
+                            .decodedFrames =
+                                decodedFrames.load(
+                                    std::memory_order_relaxed),
+                            .rawPresentedFrames =
+                                rawPresentedFrames.load(
+                                    std::memory_order_relaxed),
+                            .overlayPresentedFrames =
+                                overlayPresentedFrames.load(
+                                    std::memory_order_relaxed),
+                            .overlayMissingMetadataDrops =
+                                overlayMissingMetadataDrops.load(
+                                    std::memory_order_relaxed),
+                            .metadataPackets =
+                                receiverStats.packetsReceived,
+                            .metadataInvalid =
+                                receiverStats.packetsInvalid,
+                            .metadataDuplicates =
+                                receiverStats.packetDuplicates +
+                                receiverStats.frameDuplicates,
+                            .metadataSequenceGaps =
+                                receiverStats.sequenceGaps,
+                            .recorderPacketsWritten =
+                                recorderStats.packetsWritten,
+                            .recorderQueueDrops =
+                                recorderStats.packetsDroppedQueueFull,
+                            .recorderMetadataWritten =
+                                recorderStats.metadataWritten,
+                            .recorderMetadataQueueDrops =
+                                recorderStats.metadataDroppedQueueFull,
+                            .recorderFailures =
+                                recorderStats.failures,
+                            .overlayBufferDepth =
+                                overlayFrames.size(),
+                            .metadataStoreDepth =
+                                metadataStore.size(),
+                            .recorderQueueDepth =
+                                recorderStats.queueDepth,
+                        },
+                        telemetryNow);
+
+                    const auto telemetrySnapshot =
+                        telemetryModel.snapshot();
+
+                    if (telemetryRenderer->render(
+                            telemetrySnapshot,
+                            telemetryWindow->swapchain())) {
+                        didWork = true;
+                    }
+
+                    nextTelemetryRenderAt =
+                        telemetryNow +
+                        std::chrono::milliseconds{100};
                 }
 
                 if (!didWork) {

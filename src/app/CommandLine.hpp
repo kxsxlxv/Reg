@@ -25,6 +25,7 @@ struct CommandLineOptions {
     int reconnectInitialMs{250};
     int reconnectMaxMs{2000};
 
+    bool telemetryEnabled{true};
     bool validation{true};
 };
 

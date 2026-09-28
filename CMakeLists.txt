@@ -110,6 +110,8 @@ add_executable(reg_probe
     src/video/VideoTransform.cpp
     src/render/TargetOverlayBuilder.cpp
     src/render/ImGuiOverlayRenderer.cpp
+    src/render/ImGuiTelemetryRenderer.cpp
+    src/telemetry/TelemetryModel.cpp
     src/recorder/SegmentedMkvWriter.cpp
     src/recorder/MetadataJournal.cpp
     src/recorder/BlackboxRecorder.cpp
@@ -223,4 +225,18 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME blackbox_recorder COMMAND reg_blackbox_recorder_tests)
+
+    add_executable(reg_telemetry_model_tests
+        tests/telemetry_model_tests.cpp
+        src/telemetry/TelemetryModel.cpp
+    )
+    target_include_directories(reg_telemetry_model_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+    if(MSVC)
+        target_compile_options(reg_telemetry_model_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_telemetry_model_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME telemetry_model COMMAND reg_telemetry_model_tests)
 endif()
