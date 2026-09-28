@@ -243,6 +243,23 @@ endif()
 if(REG_BUILD_TESTS)
     enable_testing()
 
+    add_executable(reg_source_frame_identity_injector_tests
+        tests/source_frame_identity_injector_tests.cpp
+        src/media/FrameIdentity.cpp
+        src/media/FrameIdentitySei.cpp
+        src/source/FrameIdentityAccessUnitInjector.cpp
+    )
+    target_include_directories(reg_source_frame_identity_injector_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_source_frame_identity_injector_tests PRIVATE FFmpeg::avutil)
+
+    if(MSVC)
+        target_compile_options(reg_source_frame_identity_injector_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_source_frame_identity_injector_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME source_frame_identity_injector COMMAND reg_source_frame_identity_injector_tests)
+
     add_executable(reg_frame_identity_tests
         tests/frame_identity_tests.cpp
         src/media/FrameIdentity.cpp
