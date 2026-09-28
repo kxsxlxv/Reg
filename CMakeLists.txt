@@ -94,7 +94,9 @@ add_executable(reg_probe
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
     src/vulkan/VideoRenderer.cpp
+    src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
+    src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
     src/metadata/Protocol.cpp
@@ -108,6 +110,8 @@ add_executable(reg_probe
     src/video/VideoTransform.cpp
     src/render/TargetOverlayBuilder.cpp
     src/render/ImGuiOverlayRenderer.cpp
+    src/recorder/SegmentedMkvWriter.cpp
+    src/recorder/BlackboxRecorder.cpp
 )
 
 add_dependencies(reg_probe reg_shaders)
