@@ -91,7 +91,9 @@ void wrongFrameMetadataIsNeverReused() {
 
     const auto result = sync.next(t0 + 100ms);
     require(result.action == reg::video::SyncAction::Drop, "stale metadata was applied to a newer frame");
-    require(metadata.find(staleKey) != nullptr, "unrelated metadata should remain independently addressable");
+    require(
+        !metadata.find(staleKey),
+        "metadata behind the consumed-frame watermark should be pruned");
 }
 
 void streamEpochIsPartOfIdentity() {
