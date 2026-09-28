@@ -27,6 +27,7 @@ struct TargetMetadata {
 struct FrameMetadata {
     media::FrameKey key{};
     std::uint32_t packetSequence{};
+    std::uint16_t flags{};
     std::uint64_t cvBeginNs{};
     std::uint64_t cvEndNs{};
     std::chrono::steady_clock::time_point receivedAt{};
