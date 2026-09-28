@@ -73,8 +73,8 @@ void RtspDecoder::run(
     }
 
     // requestStop() is terminal for this decoder object. Never clear
-    // stopRequested_ here: a reconnect/replay supervisor must not reopen the
-    // input after application shutdown has begun.
+    // stopRequested_ here: watchdog/device-loss shutdown must not race an
+    // automatic reopen of the same decoder object.
     if (stopRequested_.load(
             std::memory_order_acquire)) {
         return;
@@ -160,8 +160,6 @@ void RtspDecoder::run(
 
         close();
     } catch (...) {
-        // Every reconnect/replay run starts with a fresh demuxer/decoder
-        // session. Never retain partially initialized codec state.
         close();
         throw;
     }

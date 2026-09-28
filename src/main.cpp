@@ -17,6 +17,7 @@
 #include "vulkan/RenderWindow.hpp"
 #include "vulkan/VideoRenderer.hpp"
 #include "vulkan/VulkanContext.hpp"
+#include "vulkan/VulkanError.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -32,10 +33,10 @@
 #include <thread>
 #include <utility>
 
-int main(int argc, char** argv) {
-    try {
-        const auto options = reg::app::parseCommandLine(argc, argv);
+namespace {
 
+int runApplication(
+    const reg::app::CommandLineOptions& options) {
         reg::platform::SDLPlatform platform;
 
         SDL_Window* rawSdlWindow = platform.createVulkanWindow(
@@ -1132,10 +1133,73 @@ int main(int argc, char** argv) {
         }
 
         return 0;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    reg::app::CommandLineOptions options;
+
+    try {
+        options =
+            reg::app::parseCommandLine(
+                argc,
+                argv);
     } catch (const std::exception& error) {
-        std::cerr << "fatal: " << error.what() << '\n';
+        std::cerr
+            << "fatal: "
+            << error.what()
+            << '\n';
+
         reg::app::printUsage(
-            argc > 0 ? argv[0] : "reg_probe");
+            argc > 0
+                ? argv[0]
+                : "reg_probe");
         return 1;
+    }
+
+    std::uint64_t deviceRecoveryAttempt = 0;
+    auto recoveryDelay =
+        std::chrono::milliseconds{500};
+
+    constexpr auto maxRecoveryDelay =
+        std::chrono::milliseconds{5000};
+
+    while (true) {
+        try {
+            return runApplication(options);
+        } catch (
+            const reg::vulkan::DeviceLostError&
+                error) {
+            ++deviceRecoveryAttempt;
+
+            std::cerr
+                << "[watchdog] Vulkan device lost: "
+                << error.what()
+                << "; rebuilding full GPU runtime, attempt="
+                << deviceRecoveryAttempt
+                << " delay_ms="
+                << recoveryDelay.count()
+                << '\n';
+
+            std::this_thread::sleep_for(
+                recoveryDelay);
+
+            recoveryDelay =
+                std::min(
+                    recoveryDelay * 2,
+                    maxRecoveryDelay);
+        } catch (const std::exception& error) {
+            std::cerr
+                << "fatal: "
+                << error.what()
+                << '\n';
+
+            reg::app::printUsage(
+                argc > 0
+                    ? argv[0]
+                    : "reg_probe");
+            return 1;
+        }
     }
 }
