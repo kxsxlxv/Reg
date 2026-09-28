@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
