@@ -17,8 +17,14 @@ struct AVPacket;
 
 namespace reg::media {
 
+enum class VideoInputMode {
+    RtspUdp,
+    File,
+};
+
 struct RtspDecoderConfig {
     std::string url;
+    VideoInputMode inputMode{VideoInputMode::RtspUdp};
     std::int64_t maxDelayUs{0};
     int reorderQueueSize{0};
     int extraHwFrames{32};

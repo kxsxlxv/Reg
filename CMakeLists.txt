@@ -113,6 +113,8 @@ add_executable(reg_probe
     src/recorder/SegmentedMkvWriter.cpp
     src/recorder/MetadataJournal.cpp
     src/recorder/BlackboxRecorder.cpp
+    src/replay/ReplayClock.cpp
+    src/replay/ReplayMetadataIndex.cpp
 )
 
 add_dependencies(reg_probe reg_shaders)
@@ -223,4 +225,21 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME blackbox_recorder COMMAND reg_blackbox_recorder_tests)
+
+    add_executable(reg_replay_tests
+        tests/replay_tests.cpp
+        src/metadata/Protocol.cpp
+        src/recorder/MetadataJournal.cpp
+        src/replay/ReplayClock.cpp
+        src/replay/ReplayMetadataIndex.cpp
+    )
+    target_include_directories(reg_replay_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+    if(MSVC)
+        target_compile_options(reg_replay_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_replay_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME replay COMMAND reg_replay_tests)
 endif()

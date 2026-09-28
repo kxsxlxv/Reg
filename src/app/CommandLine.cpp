@@ -40,6 +40,12 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
 
         if (arg == "--url" || arg == "--rtsp-url") {
             options.rtspUrl = requireValue(i, argc, argv, "--url");
+        } else if (arg == "--replay-mkv") {
+            options.replayMkv =
+                requireValue(i, argc, argv, "--replay-mkv");
+        } else if (arg == "--replay-metadata-dir") {
+            options.replayMetadataDirectory =
+                requireValue(i, argc, argv, "--replay-metadata-dir");
         } else if (arg == "--max-delay-us") {
             options.maxDelayUs = parseInteger<std::int64_t>(
                 requireValue(i, argc, argv, "--max-delay-us"), "--max-delay-us");
@@ -94,8 +100,27 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         }
     }
 
-    if (options.rtspUrl.empty()) {
-        throw std::runtime_error("RTSP URL is required. Use --url rtsp://...");
+    const bool hasRtsp =
+        !options.rtspUrl.empty();
+    const bool hasReplay =
+        !options.replayMkv.empty();
+
+    if (hasRtsp == hasReplay) {
+        throw std::runtime_error(
+            "Select exactly one input: --url rtsp://... or --replay-mkv FILE");
+    }
+
+    if (!hasReplay &&
+        !options.replayMetadataDirectory.empty()) {
+        throw std::runtime_error(
+            "--replay-metadata-dir requires --replay-mkv");
+    }
+
+    if (hasReplay) {
+        // Replaying the blackbox must not recursively record itself or wait
+        // for live UDP metadata. All metadata is already present on disk.
+        options.recorderEnabled = false;
+        options.overlayDelayMs = 0;
     }
     if (options.maxDelayUs < 0) {
         throw std::runtime_error("--max-delay-us must be >= 0");
@@ -141,8 +166,12 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
 
 void printUsage(const char* executableName) {
     std::cout
-        << "Usage: " << executableName << " --url rtsp://... [options]\n\n"
+        << "Usage:\n"
+        << "  " << executableName << " --url rtsp://... [options]\n"
+        << "  " << executableName << " --replay-mkv FILE [--replay-metadata-dir DIR] [options]\n\n"
         << "Options:\n"
+        << "  --replay-mkv FILE        Replay a recorded MKV through the Vulkan decoder\n"
+        << "  --replay-metadata-dir D  Directory containing .cvmj metadata journals\n"
         << "  --max-delay-us N         FFmpeg RTSP demux max_delay (default: 0)\n"
         << "  --reorder-queue-size N   RTP packet reorder queue size (default: 0)\n"
         << "  --extra-hw-frames N      Extra Vulkan decode surfaces (default: 32)\n"

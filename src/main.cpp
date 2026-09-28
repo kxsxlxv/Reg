@@ -8,6 +8,8 @@
 #include "render/ImGuiOverlayRenderer.hpp"
 #include "render/TargetOverlayBuilder.hpp"
 #include "recorder/BlackboxRecorder.hpp"
+#include "replay/ReplayClock.hpp"
+#include "replay/ReplayMetadataIndex.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 #include "video/RawFrameMailbox.hpp"
@@ -22,6 +24,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -66,10 +69,19 @@ int main(int argc, char** argv) {
 
         reg::media::VulkanHwDevice hwDevice(vulkan);
 
+        const std::string inputPath =
+            options.replayMode()
+                ? options.replayMkv
+                : options.rtspUrl;
+
         reg::media::RtspDecoder decoder(
             hwDevice.ref(),
             reg::media::RtspDecoderConfig{
-                .url = options.rtspUrl,
+                .url = inputPath,
+                .inputMode =
+                    options.replayMode()
+                        ? reg::media::VideoInputMode::File
+                        : reg::media::VideoInputMode::RtspUdp,
                 .maxDelayUs = options.maxDelayUs,
                 .reorderQueueSize = options.reorderQueueSize,
                 .extraHwFrames = options.extraHwFrames,
@@ -111,6 +123,48 @@ int main(int argc, char** argv) {
                     });
         }
 
+        std::unique_ptr<reg::replay::ReplayMetadataIndex>
+            replayMetadataIndex;
+
+        if (options.replayMode() &&
+            options.overlayEnabled) {
+            std::filesystem::path metadataDirectory;
+
+            if (!options.replayMetadataDirectory.empty()) {
+                metadataDirectory =
+                    options.replayMetadataDirectory;
+            } else {
+                metadataDirectory =
+                    std::filesystem::path(
+                        options.replayMkv)
+                        .parent_path();
+
+                if (metadataDirectory.empty()) {
+                    metadataDirectory =
+                        std::filesystem::current_path();
+                }
+            }
+
+            replayMetadataIndex =
+                std::make_unique<
+                    reg::replay::ReplayMetadataIndex>(
+                        reg::replay::ReplayMetadataIndex::
+                            loadDirectory(
+                                metadataDirectory));
+
+            const auto stats =
+                replayMetadataIndex->stats();
+
+            std::cout
+                << "[replay] metadata files="
+                << stats.filesLoaded
+                << " records="
+                << stats.recordsLoaded
+                << " duplicate_frame_keys="
+                << stats.duplicateFrameKeys
+                << '\n';
+        }
+
         reg::video::RawFrameMailbox rawMailbox;
         reg::video::OverlayFrameBuffer overlayFrames(
             std::chrono::milliseconds{options.overlayDelayMs},
@@ -144,7 +198,8 @@ int main(int argc, char** argv) {
         }
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
-        if (options.overlayEnabled) {
+        if (options.overlayEnabled &&
+            !options.replayMode()) {
             metadataReceiver =
                 std::make_unique<reg::metadata::MetadataReceiver>(
                     metadataStore,
@@ -173,6 +228,7 @@ int main(int argc, char** argv) {
         std::atomic_bool decoderFinished{false};
         std::atomic_bool decoderConnected{false};
         std::atomic_bool metadataFailed{false};
+        std::atomic_bool replayFailed{false};
 
         std::atomic_uint64_t decoderSessionGeneration{0};
         std::atomic_uint64_t decoderReconnects{0};
@@ -190,6 +246,8 @@ int main(int argc, char** argv) {
             int reconnectDelayMs =
                 options.reconnectInitialMs;
 
+            reg::replay::ReplayClock replayClock;
+
             while (!shutdownRequested.load(
                 std::memory_order_acquire)) {
                 bool sessionOpened = false;
@@ -205,6 +263,7 @@ int main(int argc, char** argv) {
                                     rawMailbox.clear();
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    replayClock.reset();
 
                                     if (blackboxRecorder) {
                                         blackboxRecorder->configure(
@@ -224,7 +283,9 @@ int main(int argc, char** argv) {
                                         std::memory_order_acq_rel);
 
                                     std::cout
-                                        << "[watchdog] RTSP session opened\n";
+                                        << (options.replayMode()
+                                                ? "[replay] decode session opened\n"
+                                                : "[watchdog] RTSP session opened\n");
                                 },
                             .onCompressedPacket =
                                 [&](reg::media::CompressedVideoPacketPtr packet) {
@@ -236,6 +297,59 @@ int main(int argc, char** argv) {
                                 },
                             .onFrame =
                                 [&](reg::video::VideoFramePtr frame) {
+                                    if (options.replayMode()) {
+                                        const auto identity =
+                                            frame->identity();
+
+                                        if (!identity) {
+                                            throw std::runtime_error(
+                                                "Replay frame is missing canonical FrameKey SEI");
+                                        }
+
+                                        const auto target =
+                                            replayClock.targetTime(
+                                                *identity,
+                                                std::chrono::steady_clock::now());
+
+                                        while (!shutdownRequested.load(
+                                                   std::memory_order_acquire)) {
+                                            const auto now =
+                                                std::chrono::steady_clock::now();
+
+                                            if (now >= target) {
+                                                break;
+                                            }
+
+                                            const auto remaining =
+                                                target - now;
+
+                                            const auto sleepSlice =
+                                                std::min(
+                                                    std::chrono::duration_cast<
+                                                        std::chrono::milliseconds>(
+                                                            remaining),
+                                                    std::chrono::milliseconds{5});
+
+                                            if (sleepSlice >
+                                                std::chrono::milliseconds::zero()) {
+                                                std::this_thread::sleep_for(
+                                                    sleepSlice);
+                                            } else {
+                                                std::this_thread::yield();
+                                            }
+                                        }
+
+                                        if (replayMetadataIndex) {
+                                            if (const auto metadata =
+                                                    replayMetadataIndex->find(
+                                                        identity->key)) {
+                                                static_cast<void>(
+                                                    metadataStore.insert(
+                                                        *metadata));
+                                            }
+                                        }
+                                    }
+
                                     rawMailbox.publish(frame);
 
                                     if (options.overlayEnabled) {
@@ -300,6 +414,12 @@ int main(int argc, char** argv) {
                         break;
                     }
 
+                    if (options.replayMode()) {
+                        std::cout
+                            << "[replay] reached end of recorded video\n";
+                        break;
+                    }
+
                     {
                         std::scoped_lock lock(errorMutex);
                         lastDecoderError =
@@ -321,9 +441,18 @@ int main(int argc, char** argv) {
                     }
 
                     std::cerr
-                        << "[watchdog] RTSP session failed: "
+                        << (options.replayMode()
+                                ? "[replay] decode failed: "
+                                : "[watchdog] RTSP session failed: ")
                         << error.what()
                         << '\n';
+
+                    if (options.replayMode()) {
+                        replayFailed.store(
+                            true,
+                            std::memory_order_release);
+                        break;
+                    }
                 } catch (...) {
                     decoderConnected.store(
                         false,
@@ -341,7 +470,16 @@ int main(int argc, char** argv) {
                     }
 
                     std::cerr
-                        << "[watchdog] RTSP session failed: unknown error\n";
+                        << (options.replayMode()
+                                ? "[replay] decode failed: unknown error\n"
+                                : "[watchdog] RTSP session failed: unknown error\n");
+
+                    if (options.replayMode()) {
+                        replayFailed.store(
+                            true,
+                            std::memory_order_release);
+                        break;
+                    }
                 }
 
                 if (shutdownRequested.load(
@@ -470,8 +608,39 @@ int main(int argc, char** argv) {
         std::uint64_t observedSessionGeneration{0};
 
         try {
-            while (!decoderFinished.load(
-                std::memory_order_acquire)) {
+            while (true) {
+                const bool decodeFinished =
+                    decoderFinished.load(
+                        std::memory_order_acquire);
+
+                if (decodeFinished) {
+                    if (!options.replayMode()) {
+                        break;
+                    }
+
+                    if (replayFailed.load(
+                            std::memory_order_acquire)) {
+                        break;
+                    }
+
+                    const auto finalRaw =
+                        rawMailbox.latest();
+
+                    const bool rawPending =
+                        finalRaw &&
+                        finalRaw != lastRawPresented;
+
+                    const bool overlayPending =
+                        options.overlayEnabled &&
+                        (pendingOverlayFrame.has_value() ||
+                         overlayFrames.size() != 0);
+
+                    if (!rawPending &&
+                        !overlayPending) {
+                        break;
+                    }
+                }
+
                 if (platform.pollQuitRequested()) {
                     break;
                 }
@@ -665,13 +834,24 @@ int main(int argc, char** argv) {
 
         {
             std::scoped_lock lock(errorMutex);
+
             if (metadataError) {
                 std::rethrow_exception(metadataError);
+            }
+
+            if (replayFailed.load(
+                    std::memory_order_acquire)) {
+                throw std::runtime_error(
+                    lastDecoderError.empty()
+                        ? "recorded video replay failed"
+                        : lastDecoderError);
             }
         }
 
         std::cout
-            << "[probe] RTSP sessions="
+            << (options.replayMode()
+                    ? "[probe] replay sessions="
+                    : "[probe] RTSP sessions=")
             << decoderSessionGeneration.load(
                 std::memory_order_relaxed)
             << " reconnects="
