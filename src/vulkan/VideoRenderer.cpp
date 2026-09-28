@@ -1091,6 +1091,37 @@ bool VideoRenderer::render(
         return false;
     }
 
+    std::optional<std::filesystem::path>
+        screenshotPath;
+
+    ScreenshotBuffer screenshotBuffer{};
+    bool captureThisFrame = false;
+
+    if (pendingScreenshot_) {
+        screenshotPath =
+            std::move(*pendingScreenshot_);
+        pendingScreenshot_.reset();
+
+        if (!swapchain.transferSourceSupported()) {
+            std::cerr
+                << "[capture] swapchain does not support VK_IMAGE_USAGE_TRANSFER_SRC_BIT; screenshot skipped\n";
+        } else {
+            try {
+                screenshotBuffer =
+                    createScreenshotBuffer(
+                        swapchain.extent());
+                captureThisFrame = true;
+            } catch (const DeviceLostError&) {
+                throw;
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "[capture] staging buffer creation failed: "
+                    << error.what()
+                    << '\n';
+            }
+        }
+    }
+
     checkVk(vkResetFences(vulkan_.device(), 1, &slot.fence), "vkResetFences");
     checkVk(vkResetCommandBuffer(slot.commandBuffer, 0), "vkResetCommandBuffer");
 
@@ -1162,9 +1193,43 @@ bool VideoRenderer::render(
 
         vkCmdEndRendering(slot.commandBuffer);
 
-        recordSwapchainToPresentBarrier(
-            slot.commandBuffer,
-            swapchain.image(imageIndex));
+        if (captureThisFrame) {
+            recordSwapchainToTransferBarrier(
+                slot.commandBuffer,
+                swapchain.image(imageIndex));
+
+            VkBufferImageCopy copyRegion{};
+            copyRegion.bufferOffset = 0;
+            copyRegion.bufferRowLength = 0;
+            copyRegion.bufferImageHeight = 0;
+            copyRegion.imageSubresource.aspectMask =
+                VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.imageSubresource.mipLevel = 0;
+            copyRegion.imageSubresource.baseArrayLayer = 0;
+            copyRegion.imageSubresource.layerCount = 1;
+            copyRegion.imageOffset = {0, 0, 0};
+            copyRegion.imageExtent = {
+                swapchain.extent().width,
+                swapchain.extent().height,
+                1,
+            };
+
+            vkCmdCopyImageToBuffer(
+                slot.commandBuffer,
+                swapchain.image(imageIndex),
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                screenshotBuffer.buffer,
+                1,
+                &copyRegion);
+
+            recordSwapchainTransferToPresentBarrier(
+                slot.commandBuffer,
+                swapchain.image(imageIndex));
+        } else {
+            recordSwapchainToPresentBarrier(
+                slot.commandBuffer,
+                swapchain.image(imageIndex));
+        }
 
         checkVk(vkEndCommandBuffer(slot.commandBuffer), "vkEndCommandBuffer");
 
@@ -1216,7 +1281,80 @@ bool VideoRenderer::render(
         frameAccess_.unlock(lockedFrame);
     } catch (...) {
         frameAccess_.unlock(lockedFrame);
+
+        if (captureThisFrame) {
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+        }
+
         throw;
+    }
+
+    if (captureThisFrame) {
+        try {
+            checkVk(
+                vkWaitForFences(
+                    vulkan_.device(),
+                    1,
+                    &slot.fence,
+                    VK_TRUE,
+                    UINT64_MAX),
+                "vkWaitForFences(screenshot)");
+
+            const auto pixels =
+                readScreenshotBuffer(
+                    screenshotBuffer);
+
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+
+            capture::PixelOrder pixelOrder;
+
+            if (swapchain.format() ==
+                VK_FORMAT_B8G8R8A8_UNORM) {
+                pixelOrder =
+                    capture::PixelOrder::Bgra8;
+            } else if (
+                swapchain.format() ==
+                VK_FORMAT_R8G8B8A8_UNORM) {
+                pixelOrder =
+                    capture::PixelOrder::Rgba8;
+            } else {
+                throw std::runtime_error(
+                    "unsupported swapchain format for screenshot");
+            }
+
+            try {
+                capture::writeBmp32(
+                    *screenshotPath,
+                    swapchain.extent().width,
+                    swapchain.extent().height,
+                    pixels,
+                    pixelOrder);
+
+                std::cout
+                    << "[capture] saved "
+                    << screenshotPath->string()
+                    << '\n';
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "[capture] file write failed: "
+                    << error.what()
+                    << '\n';
+            }
+        } catch (const DeviceLostError&) {
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+            throw;
+        } catch (const std::exception& error) {
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+
+            std::cerr
+                << "[capture] GPU readback failed: "
+                << error.what()
+                << '\n';
+        }
     }
 
     swapchainImageLayouts_.at(imageIndex) = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
