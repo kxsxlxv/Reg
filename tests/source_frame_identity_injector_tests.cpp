@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <initializer_list>
 #include <limits>
 #include <span>
 #include <stdexcept>
