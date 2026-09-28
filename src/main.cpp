@@ -8,6 +8,7 @@
 #include "render/ImGuiOverlayRenderer.hpp"
 #include "render/TargetOverlayBuilder.hpp"
 #include "recorder/BlackboxRecorder.hpp"
+#include "replay/ReplayMetadataIndex.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 #include "video/RawFrameMailbox.hpp"
@@ -22,6 +23,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -66,10 +68,19 @@ int main(int argc, char** argv) {
 
         reg::media::VulkanHwDevice hwDevice(vulkan);
 
+        const std::string inputPath =
+            options.replayMode()
+                ? options.replayMkv
+                : options.rtspUrl;
+
         reg::media::RtspDecoder decoder(
             hwDevice.ref(),
             reg::media::RtspDecoderConfig{
-                .url = options.rtspUrl,
+                .url = inputPath,
+                .inputMode =
+                    options.replayMode()
+                        ? reg::media::VideoInputMode::File
+                        : reg::media::VideoInputMode::RtspUdp,
                 .maxDelayUs = options.maxDelayUs,
                 .reorderQueueSize = options.reorderQueueSize,
                 .extraHwFrames = options.extraHwFrames,
@@ -111,6 +122,48 @@ int main(int argc, char** argv) {
                     });
         }
 
+        std::unique_ptr<reg::replay::ReplayMetadataIndex>
+            replayMetadataIndex;
+
+        if (options.replayMode() &&
+            options.overlayEnabled) {
+            std::filesystem::path metadataDirectory;
+
+            if (!options.replayMetadataDirectory.empty()) {
+                metadataDirectory =
+                    options.replayMetadataDirectory;
+            } else {
+                metadataDirectory =
+                    std::filesystem::path(
+                        options.replayMkv)
+                        .parent_path();
+
+                if (metadataDirectory.empty()) {
+                    metadataDirectory =
+                        std::filesystem::current_path();
+                }
+            }
+
+            replayMetadataIndex =
+                std::make_unique<
+                    reg::replay::ReplayMetadataIndex>(
+                        reg::replay::ReplayMetadataIndex::
+                            loadDirectory(
+                                metadataDirectory));
+
+            const auto stats =
+                replayMetadataIndex->stats();
+
+            std::cout
+                << "[replay] metadata files="
+                << stats.filesLoaded
+                << " records="
+                << stats.recordsLoaded
+                << " duplicate_frame_keys="
+                << stats.duplicateFrameKeys
+                << '\n';
+        }
+
         reg::video::RawFrameMailbox rawMailbox;
         reg::video::OverlayFrameBuffer overlayFrames(
             std::chrono::milliseconds{options.overlayDelayMs},
@@ -144,7 +197,8 @@ int main(int argc, char** argv) {
         }
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
-        if (options.overlayEnabled) {
+        if (options.overlayEnabled &&
+            !options.replayMode()) {
             metadataReceiver =
                 std::make_unique<reg::metadata::MetadataReceiver>(
                     metadataStore,
