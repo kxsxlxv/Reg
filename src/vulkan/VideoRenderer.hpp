@@ -9,6 +9,8 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <optional>
 #include <vector>
 
 struct AVBufferRef;
@@ -42,6 +44,16 @@ public:
     // destroys image views that point into the old hardware-frame pool.
     void resetVideoSession();
 
+    // Queues a one-shot capture of the next frame presented by this renderer.
+    // This is an explicit diagnostic readback and is never used by the normal
+    // decoded-video presentation path.
+    bool requestScreenshot(
+        std::filesystem::path path);
+
+    bool screenshotPending() const noexcept {
+        return pendingScreenshot_.has_value();
+    }
+
 private:
     struct VideoFormat {
         VkFormat format{VK_FORMAT_UNDEFINED};
@@ -65,6 +77,14 @@ private:
         VkSemaphore imageAvailable{VK_NULL_HANDLE};
         VkFence fence{VK_NULL_HANDLE};
         video::VideoFramePtr retainedFrame;
+    };
+
+    struct ScreenshotBuffer {
+        VkBuffer buffer{VK_NULL_HANDLE};
+        VkDeviceMemory memory{VK_NULL_HANDLE};
+        VkDeviceSize byteSize{};
+        VkDeviceSize allocationSize{};
+        bool coherent{false};
     };
 
     static constexpr std::size_t kFramesInFlight = 2;
@@ -94,6 +114,23 @@ private:
         VkCommandBuffer commandBuffer,
         VkImage image) const;
 
+    void recordSwapchainToTransferBarrier(
+        VkCommandBuffer commandBuffer,
+        VkImage image) const;
+
+    void recordSwapchainTransferToPresentBarrier(
+        VkCommandBuffer commandBuffer,
+        VkImage image) const;
+
+    ScreenshotBuffer createScreenshotBuffer(
+        VkExtent2D extent) const;
+
+    void destroyScreenshotBuffer(
+        ScreenshotBuffer& buffer) const noexcept;
+
+    std::vector<std::uint8_t> readScreenshotBuffer(
+        const ScreenshotBuffer& buffer) const;
+
     VkViewport videoViewport(const video::VideoFrame& frame, VkExtent2D extent) const;
 
     const VulkanContext& vulkan_;
@@ -120,6 +157,9 @@ private:
     VkSwapchainKHR observedSwapchain_{VK_NULL_HANDLE};
     std::vector<VkImageLayout> swapchainImageLayouts_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
+
+    std::optional<std::filesystem::path>
+        pendingScreenshot_;
 };
 
 } // namespace reg::vulkan
