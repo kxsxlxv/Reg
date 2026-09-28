@@ -72,31 +72,36 @@ void RtspDecoder::run(
             "RtspDecoder requires an onFrame callback");
     }
 
-    stopRequested_.store(
-        false,
-        std::memory_order_release);
-
-    const VideoStreamDescriptorPtr descriptor =
-        openInput();
-    openDecoder();
-
-    if (callbacks.onStreamOpened) {
-        callbacks.onStreamOpened(descriptor);
+    // requestStop() is terminal for this decoder object. Never clear
+    // stopRequested_ here: a reconnect/replay supervisor must not reopen the
+    // input after application shutdown has begun.
+    if (stopRequested_.load(
+            std::memory_order_acquire)) {
+        return;
     }
 
-    std::unique_ptr<AVPacket, PacketDeleter>
-        packet(av_packet_alloc());
-    std::unique_ptr<AVFrame, FrameDeleter>
-        frame(av_frame_alloc());
+    try {
+        const VideoStreamDescriptorPtr descriptor =
+            openInput();
+        openDecoder();
 
-    if (!packet || !frame) {
-        throw std::bad_alloc{};
-    }
+        if (callbacks.onStreamOpened) {
+            callbacks.onStreamOpened(descriptor);
+        }
 
-    std::uint64_t packetCount = 0;
+        std::unique_ptr<AVPacket, PacketDeleter>
+            packet(av_packet_alloc());
+        std::unique_ptr<AVFrame, FrameDeleter>
+            frame(av_frame_alloc());
 
-    while (!stopRequested_.load(
-        std::memory_order_acquire)) {
+        if (!packet || !frame) {
+            throw std::bad_alloc{};
+        }
+
+        std::uint64_t packetCount = 0;
+
+        while (!stopRequested_.load(
+            std::memory_order_acquire)) {
         const int result =
             av_read_frame(
                 formatContext_,
@@ -112,36 +117,54 @@ void RtspDecoder::run(
             continue;
         }
 
+        if (result == AVERROR_EOF &&
+            config_.inputKind ==
+                VideoInputKind::File) {
+            decodePacket(
+                callbacks.onFrame,
+                nullptr,
+                frame.get());
+            break;
+        }
+
         if (result < 0) {
             throwFfmpegError(
                 "av_read_frame",
                 result);
         }
 
-        ++packetCount;
+            ++packetCount;
 
-        if (packet->stream_index ==
-            videoStreamIndex_) {
-            if (callbacks.onCompressedPacket) {
-                callbacks.onCompressedPacket(
-                    CompressedVideoPacket::cloneFrom(
-                        packet.get(),
-                        descriptor->timeBase()));
+            if (packet->stream_index ==
+                videoStreamIndex_) {
+                if (callbacks.onCompressedPacket) {
+                    callbacks.onCompressedPacket(
+                        CompressedVideoPacket::cloneFrom(
+                            packet.get(),
+                            descriptor->timeBase()));
+                }
+
+                decodePacket(
+                    callbacks.onFrame,
+                    packet.get(),
+                    frame.get());
             }
 
-            decodePacket(
-                callbacks.onFrame,
-                packet.get(),
-                frame.get());
+            av_packet_unref(packet.get());
         }
 
-        av_packet_unref(packet.get());
-    }
+        std::cout
+            << "[decoder] session ended after "
+            << packetCount
+            << " demuxed packets\n";
 
-    std::cout
-        << "[rtsp] stopped after "
-        << packetCount
-        << " demuxed packets\n";
+        close();
+    } catch (...) {
+        // Every reconnect/replay run starts with a fresh demuxer/decoder
+        // session. Never retain partially initialized codec state.
+        close();
+        throw;
+    }
 }
 
 void RtspDecoder::run(
@@ -166,17 +189,42 @@ VideoStreamDescriptorPtr RtspDecoder::openInput() {
     formatContext_->interrupt_callback.opaque = this;
 
     AVDictionary* options = nullptr;
-    av_dict_set(&options, "rtsp_transport", "udp", 0);
-    av_dict_set(&options, "fflags", "nobuffer", 0);
-    av_dict_set_int(&options, "max_delay", config_.maxDelayUs, 0);
-    av_dict_set_int(&options, "reorder_queue_size", config_.reorderQueueSize, 0);
 
-    const int openResult = avformat_open_input(&formatContext_, config_.url.c_str(), nullptr, &options);
+    if (config_.inputKind ==
+        VideoInputKind::RtspUdp) {
+        av_dict_set(
+            &options,
+            "rtsp_transport",
+            "udp",
+            0);
+        av_dict_set(
+            &options,
+            "fflags",
+            "nobuffer",
+            0);
+        av_dict_set_int(
+            &options,
+            "max_delay",
+            config_.maxDelayUs,
+            0);
+        av_dict_set_int(
+            &options,
+            "reorder_queue_size",
+            config_.reorderQueueSize,
+            0);
+    }
+
+    const int openResult =
+        avformat_open_input(
+            &formatContext_,
+            config_.url.c_str(),
+            nullptr,
+            &options);
 
     if (options != nullptr) {
         const AVDictionaryEntry* entry = nullptr;
         while ((entry = av_dict_iterate(options, entry)) != nullptr) {
-            std::cerr << "[rtsp] unused FFmpeg option: " << entry->key << '=' << entry->value << '\n';
+            std::cerr << "[input] unused FFmpeg option: " << entry->key << '=' << entry->value << '\n';
         }
     }
     av_dict_free(&options);
@@ -198,8 +246,18 @@ VideoStreamDescriptorPtr RtspDecoder::openInput() {
         throw std::runtime_error("The MVP accepts H.264 only");
     }
 
-    std::cout << "[rtsp] connected: " << config_.url << '\n';
-    std::cout << "[rtsp] coded size: " << parameters->width << 'x' << parameters->height << '\n';
+    std::cout
+        << (config_.inputKind == VideoInputKind::RtspUdp
+                ? "[rtsp] connected: "
+                : "[file] opened: ")
+        << config_.url
+        << '\n';
+    std::cout
+        << "[input] coded size: "
+        << parameters->width
+        << 'x'
+        << parameters->height
+        << '\n';
 
     const AVStream* videoStream =
         formatContext_->streams[videoStreamIndex_];

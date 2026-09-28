@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <vector>
 
+struct AVBufferRef;
+
 namespace reg::render {
 class VideoOverlayRecorder;
 }
@@ -103,6 +105,7 @@ private:
 
     VideoFormat videoFormat_{};
     bool videoFormatInitialized_{false};
+    AVBufferRef* retainedFramesContext_{nullptr};
 
     VkSamplerYcbcrConversion ycbcrConversion_{VK_NULL_HANDLE};
     VkSampler sampler_{VK_NULL_HANDLE};
