@@ -181,4 +181,20 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME metadata_protocol COMMAND reg_metadata_protocol_tests)
+
+    add_executable(reg_overlay_geometry_tests
+        tests/overlay_geometry_tests.cpp
+        src/overlay/PatternedLine.cpp
+        src/overlay/TrackHistory.cpp
+        src/video/VideoTransform.cpp
+    )
+    target_include_directories(reg_overlay_geometry_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+    if(MSVC)
+        target_compile_options(reg_overlay_geometry_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_overlay_geometry_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME overlay_geometry COMMAND reg_overlay_geometry_tests)
 endif()
