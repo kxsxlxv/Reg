@@ -983,6 +983,10 @@ VideoRenderer::readScreenshotBuffer(
             "screenshot buffer is not initialized");
     }
 
+    std::vector<std::uint8_t> pixels(
+        static_cast<std::size_t>(
+            buffer.byteSize));
+
     void* mapped = nullptr;
 
     checkVk(
@@ -1016,10 +1020,6 @@ VideoRenderer::readScreenshotBuffer(
             throw;
         }
     }
-
-    std::vector<std::uint8_t> pixels(
-        static_cast<std::size_t>(
-            buffer.byteSize));
 
     std::memcpy(
         pixels.data(),
