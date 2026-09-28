@@ -178,6 +178,49 @@ void buffersRemainBounded() {
     require(!metadata.find({1, 1}), "metadata store retained evicted oldest entry");
 }
 
+void lateMetadataBehindWatermarkIsRejected() {
+    Buffer video(50ms, 16);
+    reg::metadata::MetadataStore metadata;
+    Synchronizer sync(video, metadata);
+
+    const auto t0 = Buffer::Clock::time_point{} + 1s;
+    const reg::media::FrameKey expired{.streamEpoch = 4, .frameId = 77};
+
+    video.push(expired, frame(77), t0);
+    const auto dropped = sync.next(t0 + 50ms);
+
+    require(dropped.action == reg::video::SyncAction::Drop, "frame without metadata was not dropped");
+    require(dropped.droppedFrames == 1, "drop count mismatch");
+
+    require(
+        metadata.insert(metadataFor(expired, 5)) ==
+            reg::metadata::MetadataInsertResult::TooLate,
+        "late metadata behind watermark was accepted");
+    require(metadata.size() == 0, "late metadata polluted the store");
+}
+
+void synchronizerDrainsMultipleExpiredMisses() {
+    Buffer video(50ms, 16);
+    reg::metadata::MetadataStore metadata;
+    Synchronizer sync(video, metadata);
+
+    const auto t0 = Buffer::Clock::time_point{} + 1s;
+    const reg::media::FrameKey first{.streamEpoch = 1, .frameId = 10};
+    const reg::media::FrameKey second{.streamEpoch = 1, .frameId = 11};
+    const reg::media::FrameKey third{.streamEpoch = 1, .frameId = 12};
+
+    video.push(first, frame(10), t0);
+    video.push(second, frame(11), t0 + 1ms);
+    video.push(third, frame(12), t0 + 2ms);
+    metadata.insert(metadataFor(third, 3));
+
+    const auto result = sync.next(t0 + 60ms);
+
+    require(result.action == reg::video::SyncAction::Present, "ready exact pair was not reached");
+    require(result.key == third, "synchronizer presented the wrong frame after draining misses");
+    require(result.droppedFrames == 2, "expired misses were not drained in one synchronization decision");
+}
+
 void changingDelayRetimesBufferedFrames() {
     Buffer video(150ms, 4);
     const auto t0 = Buffer::Clock::time_point{} + 1s;
@@ -201,6 +244,8 @@ int main() {
         outOfOrderMetadataStillMatchesExactFrame();
         duplicateMetadataIsIgnored();
         buffersRemainBounded();
+        lateMetadataBehindWatermarkIsRejected();
+        synchronizerDrainsMultipleExpiredMisses();
         changingDelayRetimesBufferedFrames();
 
         std::cout << "frame_sync_tests: PASS\n";
