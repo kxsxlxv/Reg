@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <utility>
 
 namespace reg::video {
 
