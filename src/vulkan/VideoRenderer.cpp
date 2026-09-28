@@ -1,5 +1,6 @@
 #include "vulkan/VideoRenderer.hpp"
 
+#include "render/VideoOverlayRecorder.hpp"
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanContext.hpp"
 
@@ -704,7 +705,8 @@ VkViewport VideoRenderer::videoViewport(
 
 bool VideoRenderer::render(
     const video::VideoFramePtr& frame,
-    Swapchain& swapchain) {
+    Swapchain& swapchain,
+    render::VideoOverlayRecorder* overlay) {
     if (!frame) {
         return false;
     }
@@ -795,6 +797,13 @@ bool VideoRenderer::render(
             0,
             nullptr);
         vkCmdDraw(slot.commandBuffer, 3, 1, 0, 0);
+
+        if (overlay != nullptr) {
+            overlay->record(
+                slot.commandBuffer,
+                swapchain.format(),
+                swapchain.extent());
+        }
 
         vkCmdEndRendering(slot.commandBuffer);
 
