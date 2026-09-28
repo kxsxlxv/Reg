@@ -38,6 +38,21 @@ else()
     find_package(SDL3 CONFIG REQUIRED)
 endif()
 
+add_library(reg_imgui STATIC
+    imgui/imgui.cpp
+    imgui/imgui_draw.cpp
+    imgui/imgui_tables.cpp
+    imgui/imgui_widgets.cpp
+    imgui/backends/imgui_impl_vulkan.cpp
+)
+
+target_include_directories(reg_imgui PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends"
+)
+
+target_link_libraries(reg_imgui PUBLIC Vulkan::Vulkan)
+
 if(Vulkan_GLSLC_EXECUTABLE)
     set(REG_GLSLC_EXECUTABLE "${Vulkan_GLSLC_EXECUTABLE}")
 else()
@@ -85,10 +100,14 @@ add_executable(reg_probe
     src/metadata/Protocol.cpp
     src/metadata/MetadataStore.cpp
     src/metadata/MetadataReceiver.cpp
+    src/metadata/TrackHistory.cpp
     src/platform/UdpSocket.cpp
     src/video/VideoFrame.cpp
     src/video/OverlayFrameBuffer.cpp
     src/video/FrameSynchronizer.cpp
+    src/video/VideoTransform.cpp
+    src/render/TargetOverlayBuilder.cpp
+    src/render/ImGuiOverlayRenderer.cpp
 )
 
 add_dependencies(reg_probe reg_shaders)
@@ -101,6 +120,7 @@ target_link_libraries(reg_probe PRIVATE
     FFmpeg::avcodec
     FFmpeg::avformat
     FFmpeg::avutil
+    reg_imgui
 )
 
 if(WIN32)
