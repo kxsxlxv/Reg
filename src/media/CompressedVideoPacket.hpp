@@ -18,6 +18,12 @@ public:
         const AVPacket* packet,
         AVRational timeBase);
 
+    static std::shared_ptr<const CompressedVideoPacket>
+    cloneFrom(
+        const AVPacket* packet,
+        AVRational timeBase,
+        std::chrono::steady_clock::time_point receivedAt);
+
     ~CompressedVideoPacket();
 
     CompressedVideoPacket(
