@@ -10,12 +10,18 @@
 
 namespace reg::metadata::protocol {
 
-inline constexpr std::uint16_t kVersion = 1;
+inline constexpr std::uint16_t kLegacyVersion = 1;
+inline constexpr std::uint16_t kVersion = 2;
+
 inline constexpr std::size_t kHeaderSize = 52;
-inline constexpr std::size_t kTargetSize = 32;
+inline constexpr std::size_t kLegacyTargetSize = 32;
+inline constexpr std::size_t kTargetV2BaseSize = 36;
+inline constexpr std::size_t kContourPointSize = 8;
 inline constexpr std::size_t kCrcSize = 4;
+
 inline constexpr std::size_t kMaxDatagramSize = 1400;
 inline constexpr std::size_t kMaxTargets = 32;
+inline constexpr std::size_t kMaxContourPointsPerTarget = 64;
 
 enum class MessageType : std::uint16_t {
     FrameMetadata = 1,
@@ -34,6 +40,8 @@ enum class DecodeError {
     CrcMismatch,
     InvalidNumber,
     InvalidNormalizedRect,
+    ContourCountTooLarge,
+    InvalidContour,
 };
 
 struct DecodeResult {
