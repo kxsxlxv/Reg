@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -175,6 +176,11 @@ int main(int argc, char** argv) {
 
         std::atomic_uint64_t decoderSessionGeneration{0};
         std::atomic_uint64_t decoderReconnects{0};
+        std::atomic_uint64_t decoderCleanupRequest{0};
+        std::atomic_uint64_t decoderCleanupAck{0};
+
+        std::mutex cleanupMutex;
+        std::condition_variable cleanupCondition;
 
         std::mutex errorMutex;
         std::string lastDecoderError;
@@ -343,6 +349,32 @@ int main(int argc, char** argv) {
                     break;
                 }
 
+                if (sessionOpened) {
+                    const std::uint64_t cleanupToken =
+                        decoderCleanupRequest.fetch_add(
+                            1,
+                            std::memory_order_acq_rel) +
+                        1;
+
+                    std::unique_lock cleanupLock(
+                        cleanupMutex);
+
+                    cleanupCondition.wait(
+                        cleanupLock,
+                        [&] {
+                            return shutdownRequested.load(
+                                       std::memory_order_acquire) ||
+                                   decoderCleanupAck.load(
+                                       std::memory_order_acquire) >=
+                                       cleanupToken;
+                        });
+
+                    if (shutdownRequested.load(
+                            std::memory_order_acquire)) {
+                        break;
+                    }
+                }
+
                 const auto reconnectNumber =
                     decoderReconnects.fetch_add(
                         1,
@@ -414,6 +446,7 @@ int main(int argc, char** argv) {
                 std::memory_order_release);
 
             decoder.requestStop();
+            cleanupCondition.notify_all();
 
             if (metadataReceiver) {
                 metadataReceiver->requestStop();
@@ -449,6 +482,35 @@ int main(int argc, char** argv) {
                 }
 
                 bool didWork = false;
+
+                const std::uint64_t cleanupRequest =
+                    decoderCleanupRequest.load(
+                        std::memory_order_acquire);
+
+                if (cleanupRequest >
+                    decoderCleanupAck.load(
+                        std::memory_order_acquire)) {
+                    // No new decoder session is allowed to open until this
+                    // render-thread cleanup is acknowledged.
+                    rawMailbox.clear();
+                    overlayFrames.clear();
+                    metadataStore.clear();
+
+                    pendingOverlayFrame.reset();
+                    lastRawPresented.reset();
+                    trackHistory.clear();
+
+                    rawRenderer.resetVideoSession();
+                    if (overlayRenderer) {
+                        overlayRenderer->resetVideoSession();
+                    }
+
+                    decoderCleanupAck.store(
+                        cleanupRequest,
+                        std::memory_order_release);
+                    cleanupCondition.notify_all();
+                    didWork = true;
+                }
 
                 const std::uint64_t sessionGeneration =
                     decoderSessionGeneration.load(
