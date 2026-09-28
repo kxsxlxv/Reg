@@ -28,7 +28,8 @@ OverlayPushResult OverlayFrameBuffer::push(VideoFramePtr frame) {
         return OverlayPushResult::MissingIdentity;
     }
 
-    return push(identity->key, std::move(frame), frame->decodedAt());
+    const auto decodedAt = frame->decodedAt();
+    return push(identity->key, std::move(frame), decodedAt);
 }
 
 OverlayPushResult OverlayFrameBuffer::push(
