@@ -20,6 +20,15 @@ void checkVk(VkResult result, const char* operation) {
     }
 }
 
+void checkSurfaceVk(VkResult result, const char* operation) {
+    if (result == VK_ERROR_SURFACE_LOST_KHR) {
+        throw SurfaceLostError(
+            std::string(operation) +
+            " failed: Vulkan surface lost");
+    }
+    checkVk(result, operation);
+}
+
 } // namespace
 
 Swapchain::Swapchain(
@@ -62,7 +71,7 @@ bool Swapchain::recreate() {
     }
 
     VkSurfaceCapabilitiesKHR capabilities{};
-    checkVk(
+    checkSurfaceVk(
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
             vulkan_.physicalDevice(),
             surface_,
@@ -70,7 +79,7 @@ bool Swapchain::recreate() {
         "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
     std::uint32_t formatCount = 0;
-    checkVk(
+    checkSurfaceVk(
         vkGetPhysicalDeviceSurfaceFormatsKHR(
             vulkan_.physicalDevice(),
             surface_,
@@ -82,7 +91,7 @@ bool Swapchain::recreate() {
     }
 
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    checkVk(
+    checkSurfaceVk(
         vkGetPhysicalDeviceSurfaceFormatsKHR(
             vulkan_.physicalDevice(),
             surface_,
@@ -91,7 +100,7 @@ bool Swapchain::recreate() {
         "vkGetPhysicalDeviceSurfaceFormatsKHR(list)");
 
     std::uint32_t presentModeCount = 0;
-    checkVk(
+    checkSurfaceVk(
         vkGetPhysicalDeviceSurfacePresentModesKHR(
             vulkan_.physicalDevice(),
             surface_,
@@ -101,7 +110,7 @@ bool Swapchain::recreate() {
 
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     if (presentModeCount != 0) {
-        checkVk(
+        checkSurfaceVk(
             vkGetPhysicalDeviceSurfacePresentModesKHR(
                 vulkan_.physicalDevice(),
                 surface_,
@@ -164,7 +173,7 @@ bool Swapchain::recreate() {
     }
 
     VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
-    checkVk(
+    checkSurfaceVk(
         vkCreateSwapchainKHR(vulkan_.device(), &createInfo, nullptr, &newSwapchain),
         "vkCreateSwapchainKHR");
 
@@ -227,6 +236,10 @@ AcquireStatus Swapchain::acquire(VkSemaphore imageAvailable, std::uint32_t& imag
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         return AcquireStatus::Recreate;
     }
+    if (result == VK_ERROR_SURFACE_LOST_KHR) {
+        throw SurfaceLostError(
+            "vkAcquireNextImageKHR failed: Vulkan surface lost");
+    }
     if (result == VK_NOT_READY || result == VK_TIMEOUT) {
         return AcquireStatus::NotReady;
     }
@@ -249,6 +262,10 @@ bool Swapchain::present(std::uint32_t imageIndex, VkSemaphore renderFinished) {
     }
     if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
         return false;
+    }
+    if (result == VK_ERROR_SURFACE_LOST_KHR) {
+        throw SurfaceLostError(
+            "vkQueuePresentKHR failed: Vulkan surface lost");
     }
 
     checkVk(result, "vkQueuePresentKHR");
