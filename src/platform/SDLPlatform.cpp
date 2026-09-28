@@ -159,6 +159,17 @@ bool SDLPlatform::pollQuitRequested() {
         }
 
         if (event.type ==
+                SDL_EVENT_KEY_DOWN &&
+            !event.key.repeat) {
+            if (event.key.key == SDLK_F11) {
+                rawScreenshotRequested_ = true;
+            } else if (
+                event.key.key == SDLK_F12) {
+                overlayScreenshotRequested_ = true;
+            }
+        }
+
+        if (event.type ==
                 SDL_EVENT_DISPLAY_ADDED ||
             event.type ==
                 SDL_EVENT_DISPLAY_REMOVED ||
