@@ -118,10 +118,6 @@ void VideoRenderer::createCommandResources() {
         checkVk(vkCreateSemaphore(
                     vulkan_.device(), &semaphoreInfo, nullptr, &frameSlots_[i].imageAvailable),
                 "vkCreateSemaphore(imageAvailable)");
-        checkVk(vkCreateSemaphore(
-                    vulkan_.device(), &semaphoreInfo, nullptr, &frameSlots_[i].renderFinished),
-                "vkCreateSemaphore(renderFinished)");
-
         VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         checkVk(vkCreateFence(vulkan_.device(), &fenceInfo, nullptr, &frameSlots_[i].fence),
@@ -136,15 +132,13 @@ void VideoRenderer::destroyCommandResources() {
             vkDestroyFence(vulkan_.device(), slot.fence, nullptr);
             slot.fence = VK_NULL_HANDLE;
         }
-        if (slot.renderFinished != VK_NULL_HANDLE) {
-            vkDestroySemaphore(vulkan_.device(), slot.renderFinished, nullptr);
-            slot.renderFinished = VK_NULL_HANDLE;
-        }
         if (slot.imageAvailable != VK_NULL_HANDLE) {
             vkDestroySemaphore(vulkan_.device(), slot.imageAvailable, nullptr);
             slot.imageAvailable = VK_NULL_HANDLE;
         }
     }
+
+    destroySwapchainSyncResources();
 
     if (commandPool_ != VK_NULL_HANDLE) {
         vkDestroyCommandPool(vulkan_.device(), commandPool_, nullptr);
@@ -592,14 +586,45 @@ VkShaderModule VideoRenderer::loadShaderModule(const char* filename) const {
 
 void VideoRenderer::syncSwapchainState(const Swapchain& swapchain) {
     if (observedSwapchain_ == swapchain.handle() &&
-        swapchainImageLayouts_.size() == swapchain.imageCount()) {
+        swapchainImageLayouts_.size() == swapchain.imageCount() &&
+        renderFinishedSemaphores_.size() == swapchain.imageCount()) {
         return;
     }
+
+    // Swapchain::recreate() uses vkDeviceWaitIdle(), so when the handle changes
+    // no presentation operation can still be using these semaphores.
+    destroySwapchainSyncResources();
 
     observedSwapchain_ = swapchain.handle();
     swapchainImageLayouts_.assign(
         swapchain.imageCount(),
         VK_IMAGE_LAYOUT_UNDEFINED);
+
+    renderFinishedSemaphores_.resize(
+        swapchain.imageCount(),
+        VK_NULL_HANDLE);
+
+    VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    for (auto& semaphore : renderFinishedSemaphores_) {
+        checkVk(
+            vkCreateSemaphore(
+                vulkan_.device(),
+                &semaphoreInfo,
+                nullptr,
+                &semaphore),
+            "vkCreateSemaphore(renderFinished)");
+    }
+}
+
+void VideoRenderer::destroySwapchainSyncResources() {
+    for (VkSemaphore semaphore : renderFinishedSemaphores_) {
+        if (semaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(vulkan_.device(), semaphore, nullptr);
+        }
+    }
+    renderFinishedSemaphores_.clear();
+    swapchainImageLayouts_.clear();
+    observedSwapchain_ = VK_NULL_HANDLE;
 }
 
 void VideoRenderer::recordSwapchainToColorBarrier(
@@ -791,8 +816,11 @@ bool VideoRenderer::render(
 
         const VkSemaphoreSubmitInfo frameSignal = frameAccess_.signalInfo(lockedFrame);
 
+        const VkSemaphore renderFinished =
+            renderFinishedSemaphores_.at(imageIndex);
+
         VkSemaphoreSubmitInfo presentSignal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
-        presentSignal.semaphore = slot.renderFinished;
+        presentSignal.semaphore = renderFinished;
         presentSignal.value = 0;
         presentSignal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 
@@ -831,7 +859,7 @@ bool VideoRenderer::render(
     swapchainImageLayouts_.at(imageIndex) = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     slot.retainedFrame = frame;
 
-    const bool presentOk = swapchain.present(imageIndex, slot.renderFinished);
+    const bool presentOk = swapchain.present(imageIndex, renderFinished);
 
     nextFrameSlot_ = (nextFrameSlot_ + 1) % frameSlots_.size();
 
