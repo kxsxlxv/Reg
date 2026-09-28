@@ -17,9 +17,24 @@ enum class AcquireStatus {
     NotReady,
 };
 
+enum class PresentPolicy {
+    LowLatency,
+    Stable,
+};
+
 class Swapchain final {
 public:
-    Swapchain(const VulkanContext& vulkan, SDL_Window* window);
+    Swapchain(
+        const VulkanContext& vulkan,
+        SDL_Window* window,
+        PresentPolicy presentPolicy = PresentPolicy::LowLatency);
+
+    Swapchain(
+        const VulkanContext& vulkan,
+        VkSurfaceKHR surface,
+        SDL_Window* window,
+        PresentPolicy presentPolicy);
+
     ~Swapchain();
 
     Swapchain(const Swapchain&) = delete;
@@ -31,6 +46,7 @@ public:
     bool present(std::uint32_t imageIndex, VkSemaphore renderFinished);
 
     VkSwapchainKHR handle() const noexcept { return swapchain_; }
+    VkSurfaceKHR surface() const noexcept { return surface_; }
     VkFormat format() const noexcept { return surfaceFormat_.format; }
     VkColorSpaceKHR colorSpace() const noexcept { return surfaceFormat_.colorSpace; }
     VkExtent2D extent() const noexcept { return extent_; }
@@ -45,7 +61,9 @@ private:
     VkExtent2D chooseExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
 
     const VulkanContext& vulkan_;
+    VkSurfaceKHR surface_{VK_NULL_HANDLE};
     SDL_Window* window_{nullptr};
+    PresentPolicy presentPolicy_{PresentPolicy::LowLatency};
 
     VkSwapchainKHR swapchain_{VK_NULL_HANDLE};
     VkSurfaceFormatKHR surfaceFormat_{};

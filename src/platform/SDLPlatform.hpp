@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 struct SDL_Window;
 
 namespace reg::platform {
@@ -16,7 +18,7 @@ public:
     bool pollQuitRequested();
 
 private:
-    SDL_Window* window_{nullptr};
+    std::vector<SDL_Window*> windows_;
 };
 
 } // namespace reg::platform

@@ -78,7 +78,9 @@ add_executable(reg_probe
     src/metadata/MetadataProtocol.cpp
     src/metadata/MetadataStore.cpp
     src/metadata/MetadataReceiver.cpp
+    src/overlay/TrackHistory.cpp
     src/vulkan/VulkanContext.cpp
+    src/vulkan/VulkanSurface.cpp
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
     src/vulkan/VideoRenderer.cpp
