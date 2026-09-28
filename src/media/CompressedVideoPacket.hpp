@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <memory>
 
 extern "C" {
@@ -32,15 +33,22 @@ public:
         return timeBase_;
     }
 
+    std::chrono::steady_clock::time_point
+    receivedAt() const noexcept {
+        return receivedAt_;
+    }
+
     bool keyFrame() const noexcept;
 
 private:
     CompressedVideoPacket(
         AVPacket* packet,
-        AVRational timeBase) noexcept;
+        AVRational timeBase,
+        std::chrono::steady_clock::time_point receivedAt) noexcept;
 
     AVPacket* packet_{nullptr};
     AVRational timeBase_{};
+    std::chrono::steady_clock::time_point receivedAt_{};
 };
 
 using CompressedVideoPacketPtr =
