@@ -9,7 +9,8 @@ namespace reg::recorder {
 BlackboxRecorder::BlackboxRecorder(
     BlackboxRecorderConfig config)
     : config_(std::move(config)),
-      writer_(config_.writer) {
+      writer_(config_.writer),
+      metadataWriter_(config_.metadataJournal) {
     if (config_.queueCapacity == 0) {
         throw std::invalid_argument(
             "blackbox queue capacity must be greater than zero");
@@ -55,31 +56,74 @@ bool BlackboxRecorder::submit(
         return false;
     }
 
-    {
-        std::scoped_lock lock(mutex_);
+    try {
+        {
+            std::scoped_lock lock(mutex_);
 
-        if (stopping_ || failed_) {
-            return false;
+            if (stopping_ || failed_) {
+                return false;
+            }
+
+            if (queue_.size() >=
+                config_.queueCapacity) {
+                packetsDroppedQueueFull_.fetch_add(
+                    1,
+                    std::memory_order_relaxed);
+                return false;
+            }
+
+            queue_.emplace_back(
+                std::move(packet));
         }
 
-        if (queue_.size() >=
-            config_.queueCapacity) {
-            packetsDroppedQueueFull_.fetch_add(
-                1,
-                std::memory_order_relaxed);
-            return false;
-        }
+        packetsAccepted_.fetch_add(
+            1,
+            std::memory_order_relaxed);
 
-        queue_.emplace_back(
-            std::move(packet));
+        condition_.notify_one();
+        return true;
+    } catch (...) {
+        packetsDroppedQueueFull_.fetch_add(
+            1,
+            std::memory_order_relaxed);
+        return false;
     }
+}
 
-    packetsAccepted_.fetch_add(
-        1,
-        std::memory_order_relaxed);
+bool BlackboxRecorder::submitMetadata(
+    metadata::FrameMetadata metadata) noexcept {
+    try {
+        {
+            std::scoped_lock lock(mutex_);
 
-    condition_.notify_one();
-    return true;
+            if (stopping_ || failed_) {
+                return false;
+            }
+
+            if (queue_.size() >=
+                config_.queueCapacity) {
+                metadataDroppedQueueFull_.fetch_add(
+                    1,
+                    std::memory_order_relaxed);
+                return false;
+            }
+
+            queue_.emplace_back(
+                std::move(metadata));
+        }
+
+        metadataAccepted_.fetch_add(
+            1,
+            std::memory_order_relaxed);
+
+        condition_.notify_one();
+        return true;
+    } catch (...) {
+        metadataDroppedQueueFull_.fetch_add(
+            1,
+            std::memory_order_relaxed);
+        return false;
+    }
 }
 
 void BlackboxRecorder::stop() noexcept {
@@ -125,6 +169,15 @@ BlackboxRecorder::stats() const noexcept {
                 std::memory_order_relaxed),
         .segmentRotations =
             segmentRotations_.load(
+                std::memory_order_relaxed),
+        .metadataAccepted =
+            metadataAccepted_.load(
+                std::memory_order_relaxed),
+        .metadataDroppedQueueFull =
+            metadataDroppedQueueFull_.load(
+                std::memory_order_relaxed),
+        .metadataWritten =
+            metadataWritten_.load(
                 std::memory_order_relaxed),
         .failures =
             failures_.load(
@@ -174,6 +227,18 @@ void BlackboxRecorder::workerMain() noexcept {
                 continue;
             }
 
+            if (const auto* metadata =
+                    std::get_if<
+                        metadata::FrameMetadata>(
+                            &item)) {
+                metadataWriter_.write(
+                    *metadata);
+                metadataWritten_.fetch_add(
+                    1,
+                    std::memory_order_relaxed);
+                continue;
+            }
+
             const auto& packet =
                 std::get<
                     media::CompressedVideoPacketPtr>(
@@ -206,6 +271,7 @@ void BlackboxRecorder::workerMain() noexcept {
         }
 
         writer_.close();
+        metadataWriter_.close();
     } catch (const std::exception& error) {
         setFailure(error.what());
     } catch (...) {

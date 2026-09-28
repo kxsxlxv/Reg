@@ -12,9 +12,11 @@ namespace reg::metadata {
 
 MetadataReceiver::MetadataReceiver(
     MetadataStore& store,
-    MetadataReceiverConfig config)
+    MetadataReceiverConfig config,
+    AcceptedMetadataCallback onAccepted)
     : store_(store),
-      config_(std::move(config)) {}
+      config_(std::move(config)),
+      onAccepted_(std::move(onAccepted)) {}
 
 void MetadataReceiver::run() {
     stopRequested_.store(false, std::memory_order_release);
@@ -58,8 +60,18 @@ void MetadataReceiver::run() {
                 std::memory_order_relaxed);
         }
 
+        FrameMetadata acceptedCopy{};
+        if (onAccepted_) {
+            acceptedCopy = decoded.metadata;
+        }
+
         const InsertResult insertResult =
             store_.insert(std::move(decoded.metadata));
+
+        if (insertResult != InsertResult::Duplicate &&
+            onAccepted_) {
+            onAccepted_(std::move(acceptedCopy));
+        }
 
         if (insertResult == InsertResult::Duplicate) {
             frameDuplicates_.fetch_add(1, std::memory_order_relaxed);

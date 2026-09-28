@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace reg::metadata {
@@ -27,9 +28,13 @@ struct MetadataReceiverStats {
 
 class MetadataReceiver final {
 public:
+    using AcceptedMetadataCallback =
+        std::function<void(FrameMetadata)>;
+
     MetadataReceiver(
         MetadataStore& store,
-        MetadataReceiverConfig config = {});
+        MetadataReceiverConfig config = {},
+        AcceptedMetadataCallback onAccepted = {});
 
     void run();
     void requestStop() noexcept;
@@ -39,6 +44,7 @@ public:
 private:
     MetadataStore& store_;
     MetadataReceiverConfig config_;
+    AcceptedMetadataCallback onAccepted_;
     std::atomic_bool stopRequested_{false};
 
     std::atomic_uint64_t packetsReceived_{0};
