@@ -3,6 +3,7 @@
 #include "metadata/Protocol.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
