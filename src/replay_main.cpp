@@ -15,8 +15,10 @@ extern "C" {
 #include <libavutil/mathematics.h>
 }
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
@@ -75,6 +77,7 @@ ReplayOptions parseOptions(
                     text,
                     &consumed);
             if (consumed != text.size() ||
+                !std::isfinite(options.speed) ||
                 !(options.speed > 0.0)) {
                 throw std::runtime_error(
                     "--speed must be positive");
