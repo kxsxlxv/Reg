@@ -73,6 +73,26 @@ else()
     target_compile_options(reg_metadata_sender PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 endif()
 
+add_library(reg_jetson_metadata_bridge STATIC
+    src/media/FrameIdentity.cpp
+    src/jetson/MetadataBridge.cpp
+)
+
+target_include_directories(reg_jetson_metadata_bridge PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(reg_jetson_metadata_bridge PUBLIC
+    reg_metadata_sender
+    FFmpeg::avutil
+)
+
+if(MSVC)
+    target_compile_options(reg_jetson_metadata_bridge PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(reg_jetson_metadata_bridge PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
 if(Vulkan_GLSLC_EXECUTABLE)
     set(REG_GLSLC_EXECUTABLE "${Vulkan_GLSLC_EXECUTABLE}")
 else()
@@ -276,6 +296,24 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME metadata_sender COMMAND reg_metadata_sender_tests)
+
+    add_executable(reg_jetson_metadata_bridge_tests
+        tests/jetson_metadata_bridge_tests.cpp
+        src/platform/UdpSocket.cpp
+    )
+    target_include_directories(reg_jetson_metadata_bridge_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_jetson_metadata_bridge_tests PRIVATE
+        reg_jetson_metadata_bridge
+        FFmpeg::avutil
+    )
+
+    if(MSVC)
+        target_compile_options(reg_jetson_metadata_bridge_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_jetson_metadata_bridge_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME jetson_metadata_bridge COMMAND reg_jetson_metadata_bridge_tests)
 
     add_executable(reg_overlay_model_tests
         tests/overlay_model_tests.cpp
