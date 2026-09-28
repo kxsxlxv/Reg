@@ -42,7 +42,6 @@ int main(int argc, char** argv) {
             reg::vulkan::PresentPolicy::LowLatencyTearingAllowed);
 
         std::unique_ptr<reg::vulkan::RenderWindow> overlayWindow;
-        std::unique_ptr<reg::vulkan::VideoRenderer> overlayRenderer;
 
         if (options.overlayEnabled) {
             SDL_Window* overlaySdlWindow = platform.createVulkanWindow(
@@ -54,9 +53,6 @@ int main(int argc, char** argv) {
                 vulkan,
                 overlaySdlWindow,
                 reg::vulkan::PresentPolicy::Stable);
-
-            overlayRenderer =
-                std::make_unique<reg::vulkan::VideoRenderer>(vulkan);
         }
 
         reg::media::VulkanHwDevice hwDevice(vulkan);
@@ -80,6 +76,13 @@ int main(int argc, char** argv) {
             metadataStore);
 
         reg::vulkan::VideoRenderer rawRenderer(vulkan);
+        std::unique_ptr<reg::vulkan::VideoRenderer> overlayRenderer;
+        if (options.overlayEnabled) {
+            // Construct after the decoder so renderer-owned VkImageViews are
+            // destroyed before FFmpeg releases its hardware-frame pool.
+            overlayRenderer =
+                std::make_unique<reg::vulkan::VideoRenderer>(vulkan);
+        }
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
         if (options.overlayEnabled) {
