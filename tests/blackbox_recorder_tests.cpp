@@ -76,7 +76,7 @@ makeDescriptor() {
     parameters->width = 640;
     parameters->height = 360;
     parameters->profile =
-        FF_PROFILE_H264_BASELINE;
+        AV_PROFILE_H264_BASELINE;
     parameters->level = 31;
 
     // AVCDecoderConfigurationRecord. The writer does not decode this data;
