@@ -22,12 +22,46 @@ void checkVk(VkResult result, const char* operation) {
 
 } // namespace
 
-Swapchain::Swapchain(const VulkanContext& vulkan, SDL_Window* window)
+Swapchain::Swapchain(
+    const VulkanContext& vulkan,
+    SDL_Window* window,
+    PresentPolicy presentPolicy)
+    : Swapchain(
+          vulkan,
+          vulkan.bootstrapSurface(),
+          window,
+          presentPolicy) {}
+
+Swapchain::Swapchain(
+    const VulkanContext& vulkan,
+    VkSurfaceKHR surface,
+    SDL_Window* window,
+    PresentPolicy presentPolicy)
     : vulkan_(vulkan),
-      window_(window) {
+      surface_(surface),
+      window_(window),
+      presentPolicy_(presentPolicy) {
+    if (surface_ == VK_NULL_HANDLE) {
+        throw std::invalid_argument("Swapchain requires a valid Vulkan surface");
+    }
     if (window_ == nullptr) {
         throw std::invalid_argument("Swapchain requires a valid SDL window");
     }
+
+    VkBool32 presentSupported = VK_FALSE;
+    checkVk(
+        vkGetPhysicalDeviceSurfaceSupportKHR(
+            vulkan_.physicalDevice(),
+            vulkan_.presentQueue().familyIndex,
+            surface_,
+            &presentSupported),
+        "vkGetPhysicalDeviceSurfaceSupportKHR(swapchain)");
+
+    if (presentSupported != VK_TRUE) {
+        throw std::runtime_error(
+            "Selected present queue cannot present to this Vulkan surface");
+    }
+
     if (!recreate()) {
         throw std::runtime_error("Cannot create swapchain for a zero-sized window");
     }
@@ -56,7 +90,7 @@ bool Swapchain::recreate() {
     checkVk(
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
             vulkan_.physicalDevice(),
-            vulkan_.bootstrapSurface(),
+            surface_,
             &capabilities),
         "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
@@ -64,7 +98,7 @@ bool Swapchain::recreate() {
     checkVk(
         vkGetPhysicalDeviceSurfaceFormatsKHR(
             vulkan_.physicalDevice(),
-            vulkan_.bootstrapSurface(),
+            surface_,
             &formatCount,
             nullptr),
         "vkGetPhysicalDeviceSurfaceFormatsKHR(count)");
@@ -76,7 +110,7 @@ bool Swapchain::recreate() {
     checkVk(
         vkGetPhysicalDeviceSurfaceFormatsKHR(
             vulkan_.physicalDevice(),
-            vulkan_.bootstrapSurface(),
+            surface_,
             &formatCount,
             formats.data()),
         "vkGetPhysicalDeviceSurfaceFormatsKHR(list)");
@@ -85,7 +119,7 @@ bool Swapchain::recreate() {
     checkVk(
         vkGetPhysicalDeviceSurfacePresentModesKHR(
             vulkan_.physicalDevice(),
-            vulkan_.bootstrapSurface(),
+            surface_,
             &presentModeCount,
             nullptr),
         "vkGetPhysicalDeviceSurfacePresentModesKHR(count)");
@@ -95,7 +129,7 @@ bool Swapchain::recreate() {
         checkVk(
             vkGetPhysicalDeviceSurfacePresentModesKHR(
                 vulkan_.physicalDevice(),
-                vulkan_.bootstrapSurface(),
+                surface_,
                 &presentModeCount,
                 presentModes.data()),
             "vkGetPhysicalDeviceSurfacePresentModesKHR(list)");
@@ -119,7 +153,7 @@ bool Swapchain::recreate() {
     };
 
     VkSwapchainCreateInfoKHR createInfo{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
-    createInfo.surface = vulkan_.bootstrapSurface();
+    createInfo.surface = surface_;
     createInfo.minImageCount = imageCount;
     createInfo.imageFormat = newSurfaceFormat.format;
     createInfo.imageColorSpace = newSurfaceFormat.colorSpace;
@@ -297,11 +331,21 @@ VkSurfaceFormatKHR Swapchain::chooseSurfaceFormat(const std::vector<VkSurfaceFor
         "Phase A refuses an implicit/double transfer-function path");
 }
 
-VkPresentModeKHR Swapchain::choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const {
-    // Raw-display policy: minimum latency first. Tearing is explicitly acceptable.
-    if (std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+VkPresentModeKHR Swapchain::choosePresentMode(
+    const std::vector<VkPresentModeKHR>& modes) const {
+    if (presentPolicy_ == PresentPolicy::LowLatency) {
+        // Raw-display policy: minimum latency first. Tearing is explicitly acceptable.
+        if (std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
+            return VK_PRESENT_MODE_IMMEDIATE_KHR;
+        }
+        if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
+            return VK_PRESENT_MODE_MAILBOX_KHR;
+        }
+        return VK_PRESENT_MODE_FIFO_KHR;
     }
+
+    // Overlay playback already has an intentional playout delay. Prefer
+    // tear-free low-queueing MAILBOX, then guaranteed FIFO.
     if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
         return VK_PRESENT_MODE_MAILBOX_KHR;
     }
