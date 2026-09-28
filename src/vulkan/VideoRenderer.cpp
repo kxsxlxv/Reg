@@ -96,6 +96,23 @@ VideoRenderer::~VideoRenderer() {
     destroyCommandResources();
 }
 
+void VideoRenderer::resetVideoSession() {
+    if (vulkan_.device() == VK_NULL_HANDLE) {
+        return;
+    }
+
+    checkVk(
+        vkQueueWaitIdle(
+            vulkan_.graphicsQueue().handle),
+        "vkQueueWaitIdle(video session reset)");
+
+    for (auto& slot : frameSlots_) {
+        slot.retainedFrame.reset();
+    }
+
+    destroyVideoResources();
+}
+
 void VideoRenderer::createCommandResources() {
     VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT |
