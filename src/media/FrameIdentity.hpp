@@ -4,6 +4,7 @@
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <cstddef>
 #include <functional>
 
@@ -33,6 +34,9 @@ struct SourceFrameIdentity {
 
 // Project-specific H.264/H.265 user_data_unregistered UUID.
 // The encoder and Jetson decoder must use this exact UUID when Phase C is enabled.
+inline constexpr std::uint16_t kFrameIdentityPayloadVersion = 1;
+inline constexpr std::size_t kFrameIdentityPayloadSize = 32;
+
 inline constexpr std::array<std::uint8_t, 16> kFrameIdentitySeiUuid{
     0x7f, 0x53, 0x3b, 0x8d,
     0x1a, 0x91,
@@ -42,6 +46,12 @@ inline constexpr std::array<std::uint8_t, 16> kFrameIdentitySeiUuid{
     0x47, 0x46,
     0x49, 0x44,
 };
+
+std::array<std::uint8_t, kFrameIdentityPayloadSize>
+encodeFrameIdentityPayload(const SourceFrameIdentity& identity) noexcept;
+
+std::optional<SourceFrameIdentity> decodeFrameIdentityPayload(
+    std::span<const std::uint8_t> payload) noexcept;
 
 std::optional<SourceFrameIdentity> extractFrameIdentity(const AVFrame* frame);
 
