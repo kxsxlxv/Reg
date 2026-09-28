@@ -14,30 +14,65 @@ Targets:
 The architecture separates two presentation policies:
 
 - **Raw:** newest decoded frame wins; minimize latency.
-- **Overlay:** hold a short bounded GPU history and match Jetson CV metadata by explicit `(stream_epoch, frame_id)`.
+- **Overlay:** hold a short bounded GPU history and match Jetson CV metadata only by exact `(stream_epoch, frame_id)`.
+- **Telemetry:** independent low-rate Vulkan/ImGui dashboard for logs, targets and runtime metrics.
 
-## Current state
+## Current implementation state
 
-The `mvp/phase-a-vulkan-probe` branch contains the Phase A direct video path:
+The MVP is currently developed as a stacked draft-PR chain. The canonical continuation point is:
+
+```text
+branch: mvp/h264-frame-id-sei
+PR:     #23
+```
+
+Do **not** treat `master` as the current implementation tip.
+
+The current top stack includes:
+
+- application-owned NVIDIA Vulkan device shared with FFmpeg;
+- H.264 -> `AV_PIX_FMT_VULKAN` hardware decode;
+- direct Vulkan YCbCr sampling with no decoded-frame CPU roundtrip;
+- newest-frame-only Raw presentation;
+- exact delayed Overlay synchronization by source `FrameKey`;
+- binary CRC32C UDP CV metadata protocol;
+- Vulkan-only Dear ImGui overlay primitives and UTF-8/Cyrillic-capable labels;
+- separate Raw, Overlay and Telemetry Vulkan windows;
+- rolling compressed-H.264 MKV blackbox recording;
+- rolling CV metadata journals;
+- frame-accurate Vulkan replay foundation;
+- automatic RTSP reconnect;
+- monitor/surface recovery;
+- full in-process Vulkan device-loss rebuild;
+- explicit one-shot Raw/Overlay screenshots;
+- canonical H.264 FrameIdentity payload and SEI NAL builder.
+
+Linux and Windows compile/test CI are green on the canonical top stack.
+
+Target NVIDIA hardware validation and real UNIGINE/Jetson end-to-end integration are still mandatory before calling the MVP complete.
+
+## Start here
+
+For continuation, architecture invariants, canonical PR order, unfinished work and the next implementation plan:
+
+- [Engineering handoff and next plan](docs/HANDOFF.md)
+- [MVP architecture](docs/MVP_ARCHITECTURE.md)
+- [Build notes](docs/BUILD.md)
+- [Phase A hardware smoke test](docs/PHASE_A_SMOKE_TEST.md)
+- [CV metadata protocol](docs/METADATA_PROTOCOL.md)
+- [Source FrameIdentity SEI](docs/FRAME_IDENTITY_SEI.md)
+
+## Core live path
 
 ```text
 RTSP/RTP/UDP
     -> FFmpeg H.264 Vulkan decode
     -> AV_PIX_FMT_VULKAN / AVVkFrame
-    -> Vulkan YCbCr sampling
-    -> Vulkan swapchain
+    -> shared GPU frame lifetime
+       -> Raw: newest-frame-wins -> Vulkan swapchain
+       -> Overlay: bounded delayed GPU history
+          + exact Jetson metadata FrameKey match
+          -> Vulkan video + ImGui/Vulkan primitives
 ```
 
-The application creates the Vulkan device itself and gives that same device to FFmpeg. The renderer honors FFmpeg's per-frame timeline semaphore/layout state, keeps decoded surfaces alive until GPU completion, and never transfers decoded pixels through CPU RAM.
-
-Raw presentation already uses newest-frame-only semantics.
-
-Phase A source implementation is ready for the mandatory hardware smoke test. It has not been declared hardware-validated from this development environment.
-
-See:
-
-- [MVP architecture](docs/MVP_ARCHITECTURE.md)
-- [Build notes](docs/BUILD.md)
-- [Phase A hardware smoke test](docs/PHASE_A_SMOKE_TEST.md)
-
-After Phase A passes on the target NVIDIA machines, the next implementation milestone is source SEI frame identity plus the delayed exact-frame Overlay buffer.
+Recording consumes the original compressed H.264 packets before decode and therefore does not add a decoded-frame readback/re-encode path.
