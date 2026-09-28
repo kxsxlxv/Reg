@@ -25,6 +25,17 @@ std::shared_ptr<const CompressedVideoPacket>
 CompressedVideoPacket::cloneFrom(
     const AVPacket* packet,
     AVRational timeBase) {
+    return cloneFrom(
+        packet,
+        timeBase,
+        std::chrono::steady_clock::now());
+}
+
+std::shared_ptr<const CompressedVideoPacket>
+CompressedVideoPacket::cloneFrom(
+    const AVPacket* packet,
+    AVRational timeBase,
+    std::chrono::steady_clock::time_point receivedAt) {
     if (packet == nullptr) {
         throw std::invalid_argument(
             "CompressedVideoPacket requires AVPacket");
@@ -40,7 +51,7 @@ CompressedVideoPacket::cloneFrom(
             new CompressedVideoPacket(
                 clone,
                 timeBase,
-                std::chrono::steady_clock::now()));
+                receivedAt));
 }
 
 bool CompressedVideoPacket::keyFrame() const noexcept {
