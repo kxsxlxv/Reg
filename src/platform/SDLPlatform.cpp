@@ -14,34 +14,38 @@ SDLPlatform::SDLPlatform() {
 }
 
 SDLPlatform::~SDLPlatform() {
-    if (window_ != nullptr) {
-        SDL_DestroyWindow(window_);
+    for (SDL_Window* window : windows_) {
+        if (window != nullptr) {
+            SDL_DestroyWindow(window);
+        }
     }
+    windows_.clear();
     SDL_Quit();
 }
 
-SDL_Window* SDLPlatform::createVulkanWindow(const char* title, int width, int height) {
-    if (window_ != nullptr) {
-        throw std::runtime_error("The Phase A probe supports one bootstrap window");
-    }
-
-    window_ = SDL_CreateWindow(
+SDL_Window* SDLPlatform::createVulkanWindow(
+    const char* title,
+    int width,
+    int height) {
+    SDL_Window* window = SDL_CreateWindow(
         title,
         width,
         height,
         SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
-    if (window_ == nullptr) {
+    if (window == nullptr) {
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
 
-    return window_;
+    windows_.push_back(window);
+    return window;
 }
 
 bool SDLPlatform::pollQuitRequested() {
     SDL_Event event{};
     while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+        if (event.type == SDL_EVENT_QUIT ||
+            event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
             return true;
         }
     }
