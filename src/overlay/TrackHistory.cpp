@@ -25,10 +25,18 @@ void TrackHistory::observe(
 
         auto& track = tracks_[target.id];
 
-        if (!track.empty() && track.back().key == metadata.key) {
-            // Exact duplicate frame metadata should normally be filtered before
-            // this layer, but keeping history idempotent makes replay safer.
-            continue;
+        if (!track.empty()) {
+            const auto& lastKey = track.back().key;
+
+            if (lastKey.streamEpoch != metadata.key.streamEpoch) {
+                // Target IDs are session-local. Never draw a trajectory across
+                // a reconnect/new stream epoch even if the numeric ID repeats.
+                track.clear();
+            } else if (metadata.key.frameId <= lastKey.frameId) {
+                // Exact duplicates and backwards replay/reordered observations
+                // must not bend the live trajectory backwards.
+                continue;
+            }
         }
 
         track.push_back(TrackPoint{
