@@ -80,7 +80,7 @@ void zoomAndPanUseOneCanonicalTransform() {
 
     transform.setZoom(2.0F);
 
-    auto center = transform.normalizedToScreen({0.5F, 0.5F});
+    auto center = transform.normalizedToScreen(reg::video::Vec2{0.5F, 0.5F});
     require(near(center.x, 960.0F), "zoom changed source center x");
     require(near(center.y, 540.0F), "zoom changed source center y");
 
