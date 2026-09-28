@@ -106,6 +106,18 @@ implementation only:
 
 It has no FFmpeg, SDL, Vulkan, or Dear ImGui dependency.
 
+The source package can be configured independently of the Viewer:
+
+```bash
+cmake -S integrations/unigine -B build-unigine-identity
+cmake --build build-unigine-identity
+```
+
+When consumed from a UNIGINE application CMake project, the integration
+directory also exposes the interface target
+`reg_unigine_rtsp_frame_identity`, which publishes the include paths for
+`RegRtspFrameIdentityBridge.hpp` and links the portable source library.
+
 Reg provides:
 
 ```cpp
