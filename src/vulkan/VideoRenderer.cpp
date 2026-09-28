@@ -2,6 +2,7 @@
 
 #include "render/VideoOverlayRecorder.hpp"
 #include "vulkan/Swapchain.hpp"
+#include "vulkan/VulkanError.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 extern "C" {
@@ -28,12 +29,6 @@ extern "C" {
 
 namespace reg::vulkan {
 namespace {
-
-void checkVk(VkResult result, const char* operation) {
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(operation) + " failed with VkResult=" + std::to_string(result));
-    }
-}
 
 VkSamplerYcbcrModelConversion modelFor(AVColorSpace colorspace) {
     switch (colorspace) {
