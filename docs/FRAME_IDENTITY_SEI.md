@@ -61,7 +61,15 @@ Viewer and Jetson copy the value from the video; they do not invent independent 
 
 `frame_id` is a monotonically increasing source-frame sequence within the epoch.
 
-It must be assigned before encoding so the same visual frame has the same identity everywhere.
+When the encoder exposes a pre-encode identity hook, assign the ID before
+encoding. With the documented UNIGINE RTSPStreamer public API, the first
+modifiable boundary is the encoded Annex-B frame callback; in that topology the
+ID is assigned to the encoded access unit immediately before that augmented
+access unit is published.
+
+In both cases, the requirement is the same: one source-assigned identity belongs
+to one published visual access unit and is carried inside that access unit to
+all consumers.
 
 The Jetson metadata packet returns exactly this FrameKey.
 
