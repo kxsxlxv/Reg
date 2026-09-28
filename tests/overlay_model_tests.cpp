@@ -59,7 +59,7 @@ void aspectFitMapsNormalizedCoordinates() {
     require(near(viewport.x, 0.0F), "unexpected viewport x");
     require(near(viewport.y, 152.0F), "unexpected vertical letterbox");
 
-    const auto center = transform.normalizedToScreen({0.5F, 0.5F});
+    const auto center = transform.normalizedToScreen(reg::video::Vec2{0.5F, 0.5F});
     require(near(center.x, 640.0F), "normalized center x mismatch");
     require(near(center.y, 512.0F), "normalized center y mismatch");
 
@@ -85,7 +85,7 @@ void zoomAndPanUseOneCanonicalTransform() {
     require(near(center.y, 540.0F), "zoom changed source center y");
 
     transform.setPan({0.1F, 0.0F});
-    center = transform.normalizedToScreen({0.6F, 0.5F});
+    center = transform.normalizedToScreen(reg::video::Vec2{0.6F, 0.5F});
     require(near(center.x, 960.0F), "pan center mapping mismatch");
 }
 
