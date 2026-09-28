@@ -11,9 +11,11 @@ namespace reg::media {
 
 CompressedVideoPacket::CompressedVideoPacket(
     AVPacket* packet,
-    AVRational timeBase) noexcept
+    AVRational timeBase,
+    std::chrono::steady_clock::time_point receivedAt) noexcept
     : packet_(packet),
-      timeBase_(timeBase) {}
+      timeBase_(timeBase),
+      receivedAt_(receivedAt) {}
 
 CompressedVideoPacket::~CompressedVideoPacket() {
     av_packet_free(&packet_);
@@ -37,7 +39,8 @@ CompressedVideoPacket::cloneFrom(
         const CompressedVideoPacket>(
             new CompressedVideoPacket(
                 clone,
-                timeBase));
+                timeBase,
+                std::chrono::steady_clock::now()));
 }
 
 bool CompressedVideoPacket::keyFrame() const noexcept {
