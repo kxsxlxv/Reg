@@ -75,6 +75,7 @@ endif()
 
 add_library(reg_jetson_metadata_bridge STATIC
     src/media/FrameIdentity.cpp
+    src/media/FrameIdentityAvFrame.cpp
     src/jetson/MetadataBridge.cpp
 )
 
@@ -137,6 +138,7 @@ add_executable(reg_probe
     src/vulkan/VideoRenderer.cpp
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
+    src/media/FrameIdentityAvFrame.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
@@ -250,8 +252,6 @@ if(REG_BUILD_TESTS)
         src/source/FrameIdentityAccessUnitInjector.cpp
     )
     target_include_directories(reg_source_frame_identity_injector_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-    target_link_libraries(reg_source_frame_identity_injector_tests PRIVATE FFmpeg::avutil)
-
     if(MSVC)
         target_compile_options(reg_source_frame_identity_injector_tests PRIVATE /W4 /permissive- /EHsc)
     else()
@@ -263,6 +263,7 @@ if(REG_BUILD_TESTS)
     add_executable(reg_frame_identity_tests
         tests/frame_identity_tests.cpp
         src/media/FrameIdentity.cpp
+        src/media/FrameIdentityAvFrame.cpp
         src/media/FrameIdentitySei.cpp
     )
     target_include_directories(reg_frame_identity_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
