@@ -3,6 +3,7 @@
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
+#include "overlay/TrackHistory.hpp"
 #include "platform/SDLPlatform.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
@@ -10,6 +11,7 @@
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VideoRenderer.hpp"
 #include "vulkan/VulkanContext.hpp"
+#include "vulkan/VulkanSurface.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -18,6 +20,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 
@@ -26,13 +29,18 @@ int main(int argc, char** argv) {
         const auto options = reg::app::parseCommandLine(argc, argv);
 
         reg::platform::SDLPlatform platform;
-        SDL_Window* window = platform.createVulkanWindow(
-            "Reg - Vulkan Decode / Frame Sync Probe",
+
+        SDL_Window* rawWindow = platform.createVulkanWindow(
+            "Reg - Raw",
             1280,
             720);
 
-        reg::vulkan::VulkanContext vulkan(window, options.validation);
-        reg::vulkan::Swapchain swapchain(vulkan, window);
+        reg::vulkan::VulkanContext vulkan(rawWindow, options.validation);
+        reg::vulkan::Swapchain rawSwapchain(
+            vulkan,
+            rawWindow,
+            reg::vulkan::PresentPolicy::LowLatency);
+
         reg::media::VulkanHwDevice hwDevice(vulkan);
 
         reg::media::RtspDecoder decoder(
@@ -45,7 +53,7 @@ int main(int argc, char** argv) {
             });
 
         reg::video::RawFrameMailbox rawMailbox;
-        reg::vulkan::VideoRenderer renderer(vulkan);
+        reg::vulkan::VideoRenderer rawRenderer(vulkan);
 
         using OverlayBuffer =
             reg::video::OverlayFrameBuffer<reg::video::VideoFrame>;
@@ -63,6 +71,11 @@ int main(int argc, char** argv) {
         const bool metadataEnabled = options.metadataPort != 0;
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
+        std::unique_ptr<reg::vulkan::VulkanSurface> overlaySurface;
+        std::unique_ptr<reg::vulkan::Swapchain> overlaySwapchain;
+        std::unique_ptr<reg::vulkan::VideoRenderer> overlayVideoRenderer;
+        reg::overlay::TrackHistory trackHistory(std::chrono::seconds(5));
+
         if (metadataEnabled) {
             metadataReceiver =
                 std::make_unique<reg::metadata::MetadataReceiver>(
@@ -73,6 +86,27 @@ int main(int argc, char** argv) {
                         .pollTimeout = std::chrono::milliseconds(20),
                     });
 
+            SDL_Window* overlayWindow = platform.createVulkanWindow(
+                "Reg - Frame-accurate Overlay Video",
+                1280,
+                720);
+
+            overlaySurface =
+                std::make_unique<reg::vulkan::VulkanSurface>(
+                    vulkan,
+                    overlayWindow);
+
+            overlaySwapchain =
+                std::make_unique<reg::vulkan::Swapchain>(
+                    vulkan,
+                    overlaySurface->handle(),
+                    overlayWindow,
+                    reg::vulkan::PresentPolicy::Stable);
+
+            overlayVideoRenderer =
+                std::make_unique<reg::vulkan::VideoRenderer>(
+                    vulkan);
+
             std::cout
                 << "[metadata] enabled on "
                 << options.metadataBind << ':' << options.metadataPort
@@ -82,9 +116,9 @@ int main(int argc, char** argv) {
         }
 
         std::atomic_uint64_t decodedFrames{0};
-        std::atomic_uint64_t presentedFrames{0};
+        std::atomic_uint64_t rawPresentedFrames{0};
         std::atomic_uint64_t framesWithoutIdentity{0};
-        std::atomic_uint64_t overlayMatchedFrames{0};
+        std::atomic_uint64_t overlayPresentedFrames{0};
         std::atomic_uint64_t overlayDroppedFrames{0};
 
         std::atomic_bool decoderFinished{false};
@@ -167,7 +201,8 @@ int main(int argc, char** argv) {
             }
         };
 
-        reg::video::VideoFramePtr lastPresented;
+        reg::video::VideoFramePtr lastRawPresented;
+        std::optional<OverlaySynchronizer::Result> pendingOverlay;
 
         try {
             while (!decoderFinished.load(std::memory_order_acquire)) {
@@ -180,10 +215,11 @@ int main(int argc, char** argv) {
                     break;
                 }
 
-                if (metadataEnabled) {
-                    const auto syncResult =
-                        overlaySynchronizer.next(
-                            std::chrono::steady_clock::now());
+                const auto now = std::chrono::steady_clock::now();
+
+                if (metadataEnabled && !pendingOverlay) {
+                    auto syncResult =
+                        overlaySynchronizer.next(now);
 
                     if (syncResult.droppedFrames != 0) {
                         overlayDroppedFrames.fetch_add(
@@ -191,22 +227,42 @@ int main(int argc, char** argv) {
                             std::memory_order_relaxed);
                     }
 
-                    if (syncResult.action == reg::video::SyncAction::Present) {
-                        const auto matched =
-                            overlayMatchedFrames.fetch_add(
+                    if (syncResult.action ==
+                        reg::video::SyncAction::Present) {
+                        pendingOverlay = std::move(syncResult);
+                    }
+                }
+
+                if (pendingOverlay &&
+                    overlayVideoRenderer &&
+                    overlaySwapchain) {
+                    if (overlayVideoRenderer->render(
+                            pendingOverlay->frame,
+                            *overlaySwapchain)) {
+                        const auto presented =
+                            overlayPresentedFrames.fetch_add(
                                 1,
                                 std::memory_order_relaxed) + 1;
 
-                        if (matched == 1 || matched % 60 == 0) {
+                        trackHistory.observe(
+                            *pendingOverlay->metadata,
+                            now);
+
+                        if (presented == 1 ||
+                            presented % 60 == 0) {
                             const auto metadataLatency =
-                                std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    syncResult.metadata->receivedAt -
-                                    syncResult.frame->decodedAt());
+                                std::chrono::duration_cast<
+                                    std::chrono::milliseconds>(
+                                        pendingOverlay->metadata->receivedAt -
+                                        pendingOverlay->frame->decodedAt());
 
                             std::cout
-                                << "[overlay-sync] matched=" << matched
-                                << " epoch=" << syncResult.key.streamEpoch
-                                << " frame=" << syncResult.key.frameId
+                                << "[overlay-video] presented="
+                                << presented
+                                << " epoch="
+                                << pendingOverlay->key.streamEpoch
+                                << " frame="
+                                << pendingOverlay->key.frameId
                                 << " metadata_latency_ms="
                                 << metadataLatency.count()
                                 << " dropped_total="
@@ -214,31 +270,38 @@ int main(int argc, char** argv) {
                                     std::memory_order_relaxed)
                                 << '\n';
                         }
+
+                        pendingOverlay.reset();
                     }
                 }
 
                 const auto latest = rawMailbox.latest();
-                if (latest && latest != lastPresented) {
-                    if (renderer.render(latest, swapchain)) {
-                        lastPresented = latest;
+                if (latest && latest != lastRawPresented) {
+                    if (rawRenderer.render(
+                            latest,
+                            rawSwapchain)) {
+                        lastRawPresented = latest;
+
                         const auto count =
-                            presentedFrames.fetch_add(
+                            rawPresentedFrames.fetch_add(
                                 1,
                                 std::memory_order_relaxed) + 1;
 
                         if (count == 1 || count % 120 == 0) {
                             std::cout
-                                << "[renderer] presented=" << count
+                                << "[raw] presented=" << count
                                 << " source=" << latest->width()
                                 << 'x' << latest->height()
-                                << " output=" << swapchain.extent().width
-                                << 'x' << swapchain.extent().height
+                                << " output="
+                                << rawSwapchain.extent().width
+                                << 'x'
+                                << rawSwapchain.extent().height
                                 << '\n';
                         }
                     } else {
                         std::this_thread::yield();
                     }
-                } else {
+                } else if (!pendingOverlay) {
                     std::this_thread::sleep_for(
                         std::chrono::milliseconds(1));
                 }
@@ -266,38 +329,53 @@ int main(int argc, char** argv) {
             << '\n';
         std::cout
             << "[probe] presented raw frames: "
-            << presentedFrames.load(std::memory_order_relaxed)
+            << rawPresentedFrames.load(std::memory_order_relaxed)
             << '\n';
 
         if (metadataEnabled) {
             const auto stats = metadataReceiver->stats();
 
             std::cout
-                << "[probe] overlay matched: "
-                << overlayMatchedFrames.load(std::memory_order_relaxed)
+                << "[probe] overlay presented: "
+                << overlayPresentedFrames.load(
+                    std::memory_order_relaxed)
                 << " dropped: "
-                << overlayDroppedFrames.load(std::memory_order_relaxed)
+                << overlayDroppedFrames.load(
+                    std::memory_order_relaxed)
                 << " missing_sei: "
-                << framesWithoutIdentity.load(std::memory_order_relaxed)
+                << framesWithoutIdentity.load(
+                    std::memory_order_relaxed)
+                << " active_tracks: "
+                << trackHistory.trackCount()
                 << '\n';
 
             std::cout
-                << "[probe] metadata rx=" << stats.datagramsReceived
-                << " accepted=" << stats.packetsAccepted
-                << " invalid=" << stats.invalidPackets
-                << " duplicate_seq=" << stats.duplicateSequences
-                << " duplicate_frame=" << stats.duplicateFrames
-                << " out_of_order=" << stats.outOfOrderSequences
-                << " gaps_observed=" << stats.sequenceGapsObserved
-                << " late=" << stats.latePackets
-                << " store_evictions=" << stats.storeEvictions
+                << "[probe] metadata rx="
+                << stats.datagramsReceived
+                << " accepted="
+                << stats.packetsAccepted
+                << " invalid="
+                << stats.invalidPackets
+                << " duplicate_seq="
+                << stats.duplicateSequences
+                << " duplicate_frame="
+                << stats.duplicateFrames
+                << " out_of_order="
+                << stats.outOfOrderSequences
+                << " gaps_observed="
+                << stats.sequenceGapsObserved
+                << " late="
+                << stats.latePackets
+                << " store_evictions="
+                << stats.storeEvictions
                 << '\n';
         }
 
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "fatal: " << error.what() << '\n';
-        reg::app::printUsage(argc > 0 ? argv[0] : "reg_probe");
+        reg::app::printUsage(
+            argc > 0 ? argv[0] : "reg_probe");
         return 1;
     }
 }
