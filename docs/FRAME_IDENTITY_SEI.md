@@ -95,10 +95,16 @@ The shared implementation exposes:
 ```cpp
 encodeFrameIdentityPayload(identity)
 decodeFrameIdentityPayload(payload)
+buildFrameIdentitySeiNal(identity, framing)
 extractFrameIdentity(avFrame)
 ```
 
-The first two functions define the project wire contract.
+The first two functions define the project payload wire contract.
+
+`buildFrameIdentitySeiNal()` constructs a complete H.264 SEI NAL and performs H.264 emulation-prevention insertion. It supports:
+
+- Annex-B framing: `00 00 00 01 | NAL(type=6) | EBSP`;
+- AVCC framing with a 4-byte big-endian NAL length.
 
 `extractFrameIdentity()` additionally validates the SEI UUID when consuming FFmpeg `AV_FRAME_DATA_SEI_UNREGISTERED`.
 
@@ -110,8 +116,12 @@ The UNIGINE/source integration should:
 
 1. assign `stream_epoch` once per logical stream session;
 2. increment `frame_id` for each rendered source frame;
-3. call the canonical payload encoder, or implement the documented golden-compatible layout;
-4. attach UUID + payload as H.264 `user_data_unregistered` SEI to that frame's access unit;
+3. call `buildFrameIdentitySeiNal()` using the framing expected by the encoder/packetizer;
+4. insert the returned SEI NAL into the **same H.264 access unit**, before that frame's VCL NAL units;
 5. preserve the identity through the RTSP stream sent to both Viewer and Jetson.
+
+The builder emits SEI payload type 5 (`user_data_unregistered`), payload size 48 bytes (16-byte UUID + 32-byte Reg payload), RBSP trailing bits, and all required emulation-prevention bytes.
+
+Do not insert the SEI after the following frame has already begun. Exact synchronization assumes the SEI belongs to the same source frame as the VCL NAL units that follow it.
 
 The exact encoder API hook depends on the H.264 encoder/server implementation and is intentionally outside the portable Viewer core.
