@@ -78,6 +78,12 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
                 requireValue(i, argc, argv, "--record-queue-capacity"), "--record-queue-capacity");
         } else if (arg == "--disable-recorder") {
             options.recorderEnabled = false;
+        } else if (arg == "--reconnect-initial-ms") {
+            options.reconnectInitialMs = parseInteger<int>(
+                requireValue(i, argc, argv, "--reconnect-initial-ms"), "--reconnect-initial-ms");
+        } else if (arg == "--reconnect-max-ms") {
+            options.reconnectMaxMs = parseInteger<int>(
+                requireValue(i, argc, argv, "--reconnect-max-ms"), "--reconnect-max-ms");
         } else if (arg == "--no-validation") {
             options.validation = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -123,6 +129,12 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.recordQueueCapacity <= 0) {
         throw std::runtime_error("--record-queue-capacity must be > 0");
     }
+    if (options.reconnectInitialMs <= 0) {
+        throw std::runtime_error("--reconnect-initial-ms must be > 0");
+    }
+    if (options.reconnectMaxMs < options.reconnectInitialMs) {
+        throw std::runtime_error("--reconnect-max-ms must be >= --reconnect-initial-ms");
+    }
 
     return options;
 }
@@ -143,6 +155,8 @@ void printUsage(const char* executableName) {
         << "  --record-retention-sec N Rolling retention duration (default: 300)\n"
         << "  --record-queue-capacity N Compressed packet queue bound (default: 2048)\n"
         << "  --disable-recorder       Disable rolling compressed-stream recorder\n"
+        << "  --reconnect-initial-ms N Initial RTSP reconnect delay (default: 250)\n"
+        << "  --reconnect-max-ms N     Maximum RTSP reconnect delay (default: 2000)\n"
         << "  --no-validation          Do not request VK_LAYER_KHRONOS_validation\n"
         << "  -h, --help               Show this help\n";
 }
