@@ -75,6 +75,7 @@ jobs:
             --disable-swresample \
             --disable-encoders \
             --disable-muxers \
+            --enable-muxer=matroska \
             --disable-decoders \
             --enable-decoder=h264 \
             --enable-hwaccel=h264_vulkan \
