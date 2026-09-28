@@ -2,6 +2,8 @@
 
 #include "media/CompressedVideoPacket.hpp"
 #include "media/VideoStreamDescriptor.hpp"
+#include "metadata/FrameMetadata.hpp"
+#include "recorder/MetadataJournal.hpp"
 #include "recorder/SegmentedMkvWriter.hpp"
 
 #include <atomic>
@@ -18,6 +20,7 @@ namespace reg::recorder {
 
 struct BlackboxRecorderConfig {
     SegmentWriterConfig writer{};
+    MetadataJournalConfig metadataJournal{};
     std::size_t queueCapacity{2048};
 };
 
@@ -27,6 +30,9 @@ struct BlackboxRecorderStats {
     std::uint64_t packetsWritten{};
     std::uint64_t packetsWaitingForKeyframe{};
     std::uint64_t segmentRotations{};
+    std::uint64_t metadataAccepted{};
+    std::uint64_t metadataDroppedQueueFull{};
+    std::uint64_t metadataWritten{};
     std::uint64_t failures{};
     std::size_t queueDepth{};
     bool failed{};
@@ -54,6 +60,9 @@ public:
     bool submit(
         media::CompressedVideoPacketPtr packet) noexcept;
 
+    bool submitMetadata(
+        metadata::FrameMetadata metadata) noexcept;
+
     void stop() noexcept;
 
     BlackboxRecorderStats stats() const noexcept;
@@ -62,13 +71,15 @@ public:
 private:
     using QueueItem = std::variant<
         media::VideoStreamDescriptorPtr,
-        media::CompressedVideoPacketPtr>;
+        media::CompressedVideoPacketPtr,
+        metadata::FrameMetadata>;
 
     void workerMain() noexcept;
     void setFailure(std::string message) noexcept;
 
     BlackboxRecorderConfig config_;
     SegmentedMkvWriter writer_;
+    MetadataJournalWriter metadataWriter_;
 
     mutable std::mutex mutex_;
     std::condition_variable condition_;
@@ -85,6 +96,9 @@ private:
     std::atomic_uint64_t packetsWritten_{0};
     std::atomic_uint64_t packetsWaitingForKeyframe_{0};
     std::atomic_uint64_t segmentRotations_{0};
+    std::atomic_uint64_t metadataAccepted_{0};
+    std::atomic_uint64_t metadataDroppedQueueFull_{0};
+    std::atomic_uint64_t metadataWritten_{0};
     std::atomic_uint64_t failures_{0};
 };
 
