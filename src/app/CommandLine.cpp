@@ -49,6 +49,24 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         } else if (arg == "--extra-hw-frames") {
             options.extraHwFrames = parseInteger<int>(
                 requireValue(i, argc, argv, "--extra-hw-frames"), "--extra-hw-frames");
+        } else if (arg == "--metadata-bind") {
+            options.metadataBind = requireValue(i, argc, argv, "--metadata-bind");
+        } else if (arg == "--metadata-port") {
+            const auto port = parseInteger<std::uint32_t>(
+                requireValue(i, argc, argv, "--metadata-port"), "--metadata-port");
+            if (port > 65535U) {
+                throw std::runtime_error("--metadata-port must be in range 0..65535");
+            }
+            options.metadataPort = static_cast<std::uint16_t>(port);
+        } else if (arg == "--metadata-capacity") {
+            options.metadataCapacity = parseInteger<std::size_t>(
+                requireValue(i, argc, argv, "--metadata-capacity"), "--metadata-capacity");
+        } else if (arg == "--overlay-buffer-frames") {
+            options.overlayBufferFrames = parseInteger<std::size_t>(
+                requireValue(i, argc, argv, "--overlay-buffer-frames"), "--overlay-buffer-frames");
+        } else if (arg == "--overlay-delay-ms") {
+            options.overlayDelayMs = parseInteger<int>(
+                requireValue(i, argc, argv, "--overlay-delay-ms"), "--overlay-delay-ms");
         } else if (arg == "--no-validation") {
             options.validation = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -71,6 +89,18 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.extraHwFrames < 0) {
         throw std::runtime_error("--extra-hw-frames must be >= 0");
     }
+    if (options.metadataBind.empty()) {
+        throw std::runtime_error("--metadata-bind must not be empty");
+    }
+    if (options.metadataCapacity == 0) {
+        throw std::runtime_error("--metadata-capacity must be > 0");
+    }
+    if (options.overlayBufferFrames == 0) {
+        throw std::runtime_error("--overlay-buffer-frames must be > 0");
+    }
+    if (options.overlayDelayMs < 0) {
+        throw std::runtime_error("--overlay-delay-ms must be >= 0");
+    }
 
     return options;
 }
@@ -82,6 +112,11 @@ void printUsage(const char* executableName) {
         << "  --max-delay-us N         FFmpeg RTSP demux max_delay (default: 0)\n"
         << "  --reorder-queue-size N   RTP packet reorder queue size (default: 0)\n"
         << "  --extra-hw-frames N      Extra Vulkan decode surfaces (default: 32)\n"
+        << "  --metadata-bind ADDRESS  Metadata IPv4 bind address (default: 0.0.0.0)\n"
+        << "  --metadata-port N        Enable Jetson UDP metadata receiver on port N; 0 disables it\n"
+        << "  --metadata-capacity N    MetadataStore entry capacity (default: 512)\n"
+        << "  --overlay-buffer-frames N  Bounded delayed video-frame capacity (default: 32)\n"
+        << "  --overlay-delay-ms N     Fixed overlay playout delay (default: 150 ms)\n"
         << "  --no-validation          Do not request VK_LAYER_KHRONOS_validation\n"
         << "  -h, --help               Show this help\n";
 }
