@@ -10,11 +10,14 @@ extern "C" {
 
 #include <chrono>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace reg::recorder {
 namespace {
