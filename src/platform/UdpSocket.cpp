@@ -148,6 +148,38 @@ UdpSocket::~UdpSocket() {
 #endif
 }
 
+std::uint16_t UdpSocket::localPort() const {
+    sockaddr_in address{};
+
+#ifdef _WIN32
+    int addressSize =
+        static_cast<int>(sizeof(address));
+
+    if (getsockname(
+            static_cast<SOCKET>(handle_),
+            reinterpret_cast<sockaddr*>(&address),
+            &addressSize) ==
+        SOCKET_ERROR) {
+        throw socketError(
+            "getsockname(UDP)");
+    }
+#else
+    socklen_t addressSize =
+        static_cast<socklen_t>(
+            sizeof(address));
+
+    if (getsockname(
+            static_cast<int>(handle_),
+            reinterpret_cast<sockaddr*>(&address),
+            &addressSize) != 0) {
+        throw socketError(
+            "getsockname(UDP)");
+    }
+#endif
+
+    return ntohs(address.sin_port);
+}
+
 std::size_t UdpSocket::receive(std::span<std::uint8_t> buffer) {
     if (buffer.empty()) {
         throw std::invalid_argument("UDP receive buffer must not be empty");

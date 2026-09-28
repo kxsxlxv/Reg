@@ -23,6 +23,8 @@ public:
     // useful application packet and is also returned as 0.
     std::size_t receive(std::span<std::uint8_t> buffer);
 
+    std::uint16_t localPort() const;
+
 private:
     static constexpr std::uintptr_t kInvalidHandle = ~std::uintptr_t{0};
 
