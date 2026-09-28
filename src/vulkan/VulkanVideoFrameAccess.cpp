@@ -79,8 +79,12 @@ void VulkanVideoFrameAccess::recordSampleBarrier(
     AVVkFrame* vkFrame = frame.vulkanFrame;
 
     VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    barrier.srcAccessMask = vkFrame->access[0];
+    // Decode completion and memory availability are carried by the AVVkFrame
+    // timeline semaphore wait in vkQueueSubmit2. The previous access happened
+    // on FFmpeg's queue, so this receiving-queue layout transition must not
+    // claim that foreign access in its local source scope.
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+    barrier.srcAccessMask = 0;
     barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
     barrier.oldLayout = vkFrame->layout[0];
