@@ -738,6 +738,8 @@ bool VideoRenderer::render(
     checkVk(vkResetCommandBuffer(slot.commandBuffer, 0), "vkResetCommandBuffer");
 
     SurfaceEntry& surface = surfaceFor(*frame);
+    const VkSemaphore renderFinished =
+        renderFinishedSemaphores_.at(imageIndex);
     auto lockedFrame = frameAccess_.lock(*frame);
 
     try {
@@ -815,9 +817,6 @@ bool VideoRenderer::render(
         };
 
         const VkSemaphoreSubmitInfo frameSignal = frameAccess_.signalInfo(lockedFrame);
-
-        const VkSemaphore renderFinished =
-            renderFinishedSemaphores_.at(imageIndex);
 
         VkSemaphoreSubmitInfo presentSignal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
         presentSignal.semaphore = renderFinished;
