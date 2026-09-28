@@ -42,6 +42,20 @@ public:
 
     bool pollQuitRequested();
 
+    bool takeRawScreenshotRequested() noexcept {
+        const bool requested =
+            rawScreenshotRequested_;
+        rawScreenshotRequested_ = false;
+        return requested;
+    }
+
+    bool takeOverlayScreenshotRequested() noexcept {
+        const bool requested =
+            overlayScreenshotRequested_;
+        overlayScreenshotRequested_ = false;
+        return requested;
+    }
+
     bool takeDisplayTopologyChanged() noexcept {
         const bool changed =
             displayTopologyChanged_;
@@ -52,6 +66,8 @@ public:
 private:
     std::vector<SDL_Window*> windows_;
     bool displayTopologyChanged_{false};
+    bool rawScreenshotRequested_{false};
+    bool overlayScreenshotRequested_{false};
 };
 
 } // namespace reg::platform
