@@ -148,8 +148,23 @@ Delimiter, when present, remains the first NAL in the access unit.
 
 ## UNIGINE callback binding
 
-UNIGINE callbacks can be created with `MakeCallback()`. A source application
-can bind the encoded-frame callback as follows:
+A thin UNIGINE-facing adapter is provided at:
+
+```text
+integrations/unigine/RegRtspFrameIdentityBridge.hpp
+```
+
+It is intentionally not compiled by the normal Reg CI because the UNIGINE SDK
+headers are external to this repository. The adapter follows the documented
+2.22 API exactly: `MakeCallback()` +
+`addStreamFrameEncodedCallback()`.
+
+The adapter accepts an application-supplied `TrySubmitCallback`. That callback
+must synchronously copy the compressed bytes into a bounded non-blocking queue
+if it needs to retain them; the span becomes reusable after the UNIGINE encoder
+callback returns.
+
+Equivalent binding logic is shown below:
 
 ```cpp
 #include <UnigineCallback.h>
