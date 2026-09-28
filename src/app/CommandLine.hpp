@@ -7,6 +7,13 @@ namespace reg::app {
 
 struct CommandLineOptions {
     std::string rtspUrl;
+    std::string replayMkv;
+    std::string replayMetadataDirectory;
+
+    bool replayMode() const noexcept {
+        return !replayMkv.empty();
+    }
+
     std::int64_t maxDelayUs{0};
     int reorderQueueSize{0};
     int extraHwFrames{32};
