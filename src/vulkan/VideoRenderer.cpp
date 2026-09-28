@@ -85,8 +85,11 @@ VideoRenderer::VideoRenderer(const VulkanContext& vulkan)
 }
 
 VideoRenderer::~VideoRenderer() {
-    if (vulkan_.graphicsQueue().handle != VK_NULL_HANDLE) {
-        vkQueueWaitIdle(vulkan_.graphicsQueue().handle);
+    // renderFinished may still be referenced by a separate present queue.
+    // A device-wide idle is acceptable during teardown and guarantees that
+    // command buffers, decoded-frame references and WSI semaphores are retired.
+    if (vulkan_.device() != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(vulkan_.device());
     }
     destroyVideoResources();
     destroyCommandResources();
