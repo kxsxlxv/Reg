@@ -9,6 +9,10 @@
 #include <filesystem>
 #include <optional>
 
+extern "C" {
+#include <libavutil/avutil.h>
+}
+
 struct AVFormatContext;
 struct AVStream;
 
