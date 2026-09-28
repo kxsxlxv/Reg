@@ -269,18 +269,19 @@ void seiNalUsesEmulationPrevention() {
             zeroHeavy,
             reg::media::H264NalFraming::AnnexB);
 
+    constexpr std::array<std::uint8_t, 3>
+        preventionPattern{
+            0x00U,
+            0x00U,
+            0x03U,
+        };
+
     const bool hasPreventionByte =
         std::search(
             annexB.begin() + 5,
             annexB.end(),
-            std::array<std::uint8_t, 3>{
-                0x00U,
-                0x00U,
-                0x03U}.begin(),
-            std::array<std::uint8_t, 3>{
-                0x00U,
-                0x00U,
-                0x03U}.end()) !=
+            preventionPattern.begin(),
+            preventionPattern.end()) !=
         annexB.end();
 
     require(
