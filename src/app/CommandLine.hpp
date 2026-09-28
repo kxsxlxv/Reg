@@ -16,6 +16,12 @@ struct CommandLineOptions {
     int overlayDelayMs{150};
     bool overlayEnabled{true};
 
+    bool recorderEnabled{true};
+    std::string recordDirectory{"blackbox"};
+    int recordSegmentMs{5000};
+    int recordRetentionSeconds{300};
+    int recordQueueCapacity{2048};
+
     bool validation{true};
 };
 
