@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace reg::metadata {
@@ -12,6 +13,7 @@ namespace reg::metadata {
 enum class MetadataInsertResult {
     Inserted,
     Duplicate,
+    TooLate,
     EvictedOldestAndInserted,
 };
 
@@ -23,6 +25,10 @@ public:
 
     FrameMetadataPtr find(media::FrameKey key) const;
     FrameMetadataPtr take(media::FrameKey key);
+
+    // Advances the display watermark. Metadata for this FrameKey or anything
+    // older is no longer useful for live presentation and will be rejected.
+    void discardThrough(media::FrameKey key);
 
     void eraseEpoch(std::uint64_t streamEpoch);
     void clear();
@@ -41,6 +47,7 @@ private:
     mutable std::mutex mutex_;
     std::unordered_map<media::FrameKey, FrameMetadataPtr, FrameKeyHash> entries_;
     std::deque<media::FrameKey> insertionOrder_;
+    std::optional<media::FrameKey> discardedThrough_;
 };
 
 } // namespace reg::metadata
