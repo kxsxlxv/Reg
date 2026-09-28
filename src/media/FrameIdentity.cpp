@@ -1,9 +1,5 @@
 #include "media/FrameIdentity.hpp"
 
-extern "C" {
-#include <libavutil/frame.h>
-}
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -22,7 +18,8 @@ void writeLe16(
     bytes[offset] =
         static_cast<std::uint8_t>(value & 0xffU);
     bytes[offset + 1] =
-        static_cast<std::uint8_t>((value >> 8U) & 0xffU);
+        static_cast<std::uint8_t>(
+            (value >> 8U) & 0xffU);
 }
 
 void writeLe64(
@@ -55,31 +52,6 @@ std::uint64_t readLe64(
                 bytes[offset + i]) << (8U * i);
     }
     return value;
-}
-
-std::optional<SourceFrameIdentity> parseSideData(
-    const AVFrameSideData& sideData) {
-    constexpr std::size_t uuidSize =
-        kFrameIdentitySeiUuid.size();
-
-    if (sideData.size <
-        uuidSize + kFrameIdentityPayloadSize) {
-        return std::nullopt;
-    }
-
-    const std::span<const std::uint8_t> data(
-        sideData.data,
-        sideData.size);
-
-    if (!std::equal(
-            kFrameIdentitySeiUuid.begin(),
-            kFrameIdentitySeiUuid.end(),
-            data.begin())) {
-        return std::nullopt;
-    }
-
-    return decodeFrameIdentityPayload(
-        data.subspan(uuidSize));
 }
 
 } // namespace
@@ -155,29 +127,6 @@ decodeFrameIdentityPayload(
         },
         .sourceTimeNs = readLe64(payload, 24),
     };
-}
-
-std::optional<SourceFrameIdentity>
-extractFrameIdentity(const AVFrame* frame) {
-    if (frame == nullptr) {
-        return std::nullopt;
-    }
-
-    for (int i = 0; i < frame->nb_side_data; ++i) {
-        const AVFrameSideData* sideData =
-            frame->side_data[i];
-
-        if (sideData != nullptr &&
-            sideData->type ==
-                AV_FRAME_DATA_SEI_UNREGISTERED) {
-            if (auto identity =
-                    parseSideData(*sideData)) {
-                return identity;
-            }
-        }
-    }
-
-    return std::nullopt;
 }
 
 } // namespace reg::media
