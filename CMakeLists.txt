@@ -53,6 +53,26 @@ target_include_directories(reg_imgui PUBLIC
 
 target_link_libraries(reg_imgui PUBLIC Vulkan::Vulkan)
 
+add_library(reg_metadata_sender STATIC
+    src/metadata/Protocol.cpp
+    src/metadata/MetadataSender.cpp
+    src/platform/UdpSender.cpp
+)
+
+target_include_directories(reg_metadata_sender PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+if(WIN32)
+    target_link_libraries(reg_metadata_sender PUBLIC ws2_32)
+endif()
+
+if(MSVC)
+    target_compile_options(reg_metadata_sender PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(reg_metadata_sender PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
 if(Vulkan_GLSLC_EXECUTABLE)
     set(REG_GLSLC_EXECUTABLE "${Vulkan_GLSLC_EXECUTABLE}")
 else()
@@ -241,6 +261,21 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME frame_sync COMMAND reg_frame_sync_tests)
+
+    add_executable(reg_metadata_sender_tests
+        tests/metadata_sender_tests.cpp
+        src/platform/UdpSocket.cpp
+    )
+    target_include_directories(reg_metadata_sender_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_metadata_sender_tests PRIVATE reg_metadata_sender)
+
+    if(MSVC)
+        target_compile_options(reg_metadata_sender_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_metadata_sender_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME metadata_sender COMMAND reg_metadata_sender_tests)
 
     add_executable(reg_overlay_model_tests
         tests/overlay_model_tests.cpp
