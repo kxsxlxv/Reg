@@ -90,7 +90,8 @@ void bmpHeaderAndChannelOrderAreStable() {
         stream.read(
             reinterpret_cast<char*>(
                 bytes.data()),
-            size);
+            static_cast<std::streamsize>(
+                size));
 
         require(
             bytes[0] == 'B' &&
