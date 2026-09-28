@@ -926,6 +926,9 @@ VideoRenderer::createScreenshotBuffer(
         allocationInfo.memoryTypeIndex =
             *selected;
 
+        result.allocationSize =
+            requirements.size;
+
         checkVk(
             vkAllocateMemory(
                 vulkan_.device(),
@@ -968,6 +971,7 @@ void VideoRenderer::destroyScreenshotBuffer(
     }
 
     buffer.byteSize = 0;
+    buffer.allocationSize = 0;
 }
 
 std::vector<std::uint8_t>
@@ -979,21 +983,6 @@ VideoRenderer::readScreenshotBuffer(
             "screenshot buffer is not initialized");
     }
 
-    if (!buffer.coherent) {
-        VkMappedMemoryRange range{
-            VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
-        range.memory = buffer.memory;
-        range.offset = 0;
-        range.size = VK_WHOLE_SIZE;
-
-        checkVk(
-            vkInvalidateMappedMemoryRanges(
-                vulkan_.device(),
-                1,
-                &range),
-            "vkInvalidateMappedMemoryRanges(screenshot)");
-    }
-
     void* mapped = nullptr;
 
     checkVk(
@@ -1001,10 +990,32 @@ VideoRenderer::readScreenshotBuffer(
             vulkan_.device(),
             buffer.memory,
             0,
-            buffer.byteSize,
+            VK_WHOLE_SIZE,
             0,
             &mapped),
         "vkMapMemory(screenshot)");
+
+    if (!buffer.coherent) {
+        VkMappedMemoryRange range{
+            VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
+        range.memory = buffer.memory;
+        range.offset = 0;
+        range.size = VK_WHOLE_SIZE;
+
+        try {
+            checkVk(
+                vkInvalidateMappedMemoryRanges(
+                    vulkan_.device(),
+                    1,
+                    &range),
+                "vkInvalidateMappedMemoryRanges(screenshot)");
+        } catch (...) {
+            vkUnmapMemory(
+                vulkan_.device(),
+                buffer.memory);
+            throw;
+        }
+    }
 
     std::vector<std::uint8_t> pixels(
         static_cast<std::size_t>(
