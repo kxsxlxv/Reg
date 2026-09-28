@@ -2,6 +2,7 @@
 
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanContext.hpp"
+#include "vulkan/VulkanError.hpp"
 
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
@@ -27,12 +28,9 @@ namespace {
 void checkVk(
     VkResult result,
     const char* operation) {
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(
-            std::string(operation) +
-            " failed with VkResult=" +
-            std::to_string(result));
-    }
+    vulkan::checkVk(
+        result,
+        operation);
 }
 
 std::optional<std::filesystem::path>
