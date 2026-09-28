@@ -84,6 +84,8 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         } else if (arg == "--reconnect-max-ms") {
             options.reconnectMaxMs = parseInteger<int>(
                 requireValue(i, argc, argv, "--reconnect-max-ms"), "--reconnect-max-ms");
+        } else if (arg == "--disable-telemetry") {
+            options.telemetryEnabled = false;
         } else if (arg == "--no-validation") {
             options.validation = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -157,6 +159,7 @@ void printUsage(const char* executableName) {
         << "  --disable-recorder       Disable rolling compressed-stream recorder\n"
         << "  --reconnect-initial-ms N Initial RTSP reconnect delay (default: 250)\n"
         << "  --reconnect-max-ms N     Maximum RTSP reconnect delay (default: 2000)\n"
+        << "  --disable-telemetry      Disable the third telemetry window\n"
         << "  --no-validation          Do not request VK_LAYER_KHRONOS_validation\n"
         << "  -h, --help               Show this help\n";
 }
