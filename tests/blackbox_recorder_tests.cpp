@@ -1,5 +1,7 @@
 #include "media/CompressedVideoPacket.hpp"
 #include "media/VideoStreamDescriptor.hpp"
+#include "metadata/FrameMetadata.hpp"
+#include "recorder/MetadataJournal.hpp"
 #include "recorder/SegmentedMkvWriter.hpp"
 
 extern "C" {
@@ -162,6 +164,37 @@ makePacket(
         receivedAt);
 }
 
+reg::metadata::FrameMetadata makeMetadata(
+    std::uint64_t epoch,
+    std::uint64_t frameId,
+    std::uint32_t sequence,
+    std::chrono::steady_clock::time_point receivedAt) {
+    reg::metadata::FrameMetadata metadata{};
+    metadata.key = {
+        .streamEpoch = epoch,
+        .frameId = frameId,
+    };
+    metadata.sequence = sequence;
+    metadata.flags = 3;
+    metadata.cvBeginNs = 1000 + frameId;
+    metadata.cvEndNs = 2000 + frameId;
+    metadata.receivedAt = receivedAt;
+    metadata.targets.push_back(
+        reg::metadata::TargetMetadata{
+            .id = 42,
+            .classId = 7,
+            .flags = 1,
+            .confidence = 0.875F,
+            .bbox = {
+                .x = 0.1F,
+                .y = 0.2F,
+                .width = 0.3F,
+                .height = 0.4F,
+            },
+        });
+    return metadata;
+}
+
 void requireReadableMatroska(
     const std::filesystem::path& path) {
     AVFormatContext* input = nullptr;
@@ -303,11 +336,117 @@ void writerStartsOnKeyframeAndRotates() {
     std::filesystem::remove_all(directory);
 }
 
+void metadataJournalRoundTripsAndRotates() {
+    const auto unique =
+        std::to_string(
+            std::chrono::steady_clock::now()
+                .time_since_epoch()
+                .count());
+
+    const auto directory =
+        std::filesystem::temp_directory_path() /
+        ("reg_metadata_journal_test_" + unique);
+
+    std::filesystem::remove_all(directory);
+
+    const auto base =
+        std::chrono::steady_clock::now();
+
+    try {
+        reg::recorder::MetadataJournalWriter writer(
+            reg::recorder::MetadataJournalConfig{
+                .directory = directory,
+                .targetSegmentDuration = 50ms,
+                .retention = 2s,
+            });
+
+        writer.write(makeMetadata(9, 100, 1, base));
+        writer.write(makeMetadata(9, 101, 2, base + 20ms));
+        writer.write(makeMetadata(9, 102, 3, base + 80ms));
+        writer.close();
+
+        const auto stats = writer.stats();
+        require(
+            stats.recordsWritten == 3,
+            "metadata journal written record count mismatch");
+        require(
+            stats.segmentsCompleted == 2,
+            "metadata journal must rotate into two segments");
+
+        std::vector<std::filesystem::path> journals;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(directory)) {
+            if (entry.path().extension() == ".cvmj") {
+                journals.push_back(entry.path());
+            }
+        }
+
+        std::sort(journals.begin(), journals.end());
+
+        require(
+            journals.size() == 2,
+            "expected two metadata journal files");
+
+        std::vector<reg::recorder::MetadataJournalRecord>
+            records;
+
+        for (const auto& journalPath : journals) {
+            const auto journal =
+                reg::recorder::readMetadataJournalFile(
+                    journalPath);
+
+            require(
+                journal.streamEpoch == 9,
+                "metadata journal epoch mismatch");
+
+            records.insert(
+                records.end(),
+                journal.records.begin(),
+                journal.records.end());
+        }
+
+        require(
+            records.size() == 3,
+            "metadata journal replay record count mismatch");
+
+        require(
+            records[0].metadata.key ==
+                reg::media::FrameKey{9, 100},
+            "metadata journal first FrameKey mismatch");
+        require(
+            records[1].metadata.key ==
+                reg::media::FrameKey{9, 101},
+            "metadata journal second FrameKey mismatch");
+        require(
+            records[2].metadata.key ==
+                reg::media::FrameKey{9, 102},
+            "metadata journal third FrameKey mismatch");
+
+        require(
+            records[0].metadata.targets.size() == 1 &&
+                records[0].metadata.targets[0].id == 42,
+            "metadata journal target payload mismatch");
+
+        require(
+            records[1].receiveOffset == 20ms,
+            "metadata journal receive offset mismatch");
+        require(
+            records[2].receiveOffset == 0ns,
+            "new metadata journal segment must restart receive offset");
+    } catch (...) {
+        std::filesystem::remove_all(directory);
+        throw;
+    }
+
+    std::filesystem::remove_all(directory);
+}
+
 } // namespace
 
 int main() {
     try {
         writerStartsOnKeyframeAndRotates();
+        metadataJournalRoundTripsAndRotates();
 
         std::cout
             << "blackbox_recorder_tests: PASS\n";
