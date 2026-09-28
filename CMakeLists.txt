@@ -111,6 +111,7 @@ add_executable(reg_probe
     src/render/TargetOverlayBuilder.cpp
     src/render/ImGuiOverlayRenderer.cpp
     src/recorder/SegmentedMkvWriter.cpp
+    src/recorder/MetadataJournal.cpp
     src/recorder/BlackboxRecorder.cpp
 )
 
@@ -204,7 +205,9 @@ if(REG_BUILD_TESTS)
         tests/blackbox_recorder_tests.cpp
         src/media/CompressedVideoPacket.cpp
         src/media/VideoStreamDescriptor.cpp
+        src/metadata/Protocol.cpp
         src/recorder/SegmentedMkvWriter.cpp
+        src/recorder/MetadataJournal.cpp
     )
     target_include_directories(reg_blackbox_recorder_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(reg_blackbox_recorder_tests PRIVATE
