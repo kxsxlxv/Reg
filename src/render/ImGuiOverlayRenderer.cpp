@@ -2,6 +2,7 @@
 
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanContext.hpp"
+#include "vulkan/VulkanError.hpp"
 
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
@@ -369,15 +370,13 @@ struct ImGuiOverlayRenderer::Impl {
             static_cast<std::uint32_t>(std::size(sizes));
         info.pPoolSizes = sizes;
 
-        const VkResult result = vkCreateDescriptorPool(
-            vulkan.device(),
-            &info,
-            nullptr,
-            &descriptorPool);
-        if (result != VK_SUCCESS) {
-            throw std::runtime_error(
-                "vkCreateDescriptorPool(ImGui overlay) failed");
-        }
+        vulkan::checkVk(
+            vkCreateDescriptorPool(
+                vulkan.device(),
+                &info,
+                nullptr,
+                &descriptorPool),
+            "vkCreateDescriptorPool(ImGui overlay)");
     }
 
     void shutdownBackend() {
@@ -461,13 +460,10 @@ struct ImGuiOverlayRenderer::Impl {
         }
 
         if (backendInitialized) {
-            const VkResult waitResult =
+            vulkan::checkVk(
                 vkQueueWaitIdle(
-                    vulkan.graphicsQueue().handle);
-            if (waitResult != VK_SUCCESS) {
-                throw std::runtime_error(
-                    "vkQueueWaitIdle before ImGui backend rebuild failed");
-            }
+                    vulkan.graphicsQueue().handle),
+                "vkQueueWaitIdle before ImGui backend rebuild");
 
             shutdownBackend();
         }
