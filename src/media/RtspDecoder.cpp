@@ -72,31 +72,36 @@ void RtspDecoder::run(
             "RtspDecoder requires an onFrame callback");
     }
 
-    stopRequested_.store(
-        false,
-        std::memory_order_release);
-
-    const VideoStreamDescriptorPtr descriptor =
-        openInput();
-    openDecoder();
-
-    if (callbacks.onStreamOpened) {
-        callbacks.onStreamOpened(descriptor);
+    // requestStop() is terminal for this decoder object. We intentionally
+    // do not clear stopRequested_ here so a reconnect supervisor cannot race a
+    // shutdown request and reopen the RTSP session.
+    if (stopRequested_.load(
+            std::memory_order_acquire)) {
+        return;
     }
 
-    std::unique_ptr<AVPacket, PacketDeleter>
-        packet(av_packet_alloc());
-    std::unique_ptr<AVFrame, FrameDeleter>
-        frame(av_frame_alloc());
+    try {
+        const VideoStreamDescriptorPtr descriptor =
+            openInput();
+        openDecoder();
 
-    if (!packet || !frame) {
-        throw std::bad_alloc{};
-    }
+        if (callbacks.onStreamOpened) {
+            callbacks.onStreamOpened(descriptor);
+        }
 
-    std::uint64_t packetCount = 0;
+        std::unique_ptr<AVPacket, PacketDeleter>
+            packet(av_packet_alloc());
+        std::unique_ptr<AVFrame, FrameDeleter>
+            frame(av_frame_alloc());
 
-    while (!stopRequested_.load(
-        std::memory_order_acquire)) {
+        if (!packet || !frame) {
+            throw std::bad_alloc{};
+        }
+
+        std::uint64_t packetCount = 0;
+
+        while (!stopRequested_.load(
+            std::memory_order_acquire)) {
         const int result =
             av_read_frame(
                 formatContext_,
@@ -118,30 +123,39 @@ void RtspDecoder::run(
                 result);
         }
 
-        ++packetCount;
+            ++packetCount;
 
-        if (packet->stream_index ==
-            videoStreamIndex_) {
-            if (callbacks.onCompressedPacket) {
-                callbacks.onCompressedPacket(
-                    CompressedVideoPacket::cloneFrom(
-                        packet.get(),
-                        descriptor->timeBase()));
+            if (packet->stream_index ==
+                videoStreamIndex_) {
+                if (callbacks.onCompressedPacket) {
+                    callbacks.onCompressedPacket(
+                        CompressedVideoPacket::cloneFrom(
+                            packet.get(),
+                            descriptor->timeBase()));
+                }
+
+                decodePacket(
+                    callbacks.onFrame,
+                    packet.get(),
+                    frame.get());
             }
 
-            decodePacket(
-                callbacks.onFrame,
-                packet.get(),
-                frame.get());
+            av_packet_unref(packet.get());
         }
 
-        av_packet_unref(packet.get());
-    }
+        std::cout
+            << "[rtsp] session ended after "
+            << packetCount
+            << " demuxed packets\n";
 
-    std::cout
-        << "[rtsp] stopped after "
-        << packetCount
-        << " demuxed packets\n";
+        close();
+    } catch (...) {
+        // Every reconnect starts from a clean demuxer/decoder session. In
+        // particular, never retain partially initialized codec state across
+        // packet-loss/EOF/network failures.
+        close();
+        throw;
+    }
 }
 
 void RtspDecoder::run(
