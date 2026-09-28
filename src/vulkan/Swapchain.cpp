@@ -12,24 +12,6 @@
 #include <vector>
 
 namespace reg::vulkan {
-namespace {
-
-void checkVk(VkResult result, const char* operation) {
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(operation) + " failed with VkResult=" + std::to_string(result));
-    }
-}
-
-void checkSurfaceVk(VkResult result, const char* operation) {
-    if (result == VK_ERROR_SURFACE_LOST_KHR) {
-        throw SurfaceLostError(
-            std::string(operation) +
-            " failed: Vulkan surface lost");
-    }
-    checkVk(result, operation);
-}
-
-} // namespace
 
 Swapchain::Swapchain(
     const VulkanContext& vulkan,
