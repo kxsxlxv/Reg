@@ -183,9 +183,13 @@ target_link_libraries(reg_replay PRIVATE
     reg_imgui
 )
 
+if(WIN32)
+    target_link_libraries(reg_replay PRIVATE ws2_32)
+endif()
+
 target_compile_definitions(reg_replay PRIVATE
     REG_ENABLE_VALIDATION=$<BOOL:${REG_ENABLE_VALIDATION}>
-    REG_SHADER_DIR="${REG_SHADER_OUTPUT_DIR}"
+    REG_SHADER_DIR=\"${REG_SHADER_OUTPUT_DIR}\"
 )
 
 if(MSVC)
