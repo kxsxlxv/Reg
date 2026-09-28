@@ -115,6 +115,26 @@ else()
     target_compile_options(reg_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 endif()
 
+add_executable(reg_metadata_probe
+    src/tools/metadata_probe.cpp
+    src/platform/UdpSocket.cpp
+    src/metadata/MetadataProtocol.cpp
+    src/metadata/MetadataStore.cpp
+    src/metadata/MetadataReceiver.cpp
+)
+
+target_include_directories(reg_metadata_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+if(WIN32)
+    target_link_libraries(reg_metadata_probe PRIVATE ws2_32)
+endif()
+
+if(MSVC)
+    target_compile_options(reg_metadata_probe PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(reg_metadata_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
 
 if(REG_BUILD_TESTS)
     enable_testing()
