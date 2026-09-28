@@ -4,6 +4,7 @@
 #include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
 #include "metadata/TrackHistory.hpp"
+#include "platform/DisplayLayout.hpp"
 #include "platform/SDLPlatform.hpp"
 #include "render/ImGuiOverlayRenderer.hpp"
 #include "render/TargetOverlayBuilder.hpp"
@@ -35,11 +36,30 @@ int main(int argc, char** argv) {
         const auto options = reg::app::parseCommandLine(argc, argv);
 
         reg::platform::SDLPlatform platform;
+        reg::platform::DisplayLayout displayLayout;
 
         SDL_Window* rawSdlWindow = platform.createVulkanWindow(
             "Reg - Raw",
             1280,
             720);
+
+        auto rawPlacement =
+            displayLayout.apply(
+                rawSdlWindow,
+                reg::platform::DisplayPlacement{
+                    .displayIndex =
+                        static_cast<std::size_t>(
+                            options.rawDisplayIndex),
+                    .fullscreen =
+                        options.fullscreenVideoWindows,
+                });
+
+        if (rawPlacement.usedFallback) {
+            std::cerr
+                << "[display] Raw requested display "
+                << options.rawDisplayIndex
+                << " is unavailable; using primary display\n";
+        }
 
         reg::vulkan::VulkanContext vulkan(
             rawSdlWindow,
@@ -57,6 +77,24 @@ int main(int argc, char** argv) {
                 "Reg - Exact CV Overlay",
                 1280,
                 720);
+
+            const auto overlayPlacement =
+                displayLayout.apply(
+                    overlaySdlWindow,
+                    reg::platform::DisplayPlacement{
+                        .displayIndex =
+                            static_cast<std::size_t>(
+                                options.overlayDisplayIndex),
+                        .fullscreen =
+                            options.fullscreenVideoWindows,
+                    });
+
+            if (overlayPlacement.usedFallback) {
+                std::cerr
+                    << "[display] Overlay requested display "
+                    << options.overlayDisplayIndex
+                    << " is unavailable; using primary display\n";
+            }
 
             overlayWindow = std::make_unique<reg::vulkan::RenderWindow>(
                 vulkan,
@@ -472,16 +510,59 @@ int main(int argc, char** argv) {
         try {
             while (!decoderFinished.load(
                 std::memory_order_acquire)) {
-                if (platform.pollQuitRequested()) {
+                bool didWork = false;
+                const auto platformEvents =
+                    platform.pollEvents();
+
+                if (platformEvents.quitRequested) {
                     break;
+                }
+
+                if (platformEvents.displayTopologyChanged ||
+                    platformEvents.windowDisplayChanged) {
+                    const auto reappliedRaw =
+                        displayLayout.apply(
+                            rawSdlWindow,
+                            reg::platform::DisplayPlacement{
+                                .displayIndex =
+                                    static_cast<std::size_t>(
+                                        options.rawDisplayIndex),
+                                .fullscreen =
+                                    options.fullscreenVideoWindows,
+                            });
+
+                    if (reappliedRaw.usedFallback) {
+                        std::cerr
+                            << "[display] Raw display unavailable; "
+                               "temporarily using primary\n";
+                    }
+
+                    if (overlayWindow) {
+                        const auto reappliedOverlay =
+                            displayLayout.apply(
+                                overlayWindow->sdlWindow(),
+                                reg::platform::DisplayPlacement{
+                                    .displayIndex =
+                                        static_cast<std::size_t>(
+                                            options.overlayDisplayIndex),
+                                    .fullscreen =
+                                        options.fullscreenVideoWindows,
+                                });
+
+                        if (reappliedOverlay.usedFallback) {
+                            std::cerr
+                                << "[display] Overlay display unavailable; "
+                                   "temporarily using primary\n";
+                        }
+                    }
+
+                    didWork = true;
                 }
 
                 if (metadataFailed.load(
                         std::memory_order_acquire)) {
                     break;
                 }
-
-                bool didWork = false;
 
                 const std::uint64_t cleanupRequest =
                     decoderCleanupRequest.load(

@@ -89,6 +89,7 @@ add_executable(reg_probe
     src/main.cpp
     src/app/CommandLine.cpp
     src/platform/SDLPlatform.cpp
+    src/platform/DisplayLayout.cpp
     src/vulkan/VulkanContext.cpp
     src/vulkan/RenderWindow.cpp
     src/vulkan/Swapchain.cpp

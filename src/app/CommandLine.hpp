@@ -25,6 +25,10 @@ struct CommandLineOptions {
     int reconnectInitialMs{250};
     int reconnectMaxMs{2000};
 
+    int rawDisplayIndex{0};
+    int overlayDisplayIndex{1};
+    bool fullscreenVideoWindows{false};
+
     bool validation{true};
 };
 
