@@ -22,6 +22,9 @@ struct CommandLineOptions {
     int recordRetentionSeconds{300};
     int recordQueueCapacity{2048};
 
+    int reconnectInitialMs{250};
+    int reconnectMaxMs{2000};
+
     bool validation{true};
 };
 
