@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -180,8 +181,8 @@ void synchronizerPresentsOnlyExactFrameKey() {
             reg::video::SyncDecisionType::DropMissingMetadata,
         "mismatched metadata must not be presented");
     require(
-        mismatchDecision.droppedKey ==
-            std::optional<reg::media::FrameKey>{{7, 500}},
+        mismatchDecision.droppedKey.has_value() &&
+            *mismatchDecision.droppedKey == reg::media::FrameKey{7, 500},
         "wrong frame reported as dropped");
     require(
         metadata.find({7, 501}) != nullptr,
