@@ -259,6 +259,10 @@ int main(int argc, char** argv) {
                                         1,
                                         std::memory_order_acq_rel);
 
+                                    telemetryModel.log(
+                                        reg::telemetry::Severity::Info,
+                                        "RTSP session opened");
+
                                     std::cout
                                         << "[watchdog] RTSP session opened\n";
                                 },
@@ -341,6 +345,10 @@ int main(int argc, char** argv) {
                         lastDecoderError =
                             "RTSP decoder session ended unexpectedly";
                     }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Warning,
+                        "RTSP decoder session ended unexpectedly");
                 } catch (const std::exception& error) {
                     decoderConnected.store(
                         false,
@@ -355,6 +363,11 @@ int main(int argc, char** argv) {
                         std::scoped_lock lock(errorMutex);
                         lastDecoderError = error.what();
                     }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Warning,
+                        std::string("RTSP session failed: ") +
+                            error.what());
 
                     std::cerr
                         << "[watchdog] RTSP session failed: "
@@ -375,6 +388,10 @@ int main(int argc, char** argv) {
                         lastDecoderError =
                             "unknown RTSP decoder failure";
                     }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Error,
+                        "RTSP session failed: unknown error");
 
                     std::cerr
                         << "[watchdog] RTSP session failed: unknown error\n";
@@ -416,6 +433,14 @@ int main(int argc, char** argv) {
                         1,
                         std::memory_order_relaxed) +
                     1;
+
+                telemetryModel.log(
+                    reg::telemetry::Severity::Info,
+                    std::string("RTSP reconnect attempt ") +
+                        std::to_string(reconnectNumber) +
+                        " after " +
+                        std::to_string(reconnectDelayMs) +
+                        " ms");
 
                 std::cerr
                     << "[watchdog] reconnect="
@@ -465,10 +490,32 @@ int main(int argc, char** argv) {
                 try {
                     metadataReceiver->run();
                 } catch (...) {
+                    const std::exception_ptr error =
+                        std::current_exception();
+
                     {
                         std::scoped_lock lock(errorMutex);
-                        metadataError = std::current_exception();
+                        metadataError = error;
                     }
+
+                    std::string message =
+                        "Metadata receiver failed";
+
+                    try {
+                        if (error) {
+                            std::rethrow_exception(error);
+                        }
+                    } catch (const std::exception& exception) {
+                        message += ": ";
+                        message += exception.what();
+                    } catch (...) {
+                        message += ": unknown error";
+                    }
+
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Error,
+                        std::move(message));
+
                     metadataFailed.store(
                         true,
                         std::memory_order_release);
@@ -504,6 +551,9 @@ int main(int argc, char** argv) {
         std::optional<reg::video::SynchronizedFrame>
             pendingOverlayFrame;
         std::uint64_t observedSessionGeneration{0};
+        bool recorderFailureLogged{false};
+        auto nextTelemetryRenderAt =
+            std::chrono::steady_clock::now();
 
         try {
             while (!decoderFinished.load(
@@ -535,6 +585,10 @@ int main(int argc, char** argv) {
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
                     trackHistory.clear();
+                    telemetryModel.clearTargets();
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Info,
+                        "Retiring Vulkan video session resources");
 
                     rawRenderer.resetVideoSession();
                     if (overlayRenderer) {
@@ -559,6 +613,7 @@ int main(int argc, char** argv) {
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
                     trackHistory.clear();
+                    telemetryModel.clearTargets();
                     didWork = true;
                 }
 
@@ -625,6 +680,9 @@ int main(int argc, char** argv) {
                                 trackHistory.update(
                                     *decision.frame->metadata,
                                     std::chrono::steady_clock::now());
+
+                                telemetryModel.setTargets(
+                                    *decision.frame->metadata);
 
                                 pendingOverlayFrame =
                                     std::move(*decision.frame);
