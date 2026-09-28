@@ -9,64 +9,163 @@
 #include <string>
 
 namespace reg::vulkan {
+namespace {
+
+void checkVk(
+    VkResult result,
+    const char* operation) {
+    if (result != VK_SUCCESS) {
+        throw std::runtime_error(
+            std::string(operation) +
+            " failed with VkResult=" +
+            std::to_string(result));
+    }
+}
+
+} // namespace
 
 RenderWindow::RenderWindow(
     const VulkanContext& vulkan,
     SDL_Window* window,
     PresentPolicy presentPolicy)
     : vulkan_(vulkan),
-      window_(window) {
+      window_(window),
+      presentPolicy_(presentPolicy) {
     if (window_ == nullptr) {
-        throw std::invalid_argument("RenderWindow requires a valid SDL window");
+        throw std::invalid_argument(
+            "RenderWindow requires a valid SDL window");
     }
 
-    if (!SDL_Vulkan_CreateSurface(
-            window_,
-            vulkan_.instance(),
-            nullptr,
-            &surface_)) {
+    if (!createSurfaceAndSwapchain()) {
         throw std::runtime_error(
-            std::string("SDL_Vulkan_CreateSurface failed: ") +
-            SDL_GetError());
-    }
-
-    try {
-        VkBool32 presentSupported = VK_FALSE;
-        const VkResult supportResult = vkGetPhysicalDeviceSurfaceSupportKHR(
-            vulkan_.physicalDevice(),
-            vulkan_.presentQueue().familyIndex,
-            surface_,
-            &presentSupported);
-
-        if (supportResult != VK_SUCCESS) {
-            throw std::runtime_error(
-                "vkGetPhysicalDeviceSurfaceSupportKHR failed for RenderWindow");
-        }
-        if (presentSupported != VK_TRUE) {
-            throw std::runtime_error(
-                "Selected Vulkan present queue family cannot present to this SDL window");
-        }
-
-        swapchain_ = std::make_unique<Swapchain>(
-            vulkan_,
-            window_,
-            surface_,
-            presentPolicy);
-    } catch (...) {
-        SDL_Vulkan_DestroySurface(
-            vulkan_.instance(),
-            surface_,
-            nullptr);
-        surface_ = VK_NULL_HANDLE;
-        throw;
+            "Cannot create initial Vulkan surface/swapchain for window");
     }
 }
 
 RenderWindow::~RenderWindow() {
     if (vulkan_.device() != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(vulkan_.device());
+        static_cast<void>(
+            vkDeviceWaitIdle(vulkan_.device()));
     }
 
+    destroySurfaceAndSwapchain();
+}
+
+Swapchain& RenderWindow::swapchain() {
+    if (!swapchain_) {
+        throw std::logic_error(
+            "RenderWindow swapchain is temporarily unavailable");
+    }
+    return *swapchain_;
+}
+
+const Swapchain& RenderWindow::swapchain() const {
+    if (!swapchain_) {
+        throw std::logic_error(
+            "RenderWindow swapchain is temporarily unavailable");
+    }
+    return *swapchain_;
+}
+
+bool RenderWindow::recoverSurface() {
+    checkVk(
+        vkDeviceWaitIdle(vulkan_.device()),
+        "vkDeviceWaitIdle(surface recovery)");
+
+    destroySurfaceAndSwapchain();
+
+    return createSurfaceAndSwapchain();
+}
+
+bool RenderWindow::createSurfaceAndSwapchain() {
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+
+    if (!SDL_GetWindowSizeInPixels(
+            window_,
+            &pixelWidth,
+            &pixelHeight)) {
+        throw std::runtime_error(
+            std::string(
+                "SDL_GetWindowSizeInPixels failed during surface recovery: ") +
+            SDL_GetError());
+    }
+
+    if (pixelWidth <= 0 ||
+        pixelHeight <= 0) {
+        return false;
+    }
+
+    VkSurfaceKHR newSurface =
+        VK_NULL_HANDLE;
+
+    if (!SDL_Vulkan_CreateSurface(
+            window_,
+            vulkan_.instance(),
+            nullptr,
+            &newSurface)) {
+        return false;
+    }
+
+    try {
+        VkBool32 presentSupported =
+            VK_FALSE;
+
+        const VkResult supportResult =
+            vkGetPhysicalDeviceSurfaceSupportKHR(
+                vulkan_.physicalDevice(),
+                vulkan_.presentQueue().familyIndex,
+                newSurface,
+                &presentSupported);
+
+        if (supportResult ==
+            VK_ERROR_SURFACE_LOST_KHR) {
+            SDL_Vulkan_DestroySurface(
+                vulkan_.instance(),
+                newSurface,
+                nullptr);
+            return false;
+        }
+
+        checkVk(
+            supportResult,
+            "vkGetPhysicalDeviceSurfaceSupportKHR(surface recovery)");
+
+        if (presentSupported != VK_TRUE) {
+            SDL_Vulkan_DestroySurface(
+                vulkan_.instance(),
+                newSurface,
+                nullptr);
+            return false;
+        }
+
+        auto newSwapchain =
+            std::make_unique<Swapchain>(
+                vulkan_,
+                window_,
+                newSurface,
+                presentPolicy_);
+
+        surface_ = newSurface;
+        swapchain_ =
+            std::move(newSwapchain);
+        return true;
+    } catch (const SurfaceLostError&) {
+        SDL_Vulkan_DestroySurface(
+            vulkan_.instance(),
+            newSurface,
+            nullptr);
+        return false;
+    } catch (...) {
+        SDL_Vulkan_DestroySurface(
+            vulkan_.instance(),
+            newSurface,
+            nullptr);
+        throw;
+    }
+}
+
+void RenderWindow::destroySurfaceAndSwapchain() noexcept {
     swapchain_.reset();
 
     if (surface_ != VK_NULL_HANDLE) {
@@ -74,7 +173,8 @@ RenderWindow::~RenderWindow() {
             vulkan_.instance(),
             surface_,
             nullptr);
-        surface_ = VK_NULL_HANDLE;
+        surface_ =
+            VK_NULL_HANDLE;
     }
 }
 

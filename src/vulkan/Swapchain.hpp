@@ -3,6 +3,9 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 struct SDL_Window;
@@ -10,6 +13,12 @@ struct SDL_Window;
 namespace reg::vulkan {
 
 class VulkanContext;
+
+class SurfaceLostError final : public std::runtime_error {
+public:
+    explicit SurfaceLostError(std::string message)
+        : std::runtime_error(std::move(message)) {}
+};
 
 enum class AcquireStatus {
     Ready,

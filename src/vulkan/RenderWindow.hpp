@@ -26,12 +26,26 @@ public:
     SDL_Window* sdlWindow() const noexcept { return window_; }
     VkSurfaceKHR surface() const noexcept { return surface_; }
 
-    Swapchain& swapchain() noexcept { return *swapchain_; }
-    const Swapchain& swapchain() const noexcept { return *swapchain_; }
+    bool available() const noexcept {
+        return swapchain_ != nullptr;
+    }
+
+    Swapchain& swapchain();
+    const Swapchain& swapchain() const;
+
+    // Rebuilds VkSurfaceKHR + VkSwapchainKHR for the existing SDL_Window.
+    // Returns false for a temporarily unavailable/zero-sized window; Vulkan
+    // device-loss and other non-WSI errors still propagate.
+    bool recoverSurface();
 
 private:
+    bool createSurfaceAndSwapchain();
+    void destroySurfaceAndSwapchain() noexcept;
+
     const VulkanContext& vulkan_;
     SDL_Window* window_{nullptr};
+    PresentPolicy presentPolicy_{PresentPolicy::Stable};
+
     VkSurfaceKHR surface_{VK_NULL_HANDLE};
     std::unique_ptr<Swapchain> swapchain_;
 };

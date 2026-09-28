@@ -43,6 +43,13 @@ int main(int argc, char** argv) {
             1280,
             720);
 
+        if (!platform.placeWindowOnDisplay(
+                rawSdlWindow,
+                0)) {
+            std::cerr
+                << "[display] raw display 0 unavailable; using window-manager placement\n";
+        }
+
         reg::vulkan::VulkanContext vulkan(
             rawSdlWindow,
             options.validation);
@@ -61,6 +68,13 @@ int main(int argc, char** argv) {
                 1280,
                 720);
 
+            if (!platform.placeWindowOnDisplay(
+                    overlaySdlWindow,
+                    1)) {
+                std::cerr
+                    << "[display] overlay display 1 unavailable; using window-manager placement\n";
+            }
+
             overlayWindow = std::make_unique<reg::vulkan::RenderWindow>(
                 vulkan,
                 overlaySdlWindow,
@@ -73,6 +87,13 @@ int main(int argc, char** argv) {
                     "Reg - Telemetry",
                     1280,
                     720);
+
+            if (!platform.placeWindowOnDisplay(
+                    telemetrySdlWindow,
+                    2)) {
+                std::cerr
+                    << "[display] telemetry display 2 unavailable; using window-manager placement\n";
+            }
 
             telemetryWindow =
                 std::make_unique<reg::vulkan::RenderWindow>(
@@ -555,6 +576,17 @@ int main(int argc, char** argv) {
         auto nextTelemetryRenderAt =
             std::chrono::steady_clock::now();
 
+        bool rawSurfaceRecoveryPending{false};
+        bool overlaySurfaceRecoveryPending{false};
+        bool telemetrySurfaceRecoveryPending{false};
+
+        auto nextRawSurfaceRecovery =
+            std::chrono::steady_clock::time_point{};
+        auto nextOverlaySurfaceRecovery =
+            std::chrono::steady_clock::time_point{};
+        auto nextTelemetrySurfaceRecovery =
+            std::chrono::steady_clock::time_point{};
+
         try {
             while (!decoderFinished.load(
                 std::memory_order_acquire)) {
@@ -565,6 +597,96 @@ int main(int argc, char** argv) {
                 if (metadataFailed.load(
                         std::memory_order_acquire)) {
                     break;
+                }
+
+                const auto loopNow =
+                    std::chrono::steady_clock::now();
+
+                const bool displayTopologyChanged =
+                    platform.takeDisplayTopologyChanged();
+
+                if (displayTopologyChanged) {
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Info,
+                        "Display topology changed");
+
+                    static_cast<void>(
+                        platform.placeWindowOnDisplay(
+                            rawWindow.sdlWindow(),
+                            0));
+
+                    if (overlayWindow) {
+                        static_cast<void>(
+                            platform.placeWindowOnDisplay(
+                                overlayWindow->sdlWindow(),
+                                1));
+                    }
+
+                    if (telemetryWindow) {
+                        static_cast<void>(
+                            platform.placeWindowOnDisplay(
+                                telemetryWindow->sdlWindow(),
+                                2));
+                    }
+
+                    nextRawSurfaceRecovery = loopNow;
+                    nextOverlaySurfaceRecovery = loopNow;
+                    nextTelemetrySurfaceRecovery = loopNow;
+                }
+
+                const auto recoverWindow =
+                    [&](reg::vulkan::RenderWindow& window,
+                        bool& pending,
+                        std::chrono::steady_clock::time_point& nextAttempt,
+                        const char* name) {
+                        if (!pending &&
+                            window.available()) {
+                            return false;
+                        }
+
+                        if (loopNow < nextAttempt) {
+                            return false;
+                        }
+
+                        if (window.recoverSurface()) {
+                            pending = false;
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Info,
+                                std::string(name) +
+                                    " Vulkan surface recovered");
+                            return true;
+                        }
+
+                        pending = true;
+                        nextAttempt =
+                            loopNow +
+                            std::chrono::milliseconds{500};
+                        return false;
+                    };
+
+                static_cast<void>(
+                    recoverWindow(
+                        rawWindow,
+                        rawSurfaceRecoveryPending,
+                        nextRawSurfaceRecovery,
+                        "Raw"));
+
+                if (overlayWindow) {
+                    static_cast<void>(
+                        recoverWindow(
+                            *overlayWindow,
+                            overlaySurfaceRecoveryPending,
+                            nextOverlaySurfaceRecovery,
+                            "Overlay"));
+                }
+
+                if (telemetryWindow) {
+                    static_cast<void>(
+                        recoverWindow(
+                            *telemetryWindow,
+                            telemetrySurfaceRecoveryPending,
+                            nextTelemetrySurfaceRecovery,
+                            "Telemetry"));
                 }
 
                 bool didWork = false;
@@ -618,38 +740,51 @@ int main(int argc, char** argv) {
                 }
 
                 const auto latest = rawMailbox.latest();
-                if (latest && latest != lastRawPresented) {
-                    if (rawRenderer.render(
-                            latest,
-                            rawWindow.swapchain())) {
-                        lastRawPresented = latest;
-                        didWork = true;
+                if (latest &&
+                    latest != lastRawPresented &&
+                    rawWindow.available()) {
+                    try {
+                        if (rawRenderer.render(
+                                latest,
+                                rawWindow.swapchain())) {
+                            lastRawPresented = latest;
+                            didWork = true;
 
-                        const auto count =
-                            rawPresentedFrames.fetch_add(
-                                1,
-                                std::memory_order_relaxed) +
-                            1;
+                            const auto count =
+                                rawPresentedFrames.fetch_add(
+                                    1,
+                                    std::memory_order_relaxed) +
+                                1;
 
-                        if (count == 1 || count % 120 == 0) {
-                            std::cout
-                                << "[raw] presented="
-                                << count
-                                << " source="
-                                << latest->width()
-                                << 'x'
-                                << latest->height()
-                                << " output="
-                                << rawWindow.swapchain().extent().width
-                                << 'x'
-                                << rawWindow.swapchain().extent().height
-                                << '\n';
+                            if (count == 1 ||
+                                count % 120 == 0) {
+                                std::cout
+                                    << "[raw] presented="
+                                    << count
+                                    << " source="
+                                    << latest->width()
+                                    << 'x'
+                                    << latest->height()
+                                    << " output="
+                                    << rawWindow.swapchain().extent().width
+                                    << 'x'
+                                    << rawWindow.swapchain().extent().height
+                                    << '\n';
+                            }
                         }
+                    } catch (const reg::vulkan::SurfaceLostError& error) {
+                        rawSurfaceRecoveryPending = true;
+                        nextRawSurfaceRecovery = loopNow;
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Warning,
+                            std::string("Raw surface lost: ") +
+                                error.what());
                     }
                 }
 
                 if (options.overlayEnabled &&
                     overlayWindow &&
+                    overlayWindow->available() &&
                     overlayRenderer) {
                     if (!pendingOverlayFrame) {
                         // Drain a small number of expired frames per iteration.
@@ -716,10 +851,31 @@ int main(int argc, char** argv) {
                             scene,
                             overlayWindow->swapchain());
 
-                        if (overlayRenderer->render(
-                                synchronized.buffered.video,
-                                overlayWindow->swapchain(),
-                                overlaySceneRenderer.get())) {
+                        bool overlayPresented = false;
+
+                        try {
+                            overlayPresented =
+                                overlayRenderer->render(
+                                    synchronized.buffered.video,
+                                    overlayWindow->swapchain(),
+                                    overlaySceneRenderer.get());
+                        } catch (const reg::vulkan::SurfaceLostError& error) {
+                            overlaySurfaceRecoveryPending = true;
+                            nextOverlaySurfaceRecovery = loopNow;
+
+                            pendingOverlayFrame.reset();
+                            overlayFrames.clear();
+                            metadataStore.clear();
+                            trackHistory.clear();
+                            telemetryModel.clearTargets();
+
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Warning,
+                                std::string("Overlay surface lost: ") +
+                                    error.what());
+                        }
+
+                        if (overlayPresented) {
                             const auto count =
                                 overlayPresentedFrames.fetch_add(
                                     1,
@@ -750,6 +906,7 @@ int main(int argc, char** argv) {
 
                 if (options.telemetryEnabled &&
                     telemetryWindow &&
+                    telemetryWindow->available() &&
                     telemetryRenderer &&
                     telemetryNow >= nextTelemetryRenderAt) {
                     reg::metadata::MetadataReceiverStats
@@ -831,10 +988,20 @@ int main(int argc, char** argv) {
                     const auto telemetrySnapshot =
                         telemetryModel.snapshot();
 
-                    if (telemetryRenderer->render(
-                            telemetrySnapshot,
-                            telemetryWindow->swapchain())) {
-                        didWork = true;
+                    try {
+                        if (telemetryRenderer->render(
+                                telemetrySnapshot,
+                                telemetryWindow->swapchain())) {
+                            didWork = true;
+                        }
+                    } catch (const reg::vulkan::SurfaceLostError& error) {
+                        telemetrySurfaceRecoveryPending = true;
+                        nextTelemetrySurfaceRecovery = loopNow;
+
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Warning,
+                            std::string("Telemetry surface lost: ") +
+                                error.what());
                     }
 
                     nextTelemetryRenderAt =
