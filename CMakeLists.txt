@@ -146,6 +146,54 @@ else()
 endif()
 
 
+add_executable(reg_replay
+    src/replay_main.cpp
+    src/platform/SDLPlatform.cpp
+    src/vulkan/VulkanContext.cpp
+    src/vulkan/RenderWindow.cpp
+    src/vulkan/Swapchain.cpp
+    src/vulkan/VulkanVideoFrameAccess.cpp
+    src/vulkan/VideoRenderer.cpp
+    src/media/CompressedVideoPacket.cpp
+    src/media/FrameIdentity.cpp
+    src/media/VideoStreamDescriptor.cpp
+    src/media/VulkanHwDevice.cpp
+    src/media/RtspDecoder.cpp
+    src/metadata/Protocol.cpp
+    src/metadata/TrackHistory.cpp
+    src/video/VideoFrame.cpp
+    src/video/VideoTransform.cpp
+    src/render/TargetOverlayBuilder.cpp
+    src/render/ImGuiOverlayRenderer.cpp
+    src/recorder/MetadataJournal.cpp
+    src/replay/ReplayMetadataIndex.cpp
+    src/replay/ReplayClock.cpp
+)
+
+add_dependencies(reg_replay reg_shaders)
+
+target_include_directories(reg_replay PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+target_link_libraries(reg_replay PRIVATE
+    SDL3::SDL3
+    Vulkan::Vulkan
+    FFmpeg::avcodec
+    FFmpeg::avformat
+    FFmpeg::avutil
+    reg_imgui
+)
+
+target_compile_definitions(reg_replay PRIVATE
+    REG_ENABLE_VALIDATION=$<BOOL:${REG_ENABLE_VALIDATION}>
+    REG_SHADER_DIR="${REG_SHADER_OUTPUT_DIR}"
+)
+
+if(MSVC)
+    target_compile_options(reg_replay PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(reg_replay PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
 if(REG_BUILD_TESTS)
     enable_testing()
 
@@ -239,4 +287,21 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME telemetry_model COMMAND reg_telemetry_model_tests)
+
+    add_executable(reg_replay_foundation_tests
+        tests/replay_foundation_tests.cpp
+        src/metadata/Protocol.cpp
+        src/recorder/MetadataJournal.cpp
+        src/replay/ReplayMetadataIndex.cpp
+        src/replay/ReplayClock.cpp
+    )
+    target_include_directories(reg_replay_foundation_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+    if(MSVC)
+        target_compile_options(reg_replay_foundation_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_replay_foundation_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME replay_foundation COMMAND reg_replay_foundation_tests)
 endif()
