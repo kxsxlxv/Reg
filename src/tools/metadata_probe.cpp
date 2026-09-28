@@ -13,16 +13,17 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 
 namespace {
 
 using namespace std::chrono_literals;
 
-volatile std::sig_atomic_t gStopRequested = 0;
+volatile std::sig_atomic_t gSignalStopRequested = 0;
 
 void signalHandler(int) {
-    gStopRequested = 1;
+    gSignalStopRequested = 1;
 }
 
 struct Options {
@@ -153,6 +154,7 @@ int main(int argc, char** argv) {
 
         std::mutex errorMutex;
         std::exception_ptr receiverError;
+        std::atomic_bool receiverFailed{false};
 
         std::jthread receiverThread([&] {
             try {
@@ -160,14 +162,15 @@ int main(int argc, char** argv) {
             } catch (...) {
                 std::scoped_lock lock(errorMutex);
                 receiverError = std::current_exception();
-                gStopRequested = 1;
+                receiverFailed.store(true, std::memory_order_release);
             }
         });
 
         const auto startedAt = std::chrono::steady_clock::now();
         auto nextReport = startedAt + 1s;
 
-        while (gStopRequested == 0) {
+        while (gSignalStopRequested == 0 &&
+               !receiverFailed.load(std::memory_order_acquire)) {
             const auto now = std::chrono::steady_clock::now();
 
             if (options.durationSeconds != 0 &&
