@@ -22,6 +22,8 @@ namespace reg::platform {
 namespace {
 
 #ifdef _WIN32
+using SocketLength = int;
+
 SOCKET nativeSocket(std::intptr_t value) noexcept {
     return static_cast<SOCKET>(value);
 }
@@ -31,6 +33,8 @@ std::string socketError(const char* operation) {
            std::to_string(WSAGetLastError());
 }
 #else
+using SocketLength = socklen_t;
+
 int nativeSocket(std::intptr_t value) noexcept {
     return static_cast<int>(value);
 }
@@ -103,7 +107,7 @@ void UdpSocket::bindIpv4(
 #else
             &reuse,
 #endif
-            static_cast<socklen_t>(sizeof(reuse))) != 0) {
+            static_cast<SocketLength>(sizeof(reuse))) != 0) {
         throw std::runtime_error(socketError("setsockopt(SO_REUSEADDR)"));
     }
 
@@ -120,7 +124,7 @@ void UdpSocket::bindIpv4(
     if (::bind(
             nativeSocket(socket_),
             reinterpret_cast<const sockaddr*>(&endpoint),
-            static_cast<socklen_t>(sizeof(endpoint))) != 0) {
+            static_cast<SocketLength>(sizeof(endpoint))) != 0) {
         throw std::runtime_error(socketError("bind"));
     }
 }
