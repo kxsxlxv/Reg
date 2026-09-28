@@ -2,6 +2,7 @@
 
 #include "video/VideoTransform.hpp"
 
+#include <compare>
 #include <cstdint>
 #include <string>
 #include <variant>

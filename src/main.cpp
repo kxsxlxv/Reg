@@ -3,10 +3,14 @@
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
+#include "metadata/TrackHistory.hpp"
 #include "platform/SDLPlatform.hpp"
+#include "render/ImGuiOverlayRenderer.hpp"
+#include "render/TargetOverlayBuilder.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
 #include "video/RawFrameMailbox.hpp"
+#include "video/VideoTransform.hpp"
 #include "vulkan/RenderWindow.hpp"
 #include "vulkan/VideoRenderer.hpp"
 #include "vulkan/VulkanContext.hpp"
@@ -77,11 +81,25 @@ int main(int argc, char** argv) {
 
         reg::vulkan::VideoRenderer rawRenderer(vulkan);
         std::unique_ptr<reg::vulkan::VideoRenderer> overlayRenderer;
+        std::unique_ptr<reg::render::ImGuiOverlayRenderer>
+            overlaySceneRenderer;
+
+        reg::metadata::TrackHistory trackHistory(
+            std::chrono::seconds{5},
+            1024);
+        reg::render::TargetOverlayBuilder overlayBuilder;
+
         if (options.overlayEnabled) {
             // Construct after the decoder so renderer-owned VkImageViews are
             // destroyed before FFmpeg releases its hardware-frame pool.
             overlayRenderer =
                 std::make_unique<reg::vulkan::VideoRenderer>(vulkan);
+
+            overlaySceneRenderer =
+                std::make_unique<
+                    reg::render::ImGuiOverlayRenderer>(
+                        vulkan,
+                        overlayWindow->swapchain());
         }
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
@@ -275,6 +293,10 @@ int main(int argc, char** argv) {
                             if (decision.type ==
                                     reg::video::SyncDecisionType::Present &&
                                 decision.frame) {
+                                trackHistory.update(
+                                    *decision.frame->metadata,
+                                    std::chrono::steady_clock::now());
+
                                 pendingOverlayFrame =
                                     std::move(*decision.frame);
                                 break;
@@ -286,9 +308,31 @@ int main(int argc, char** argv) {
                         const auto& synchronized =
                             *pendingOverlayFrame;
 
+                        const auto extent =
+                            overlayWindow->swapchain().extent();
+
+                        reg::video::VideoTransform transform(
+                            static_cast<std::uint32_t>(
+                                synchronized.buffered.video->width()),
+                            static_cast<std::uint32_t>(
+                                synchronized.buffered.video->height()),
+                            extent.width,
+                            extent.height);
+
+                        const reg::render::OverlayScene scene =
+                            overlayBuilder.build(
+                                *synchronized.metadata,
+                                trackHistory,
+                                transform);
+
+                        overlaySceneRenderer->prepare(
+                            scene,
+                            overlayWindow->swapchain());
+
                         if (overlayRenderer->render(
                                 synchronized.buffered.video,
-                                overlayWindow->swapchain())) {
+                                overlayWindow->swapchain(),
+                                overlaySceneRenderer.get())) {
                             const auto count =
                                 overlayPresentedFrames.fetch_add(
                                     1,

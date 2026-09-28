@@ -11,6 +11,10 @@
 #include <cstdint>
 #include <vector>
 
+namespace reg::render {
+class VideoOverlayRecorder;
+}
+
 namespace reg::vulkan {
 
 class Swapchain;
@@ -26,7 +30,10 @@ public:
 
     // Non-blocking raw-display render. Returns false when the GPU/swapchain is
     // temporarily not ready; the caller should simply try again with the newest frame.
-    bool render(const video::VideoFramePtr& frame, Swapchain& swapchain);
+    bool render(
+        const video::VideoFramePtr& frame,
+        Swapchain& swapchain,
+        render::VideoOverlayRecorder* overlay = nullptr);
 
 private:
     struct VideoFormat {
