@@ -308,4 +308,18 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME replay_foundation COMMAND reg_replay_foundation_tests)
+
+    add_executable(reg_vulkan_error_tests
+        tests/vulkan_error_tests.cpp
+    )
+    target_include_directories(reg_vulkan_error_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_vulkan_error_tests PRIVATE Vulkan::Vulkan)
+
+    if(MSVC)
+        target_compile_options(reg_vulkan_error_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_vulkan_error_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME vulkan_error COMMAND reg_vulkan_error_tests)
 endif()
