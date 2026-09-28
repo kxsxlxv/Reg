@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 struct SDL_Window;
 
 namespace reg::platform {
@@ -12,11 +14,15 @@ public:
     SDLPlatform(const SDLPlatform&) = delete;
     SDLPlatform& operator=(const SDLPlatform&) = delete;
 
-    SDL_Window* createVulkanWindow(const char* title, int width, int height);
+    SDL_Window* createVulkanWindow(
+        const char* title,
+        int width,
+        int height);
+
     bool pollQuitRequested();
 
 private:
-    SDL_Window* window_{nullptr};
+    std::vector<SDL_Window*> windows_;
 };
 
 } // namespace reg::platform
