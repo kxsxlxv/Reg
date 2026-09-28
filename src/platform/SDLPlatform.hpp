@@ -6,6 +6,12 @@ struct SDL_Window;
 
 namespace reg::platform {
 
+struct PlatformEvents {
+    bool quitRequested{false};
+    bool displayTopologyChanged{false};
+    bool windowDisplayChanged{false};
+};
+
 class SDLPlatform {
 public:
     SDLPlatform();
@@ -19,7 +25,7 @@ public:
         int width,
         int height);
 
-    bool pollQuitRequested();
+    PlatformEvents pollEvents();
 
 private:
     std::vector<SDL_Window*> windows_;
