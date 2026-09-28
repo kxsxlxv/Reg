@@ -159,10 +159,13 @@ void buffersRemainBounded() {
     video.push({1, 1}, frame(1), t0);
     video.push({1, 2}, frame(2), t0 + 1ms);
 
+    const auto videoPush =
+        video.push({1, 3}, frame(3), t0 + 2ms);
+    require(videoPush.evicted, "video buffer did not report bounded eviction");
     require(
-        video.push({1, 3}, frame(3), t0 + 2ms) ==
-            Buffer::PushResult::EvictedOldestAndInserted,
-        "video buffer did not report bounded eviction");
+        videoPush.evictedKey &&
+            videoPush.evictedKey->frameId == 1,
+        "video buffer did not report the evicted FrameKey");
     require(video.size() == 2, "video buffer exceeded capacity");
     const auto front = video.peekFront();
     require(front && front->key.frameId == 2, "video buffer evicted wrong frame");
@@ -176,6 +179,29 @@ void buffersRemainBounded() {
         "metadata store did not report bounded eviction");
     require(metadata.size() == 2, "metadata store exceeded capacity");
     require(!metadata.find({1, 1}), "metadata store retained evicted oldest entry");
+}
+
+void videoEvictionAdvancesMetadataWatermark() {
+    Buffer video(100ms, 1);
+    reg::metadata::MetadataStore metadata;
+    Synchronizer sync(video, metadata);
+
+    const auto t0 = Buffer::Clock::time_point{} + 1s;
+    const reg::media::FrameKey first{.streamEpoch = 5, .frameId = 1};
+    const reg::media::FrameKey second{.streamEpoch = 5, .frameId = 2};
+
+    metadata.insert(metadataFor(first, 1));
+    sync.pushFrame(first, frame(1), t0);
+
+    const auto push = sync.pushFrame(second, frame(2), t0 + 1ms);
+
+    require(push.evicted, "synchronizer did not report video eviction");
+    require(push.evictedKey && *push.evictedKey == first, "wrong video frame was evicted");
+    require(!metadata.find(first), "metadata for evicted video frame was not pruned");
+    require(
+        metadata.insert(metadataFor(first, 9)) ==
+            reg::metadata::MetadataInsertResult::TooLate,
+        "metadata for evicted video frame was accepted later");
 }
 
 void lateMetadataBehindWatermarkIsRejected() {
@@ -244,6 +270,7 @@ int main() {
         outOfOrderMetadataStillMatchesExactFrame();
         duplicateMetadataIsIgnored();
         buffersRemainBounded();
+        videoEvictionAdvancesMetadataWatermark();
         lateMetadataBehindWatermarkIsRejected();
         synchronizerDrainsMultipleExpiredMisses();
         changingDelayRetimesBufferedFrames();
