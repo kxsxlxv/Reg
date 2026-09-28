@@ -97,6 +97,15 @@ access beyond the documented public API.
 
 ## Reg access-unit injector
 
+The CMake target `reg_frame_identity_source` contains the portable source-side
+implementation only:
+
+- FrameIdentity payload codec;
+- H.264 SEI builder;
+- Annex-B access-unit injector.
+
+It has no FFmpeg, SDL, Vulkan, or Dear ImGui dependency.
+
 Reg provides:
 
 ```cpp
