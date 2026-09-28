@@ -1,10 +1,13 @@
 #include "metadata/Protocol.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace reg::metadata::protocol {
 namespace {
