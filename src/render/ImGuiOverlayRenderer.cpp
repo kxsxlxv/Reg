@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cfloat>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
