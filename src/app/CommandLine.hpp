@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -10,6 +11,13 @@ struct CommandLineOptions {
     std::int64_t maxDelayUs{0};
     int reorderQueueSize{0};
     int extraHwFrames{32};
+
+    std::string metadataBind{"0.0.0.0"};
+    std::uint16_t metadataPort{0};
+    std::size_t metadataCapacity{512};
+    std::size_t overlayBufferFrames{32};
+    int overlayDelayMs{150};
+
     bool validation{true};
 };
 
