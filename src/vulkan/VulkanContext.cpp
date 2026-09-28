@@ -1,5 +1,7 @@
 #include "vulkan/VulkanContext.hpp"
 
+#include "vulkan/VulkanError.hpp"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
@@ -17,12 +19,6 @@ namespace {
 
 constexpr std::uint32_t kNvidiaVendorId = 0x10DE;
 constexpr const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
-
-void checkVk(VkResult result, const char* operation) {
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(operation) + " failed with VkResult=" + std::to_string(result));
-    }
-}
 
 bool containsExtension(const std::vector<VkExtensionProperties>& extensions, const char* name) {
     return std::ranges::any_of(extensions, [name](const VkExtensionProperties& extension) {
