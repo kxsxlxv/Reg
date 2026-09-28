@@ -83,6 +83,7 @@ private:
         VkBuffer buffer{VK_NULL_HANDLE};
         VkDeviceMemory memory{VK_NULL_HANDLE};
         VkDeviceSize byteSize{};
+        VkDeviceSize allocationSize{};
         bool coherent{false};
     };
 
