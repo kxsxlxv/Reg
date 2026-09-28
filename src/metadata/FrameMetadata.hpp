@@ -3,6 +3,7 @@
 #include "media/FrameIdentity.hpp"
 
 #include <chrono>
+#include <compare>
 #include <cstdint>
 #include <memory>
 #include <vector>
