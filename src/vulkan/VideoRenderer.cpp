@@ -1,5 +1,6 @@
 #include "vulkan/VideoRenderer.hpp"
 
+#include "capture/BmpWriter.hpp"
 #include "render/VideoOverlayRecorder.hpp"
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanError.hpp"
@@ -16,6 +17,7 @@ extern "C" {
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -107,6 +109,18 @@ void VideoRenderer::resetVideoSession() {
     }
 
     destroyVideoResources();
+}
+
+bool VideoRenderer::requestScreenshot(
+    std::filesystem::path path) {
+    if (path.empty() ||
+        pendingScreenshot_.has_value()) {
+        return false;
+    }
+
+    pendingScreenshot_ =
+        std::move(path);
+    return true;
 }
 
 void VideoRenderer::createCommandResources() {
@@ -723,6 +737,302 @@ void VideoRenderer::recordSwapchainToPresentBarrier(
     vkCmdPipelineBarrier2(commandBuffer, &dependency);
 }
 
+void VideoRenderer::recordSwapchainToTransferBarrier(
+    VkCommandBuffer commandBuffer,
+    VkImage image) const {
+    VkImageMemoryBarrier2 barrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+    barrier.srcStageMask =
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask =
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.dstStageMask =
+        VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier.dstAccessMask =
+        VK_ACCESS_2_TRANSFER_READ_BIT;
+    barrier.oldLayout =
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    barrier.newLayout =
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.srcQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask =
+        VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkDependencyInfo dependency{
+        VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &barrier;
+
+    vkCmdPipelineBarrier2(
+        commandBuffer,
+        &dependency);
+}
+
+void VideoRenderer::recordSwapchainTransferToPresentBarrier(
+    VkCommandBuffer commandBuffer,
+    VkImage image) const {
+    VkImageMemoryBarrier2 barrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+    barrier.srcStageMask =
+        VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier.srcAccessMask =
+        VK_ACCESS_2_TRANSFER_READ_BIT;
+    barrier.dstStageMask =
+        VK_PIPELINE_STAGE_2_NONE;
+    barrier.dstAccessMask = 0;
+    barrier.oldLayout =
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.newLayout =
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.srcQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask =
+        VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkDependencyInfo dependency{
+        VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &barrier;
+
+    vkCmdPipelineBarrier2(
+        commandBuffer,
+        &dependency);
+}
+
+VideoRenderer::ScreenshotBuffer
+VideoRenderer::createScreenshotBuffer(
+    VkExtent2D extent) const {
+    if (extent.width == 0 ||
+        extent.height == 0) {
+        throw std::invalid_argument(
+            "screenshot extent must be non-zero");
+    }
+
+    ScreenshotBuffer result{};
+    result.byteSize =
+        static_cast<VkDeviceSize>(
+            extent.width) *
+        static_cast<VkDeviceSize>(
+            extent.height) *
+        4U;
+
+    VkBufferCreateInfo bufferInfo{
+        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bufferInfo.size =
+        result.byteSize;
+    bufferInfo.usage =
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.sharingMode =
+        VK_SHARING_MODE_EXCLUSIVE;
+
+    checkVk(
+        vkCreateBuffer(
+            vulkan_.device(),
+            &bufferInfo,
+            nullptr,
+            &result.buffer),
+        "vkCreateBuffer(screenshot)");
+
+    try {
+        VkMemoryRequirements requirements{};
+        vkGetBufferMemoryRequirements(
+            vulkan_.device(),
+            result.buffer,
+            &requirements);
+
+        VkPhysicalDeviceMemoryProperties
+            memoryProperties{};
+        vkGetPhysicalDeviceMemoryProperties(
+            vulkan_.physicalDevice(),
+            &memoryProperties);
+
+        std::optional<std::uint32_t>
+            fallbackMemoryType;
+
+        std::optional<std::uint32_t>
+            preferredMemoryType;
+
+        for (std::uint32_t index = 0;
+             index <
+             memoryProperties.memoryTypeCount;
+             ++index) {
+            const std::uint32_t bit =
+                1U << index;
+
+            if ((requirements.memoryTypeBits &
+                 bit) == 0) {
+                continue;
+            }
+
+            const VkMemoryPropertyFlags flags =
+                memoryProperties
+                    .memoryTypes[index]
+                    .propertyFlags;
+
+            if ((flags &
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ==
+                0) {
+                continue;
+            }
+
+            if (!fallbackMemoryType) {
+                fallbackMemoryType = index;
+            }
+
+            if ((flags &
+                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) !=
+                0) {
+                preferredMemoryType = index;
+                break;
+            }
+        }
+
+        const auto selected =
+            preferredMemoryType
+                ? preferredMemoryType
+                : fallbackMemoryType;
+
+        if (!selected) {
+            throw std::runtime_error(
+                "No host-visible Vulkan memory type is available for screenshot readback");
+        }
+
+        const VkMemoryPropertyFlags
+            selectedFlags =
+                memoryProperties
+                    .memoryTypes[*selected]
+                    .propertyFlags;
+
+        result.coherent =
+            (selectedFlags &
+             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) !=
+            0;
+
+        VkMemoryAllocateInfo allocationInfo{
+            VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        allocationInfo.allocationSize =
+            requirements.size;
+        allocationInfo.memoryTypeIndex =
+            *selected;
+
+        result.allocationSize =
+            requirements.size;
+
+        checkVk(
+            vkAllocateMemory(
+                vulkan_.device(),
+                &allocationInfo,
+                nullptr,
+                &result.memory),
+            "vkAllocateMemory(screenshot)");
+
+        checkVk(
+            vkBindBufferMemory(
+                vulkan_.device(),
+                result.buffer,
+                result.memory,
+                0),
+            "vkBindBufferMemory(screenshot)");
+    } catch (...) {
+        destroyScreenshotBuffer(result);
+        throw;
+    }
+
+    return result;
+}
+
+void VideoRenderer::destroyScreenshotBuffer(
+    ScreenshotBuffer& buffer) const noexcept {
+    if (buffer.buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(
+            vulkan_.device(),
+            buffer.buffer,
+            nullptr);
+        buffer.buffer = VK_NULL_HANDLE;
+    }
+
+    if (buffer.memory != VK_NULL_HANDLE) {
+        vkFreeMemory(
+            vulkan_.device(),
+            buffer.memory,
+            nullptr);
+        buffer.memory = VK_NULL_HANDLE;
+    }
+
+    buffer.byteSize = 0;
+    buffer.allocationSize = 0;
+}
+
+std::vector<std::uint8_t>
+VideoRenderer::readScreenshotBuffer(
+    const ScreenshotBuffer& buffer) const {
+    if (buffer.memory == VK_NULL_HANDLE ||
+        buffer.byteSize == 0) {
+        throw std::logic_error(
+            "screenshot buffer is not initialized");
+    }
+
+    std::vector<std::uint8_t> pixels(
+        static_cast<std::size_t>(
+            buffer.byteSize));
+
+    void* mapped = nullptr;
+
+    checkVk(
+        vkMapMemory(
+            vulkan_.device(),
+            buffer.memory,
+            0,
+            VK_WHOLE_SIZE,
+            0,
+            &mapped),
+        "vkMapMemory(screenshot)");
+
+    if (!buffer.coherent) {
+        VkMappedMemoryRange range{
+            VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
+        range.memory = buffer.memory;
+        range.offset = 0;
+        range.size = VK_WHOLE_SIZE;
+
+        try {
+            checkVk(
+                vkInvalidateMappedMemoryRanges(
+                    vulkan_.device(),
+                    1,
+                    &range),
+                "vkInvalidateMappedMemoryRanges(screenshot)");
+        } catch (...) {
+            vkUnmapMemory(
+                vulkan_.device(),
+                buffer.memory);
+            throw;
+        }
+    }
+
+    std::memcpy(
+        pixels.data(),
+        mapped,
+        pixels.size());
+
+    vkUnmapMemory(
+        vulkan_.device(),
+        buffer.memory);
+
+    return pixels;
+}
+
 VkViewport VideoRenderer::videoViewport(
     const video::VideoFrame& frame,
     VkExtent2D extent) const {
@@ -779,6 +1089,37 @@ bool VideoRenderer::render(
             observedSwapchain_ = VK_NULL_HANDLE;
         }
         return false;
+    }
+
+    std::optional<std::filesystem::path>
+        screenshotPath;
+
+    ScreenshotBuffer screenshotBuffer{};
+    bool captureThisFrame = false;
+
+    if (pendingScreenshot_) {
+        screenshotPath =
+            std::move(*pendingScreenshot_);
+        pendingScreenshot_.reset();
+
+        if (!swapchain.transferSourceSupported()) {
+            std::cerr
+                << "[capture] swapchain does not support VK_IMAGE_USAGE_TRANSFER_SRC_BIT; screenshot skipped\n";
+        } else {
+            try {
+                screenshotBuffer =
+                    createScreenshotBuffer(
+                        swapchain.extent());
+                captureThisFrame = true;
+            } catch (const DeviceLostError&) {
+                throw;
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "[capture] staging buffer creation failed: "
+                    << error.what()
+                    << '\n';
+            }
+        }
     }
 
     checkVk(vkResetFences(vulkan_.device(), 1, &slot.fence), "vkResetFences");
@@ -852,9 +1193,43 @@ bool VideoRenderer::render(
 
         vkCmdEndRendering(slot.commandBuffer);
 
-        recordSwapchainToPresentBarrier(
-            slot.commandBuffer,
-            swapchain.image(imageIndex));
+        if (captureThisFrame) {
+            recordSwapchainToTransferBarrier(
+                slot.commandBuffer,
+                swapchain.image(imageIndex));
+
+            VkBufferImageCopy copyRegion{};
+            copyRegion.bufferOffset = 0;
+            copyRegion.bufferRowLength = 0;
+            copyRegion.bufferImageHeight = 0;
+            copyRegion.imageSubresource.aspectMask =
+                VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.imageSubresource.mipLevel = 0;
+            copyRegion.imageSubresource.baseArrayLayer = 0;
+            copyRegion.imageSubresource.layerCount = 1;
+            copyRegion.imageOffset = {0, 0, 0};
+            copyRegion.imageExtent = {
+                swapchain.extent().width,
+                swapchain.extent().height,
+                1,
+            };
+
+            vkCmdCopyImageToBuffer(
+                slot.commandBuffer,
+                swapchain.image(imageIndex),
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                screenshotBuffer.buffer,
+                1,
+                &copyRegion);
+
+            recordSwapchainTransferToPresentBarrier(
+                slot.commandBuffer,
+                swapchain.image(imageIndex));
+        } else {
+            recordSwapchainToPresentBarrier(
+                slot.commandBuffer,
+                swapchain.image(imageIndex));
+        }
 
         checkVk(vkEndCommandBuffer(slot.commandBuffer), "vkEndCommandBuffer");
 
@@ -906,7 +1281,80 @@ bool VideoRenderer::render(
         frameAccess_.unlock(lockedFrame);
     } catch (...) {
         frameAccess_.unlock(lockedFrame);
+
+        if (captureThisFrame) {
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+        }
+
         throw;
+    }
+
+    if (captureThisFrame) {
+        try {
+            checkVk(
+                vkWaitForFences(
+                    vulkan_.device(),
+                    1,
+                    &slot.fence,
+                    VK_TRUE,
+                    UINT64_MAX),
+                "vkWaitForFences(screenshot)");
+
+            const auto pixels =
+                readScreenshotBuffer(
+                    screenshotBuffer);
+
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+
+            capture::PixelOrder pixelOrder;
+
+            if (swapchain.format() ==
+                VK_FORMAT_B8G8R8A8_UNORM) {
+                pixelOrder =
+                    capture::PixelOrder::Bgra8;
+            } else if (
+                swapchain.format() ==
+                VK_FORMAT_R8G8B8A8_UNORM) {
+                pixelOrder =
+                    capture::PixelOrder::Rgba8;
+            } else {
+                throw std::runtime_error(
+                    "unsupported swapchain format for screenshot");
+            }
+
+            try {
+                capture::writeBmp32(
+                    *screenshotPath,
+                    swapchain.extent().width,
+                    swapchain.extent().height,
+                    pixels,
+                    pixelOrder);
+
+                std::cout
+                    << "[capture] saved "
+                    << screenshotPath->string()
+                    << '\n';
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "[capture] file write failed: "
+                    << error.what()
+                    << '\n';
+            }
+        } catch (const DeviceLostError&) {
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+            throw;
+        } catch (const std::exception& error) {
+            destroyScreenshotBuffer(
+                screenshotBuffer);
+
+            std::cerr
+                << "[capture] GPU readback failed: "
+                << error.what()
+                << '\n';
+        }
     }
 
     swapchainImageLayouts_.at(imageIndex) = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;

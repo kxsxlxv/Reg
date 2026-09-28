@@ -49,6 +49,9 @@ public:
     VkImageView imageView(std::uint32_t index) const noexcept { return imageViews_[index]; }
     std::size_t imageCount() const noexcept { return images_.size(); }
     VkSurfaceKHR surface() const noexcept { return surface_; }
+    bool transferSourceSupported() const noexcept {
+        return transferSourceSupported_;
+    }
 
 private:
     void destroySwapchain();
@@ -65,6 +68,7 @@ private:
     VkSurfaceFormatKHR surfaceFormat_{};
     VkPresentModeKHR presentMode_{VK_PRESENT_MODE_FIFO_KHR};
     VkExtent2D extent_{};
+    bool transferSourceSupported_{false};
 
     std::vector<VkImage> images_;
     std::vector<VkImageView> imageViews_;

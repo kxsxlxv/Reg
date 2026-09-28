@@ -87,6 +87,7 @@ add_custom_target(reg_shaders DEPENDS ${REG_SHADER_OUTPUTS})
 
 add_executable(reg_probe
     src/main.cpp
+    src/capture/BmpWriter.cpp
     src/app/CommandLine.cpp
     src/platform/SDLPlatform.cpp
     src/vulkan/VulkanContext.cpp
@@ -148,6 +149,7 @@ endif()
 
 add_executable(reg_replay
     src/replay_main.cpp
+    src/capture/BmpWriter.cpp
     src/platform/SDLPlatform.cpp
     src/vulkan/VulkanContext.cpp
     src/vulkan/RenderWindow.cpp
@@ -322,4 +324,18 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME vulkan_error COMMAND reg_vulkan_error_tests)
+
+    add_executable(reg_bmp_writer_tests
+        tests/bmp_writer_tests.cpp
+        src/capture/BmpWriter.cpp
+    )
+    target_include_directories(reg_bmp_writer_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+    if(MSVC)
+        target_compile_options(reg_bmp_writer_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_bmp_writer_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME bmp_writer COMMAND reg_bmp_writer_tests)
 endif()

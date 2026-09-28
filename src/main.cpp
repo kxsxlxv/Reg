@@ -25,6 +25,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -34,6 +35,27 @@
 #include <utility>
 
 namespace {
+
+std::filesystem::path makeScreenshotPath(
+    const char* role) {
+    static std::uint64_t sequence = 0;
+
+    const auto timestampMs =
+        std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                std::chrono::system_clock::now()
+                    .time_since_epoch())
+            .count();
+
+    return std::filesystem::path{
+        "screenshots"} /
+        (std::string(role) +
+         "_" +
+         std::to_string(timestampMs) +
+         "_" +
+         std::to_string(sequence++) +
+         ".bmp");
+}
 
 int runApplication(
     const reg::app::CommandLineOptions& options) {
@@ -593,6 +615,47 @@ int runApplication(
                 std::memory_order_acquire)) {
                 if (platform.pollQuitRequested()) {
                     break;
+                }
+
+                if (platform.takeRawScreenshotRequested()) {
+                    const auto path =
+                        makeScreenshotPath("raw");
+
+                    if (rawRenderer.requestScreenshot(
+                            path)) {
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Info,
+                            std::string("Raw screenshot requested: ") +
+                                path.string());
+                    } else {
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Warning,
+                            "Raw screenshot request ignored because one is already pending");
+                    }
+                }
+
+                if (platform.takeOverlayScreenshotRequested()) {
+                    if (overlayRenderer) {
+                        const auto path =
+                            makeScreenshotPath(
+                                "overlay");
+
+                        if (overlayRenderer->requestScreenshot(
+                                path)) {
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Info,
+                                std::string("Overlay screenshot requested: ") +
+                                    path.string());
+                        } else {
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Warning,
+                                "Overlay screenshot request ignored because one is already pending");
+                        }
+                    } else {
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Warning,
+                            "Overlay screenshot requested while Overlay output is disabled");
+                    }
                 }
 
                 if (metadataFailed.load(

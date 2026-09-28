@@ -125,7 +125,18 @@ bool Swapchain::recreate() {
     createInfo.imageColorSpace = newSurfaceFormat.colorSpace;
     createInfo.imageExtent = newExtent;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageUsage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    const bool newTransferSourceSupported =
+        (capabilities.supportedUsageFlags &
+         VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+
+    if (newTransferSourceSupported) {
+        createInfo.imageUsage |=
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+
     createInfo.preTransform = capabilities.currentTransform;
 
     constexpr VkCompositeAlphaFlagBitsKHR compositeAlphaPreference[]{
@@ -166,6 +177,8 @@ bool Swapchain::recreate() {
     surfaceFormat_ = newSurfaceFormat;
     presentMode_ = newPresentMode;
     extent_ = newExtent;
+    transferSourceSupported_ =
+        newTransferSourceSupported;
 
     std::uint32_t actualImageCount = 0;
     checkVk(
