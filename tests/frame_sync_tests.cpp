@@ -1,4 +1,5 @@
 #include "metadata/MetadataStore.hpp"
+#include "metadata/PacketSequenceTracker.hpp"
 #include "metadata/Protocol.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
@@ -206,6 +207,37 @@ void synchronizerPresentsOnlyExactFrameKey() {
         "unexpected exact pair was presented");
 }
 
+void packetSequenceTrackerHandlesLossReorderAndWrap() {
+    reg::metadata::PacketSequenceTracker tracker;
+
+    auto observation = tracker.observe(100);
+    require(
+        !observation.duplicate &&
+            !observation.outOfOrder &&
+            observation.missingBefore == 0,
+        "first packet sequence observation is incorrect");
+
+    observation = tracker.observe(103);
+    require(
+        observation.missingBefore == 2 &&
+            !observation.outOfOrder,
+        "forward sequence gap was not detected");
+
+    observation = tracker.observe(103);
+    require(observation.duplicate, "duplicate sequence was not detected");
+
+    observation = tracker.observe(102);
+    require(observation.outOfOrder, "late sequence was not detected");
+
+    tracker.reset();
+    tracker.observe(0xfffffffeU);
+    observation = tracker.observe(1U);
+    require(
+        !observation.outOfOrder &&
+            observation.missingBefore == 2,
+        "uint32 sequence wrap-around was not handled as forward progress");
+}
+
 void changingDelayRecomputesBufferedDeadlines() {
     const auto t0 = std::chrono::steady_clock::time_point{9s};
     reg::video::OverlayFrameBuffer frames(150ms, 4);
@@ -232,6 +264,7 @@ int main() {
         metadataStoreRejectsDuplicateAndStaysBounded();
         overlayBufferHonorsDeadlineAndCapacity();
         synchronizerPresentsOnlyExactFrameKey();
+        packetSequenceTrackerHandlesLossReorderAndWrap();
         changingDelayRecomputesBufferedDeadlines();
 
         std::cout << "frame_sync_tests: PASS\n";
