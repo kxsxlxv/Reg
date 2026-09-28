@@ -53,6 +53,22 @@ target_include_directories(reg_imgui PUBLIC
 
 target_link_libraries(reg_imgui PUBLIC Vulkan::Vulkan)
 
+add_library(reg_frame_identity_source STATIC
+    src/media/FrameIdentity.cpp
+    src/media/FrameIdentitySei.cpp
+    src/source/FrameIdentityAccessUnitInjector.cpp
+)
+
+target_include_directories(reg_frame_identity_source PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+if(MSVC)
+    target_compile_options(reg_frame_identity_source PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(reg_frame_identity_source PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
 add_library(reg_metadata_sender STATIC
     src/metadata/Protocol.cpp
     src/metadata/MetadataSender.cpp
@@ -75,6 +91,7 @@ endif()
 
 add_library(reg_jetson_metadata_bridge STATIC
     src/media/FrameIdentity.cpp
+    src/media/FrameIdentityAvFrame.cpp
     src/jetson/MetadataBridge.cpp
 )
 
@@ -137,6 +154,7 @@ add_executable(reg_probe
     src/vulkan/VideoRenderer.cpp
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
+    src/media/FrameIdentityAvFrame.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
@@ -198,6 +216,7 @@ add_executable(reg_replay
     src/vulkan/VideoRenderer.cpp
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
+    src/media/FrameIdentityAvFrame.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
@@ -243,9 +262,25 @@ endif()
 if(REG_BUILD_TESTS)
     enable_testing()
 
+    add_executable(reg_source_frame_identity_injector_tests
+        tests/source_frame_identity_injector_tests.cpp
+    )
+    target_include_directories(reg_source_frame_identity_injector_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_source_frame_identity_injector_tests PRIVATE
+        reg_frame_identity_source
+    )
+    if(MSVC)
+        target_compile_options(reg_source_frame_identity_injector_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_source_frame_identity_injector_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME source_frame_identity_injector COMMAND reg_source_frame_identity_injector_tests)
+
     add_executable(reg_frame_identity_tests
         tests/frame_identity_tests.cpp
         src/media/FrameIdentity.cpp
+        src/media/FrameIdentityAvFrame.cpp
         src/media/FrameIdentitySei.cpp
     )
     target_include_directories(reg_frame_identity_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
