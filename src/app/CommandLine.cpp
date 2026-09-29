@@ -49,6 +49,13 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         } else if (arg == "--extra-hw-frames") {
             options.extraHwFrames = parseInteger<int>(
                 requireValue(i, argc, argv, "--extra-hw-frames"), "--extra-hw-frames");
+        } else if (arg == "--require-frame-identity") {
+            options.requireFrameIdentity = true;
+        } else if (arg == "--identity-probe-frames") {
+            options.identityProbeFrames = parseInteger<std::uint64_t>(
+                requireValue(i, argc, argv, "--identity-probe-frames"),
+                "--identity-probe-frames");
+            options.requireFrameIdentity = true;
         } else if (arg == "--metadata-bind") {
             options.metadataBindAddress =
                 requireValue(i, argc, argv, "--metadata-bind");
@@ -148,6 +155,8 @@ void printUsage(const char* executableName) {
         << "  --max-delay-us N         FFmpeg RTSP demux max_delay (default: 0)\n"
         << "  --reorder-queue-size N   RTP packet reorder queue size (default: 0)\n"
         << "  --extra-hw-frames N      Extra Vulkan decode surfaces (default: 32)\n"
+        << "  --require-frame-identity Fail if a decoded frame lacks/duplicates/regresses FrameIdentity\n"
+        << "  --identity-probe-frames N Validate N decoded frames then exit (implies --require-frame-identity)\n"
         << "  --metadata-bind ADDR     UDP metadata bind IPv4 address (default: 0.0.0.0)\n"
         << "  --metadata-port N        UDP metadata port (default: 50010)\n"
         << "  --overlay-delay-ms N     Exact-overlay playout delay (default: 150)\n"

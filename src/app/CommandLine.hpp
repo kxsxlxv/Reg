@@ -10,6 +10,8 @@ struct CommandLineOptions {
     std::int64_t maxDelayUs{0};
     int reorderQueueSize{0};
     int extraHwFrames{32};
+    bool requireFrameIdentity{false};
+    std::uint64_t identityProbeFrames{0};
 
     std::string metadataBindAddress{"0.0.0.0"};
     std::uint16_t metadataPort{50010};

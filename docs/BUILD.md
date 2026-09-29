@@ -103,3 +103,56 @@ Otherwise, Reg requests a second queue from any queue family shared with rendere
 ## Validation gate
 
 Follow [PHASE_A_SMOKE_TEST.md](PHASE_A_SMOKE_TEST.md) before starting the frame-accurate Overlay implementation.
+
+
+## Windows local bootstrap (MSYS2 UCRT64)
+
+The Windows CI uses MSYS2 UCRT64 for the complete toolchain, including Vulkan
+headers/loader, Shaderc/glslc, Ninja/CMake, and the bundled FFmpeg submodule.
+
+From PowerShell, after installing MSYS2 to `C:\\msys64`:
+
+```powershell
+cd C:\DEV\Projects\Reg
+git submodule update --init --recursive
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\bootstrap-ucrt64.ps1
+```
+
+The bootstrap installs the same UCRT64 packages as CI, verifies `glslc`,
+builds the bundled FFmpeg with `h264_vulkan`, configures Reg, builds it, and
+runs unit tests.
+
+The resulting FFmpeg prefix is:
+
+```text
+.deps/ffmpeg-ucrt64
+```
+
+and the probe executable is:
+
+```text
+build-win/reg_probe.exe
+```
+
+When launching the probe manually from an MSYS2 UCRT64 shell, keep the FFmpeg
+and UCRT64 DLL directories on PATH:
+
+```bash
+export PATH="$PWD/.deps/ffmpeg-ucrt64/bin:$PWD/build-win:/ucrt64/bin:$PATH"
+
+./build-win/reg_probe.exe \
+  --url rtsp://HOST:8555/reg \
+  --identity-probe-frames 300 \
+  --disable-overlay \
+  --disable-recorder \
+  --disable-telemetry
+```
+
+If `glslc` is missing, install:
+
+```bash
+pacman -S --needed mingw-w64-ucrt-x86_64-shaderc
+```
+
+and run CMake from the UCRT64 environment. The package installs `glslc` into
+`/ucrt64/bin`.

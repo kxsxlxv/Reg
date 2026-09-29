@@ -243,6 +243,10 @@ int runApplication(
         }
 
         std::atomic_uint64_t decodedFrames{0};
+        std::atomic_uint64_t identityPresentFrames{0};
+        std::atomic_uint64_t identityMissingFrames{0};
+        std::atomic_uint64_t identityNonMonotonicFrames{0};
+        std::atomic_uint64_t identityEpochChanges{0};
         std::atomic_uint64_t rawPresentedFrames{0};
         std::atomic_uint64_t overlayPresentedFrames{0};
         std::atomic_uint64_t overlayMissingIdentity{0};
@@ -265,6 +269,9 @@ int runApplication(
         std::mutex errorMutex;
         std::string lastDecoderError;
         std::exception_ptr metadataError;
+
+        std::mutex identityMutex;
+        std::optional<reg::media::FrameKey> lastIdentity;
 
         std::jthread decodeThread([&] {
             int reconnectDelayMs =
@@ -320,6 +327,46 @@ int runApplication(
                                 },
                             .onFrame =
                                 [&](reg::video::VideoFramePtr frame) {
+                                    const auto identity =
+                                        frame->identity();
+
+                                    bool identityViolation = false;
+
+                                    if (identity) {
+                                        identityPresentFrames.fetch_add(
+                                            1,
+                                            std::memory_order_relaxed);
+
+                                        {
+                                            std::scoped_lock lock(
+                                                identityMutex);
+
+                                            if (lastIdentity) {
+                                                if (lastIdentity->streamEpoch ==
+                                                    identity->key.streamEpoch) {
+                                                    if (identity->key.frameId <=
+                                                        lastIdentity->frameId) {
+                                                        identityNonMonotonicFrames.fetch_add(
+                                                            1,
+                                                            std::memory_order_relaxed);
+                                                        identityViolation = true;
+                                                    }
+                                                } else {
+                                                    identityEpochChanges.fetch_add(
+                                                        1,
+                                                        std::memory_order_relaxed);
+                                                }
+                                            }
+
+                                            lastIdentity = identity->key;
+                                        }
+                                    } else {
+                                        identityMissingFrames.fetch_add(
+                                            1,
+                                            std::memory_order_relaxed);
+                                        identityViolation = true;
+                                    }
+
                                     rawMailbox.publish(frame);
 
                                     if (options.overlayEnabled) {
@@ -358,8 +405,7 @@ int runApplication(
                                             << 'x'
                                             << frame->height();
 
-                                        if (const auto identity =
-                                                frame->identity()) {
+                                        if (identity) {
                                             std::cout
                                                 << " epoch="
                                                 << identity->key.streamEpoch
@@ -371,6 +417,21 @@ int runApplication(
                                         }
 
                                         std::cout << '\n';
+                                    }
+
+                                    if (options.requireFrameIdentity &&
+                                        identityViolation) {
+                                        shutdownRequested.store(
+                                            true,
+                                            std::memory_order_release);
+                                    }
+
+                                    if (options.identityProbeFrames > 0 &&
+                                        count >=
+                                            options.identityProbeFrames) {
+                                        shutdownRequested.store(
+                                            true,
+                                            std::memory_order_release);
                                     }
                                 },
                         });
@@ -1193,6 +1254,61 @@ int runApplication(
                 << " sequence_gaps="
                 << receiverStats.sequenceGaps
                 << '\n';
+        }
+
+        if (options.requireFrameIdentity) {
+            const auto decoded =
+                decodedFrames.load(
+                    std::memory_order_relaxed);
+            const auto present =
+                identityPresentFrames.load(
+                    std::memory_order_relaxed);
+            const auto missing =
+                identityMissingFrames.load(
+                    std::memory_order_relaxed);
+            const auto nonMonotonic =
+                identityNonMonotonicFrames.load(
+                    std::memory_order_relaxed);
+            const auto epochChanges =
+                identityEpochChanges.load(
+                    std::memory_order_relaxed);
+
+            const bool reachedProbeTarget =
+                options.identityProbeFrames == 0 ||
+                decoded >= options.identityProbeFrames;
+
+            const bool passed =
+                decoded > 0 &&
+                present == decoded &&
+                missing == 0 &&
+                nonMonotonic == 0 &&
+                reachedProbeTarget;
+
+            std::cout
+                << "[identity-probe] "
+                << (passed ? "PASS" : "FAIL")
+                << " decoded="
+                << decoded
+                << " identified="
+                << present
+                << " missing="
+                << missing
+                << " non_monotonic="
+                << nonMonotonic
+                << " epoch_changes="
+                << epochChanges;
+
+            if (options.identityProbeFrames > 0) {
+                std::cout
+                    << " target="
+                    << options.identityProbeFrames;
+            }
+
+            std::cout << '\n';
+
+            if (!passed) {
+                return 2;
+            }
         }
 
         return 0;

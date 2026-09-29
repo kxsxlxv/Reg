@@ -118,7 +118,15 @@ else()
         NAMES glslc
         HINTS "$ENV{VULKAN_SDK}"
         PATH_SUFFIXES Bin bin
-        REQUIRED
+    )
+endif()
+
+if(NOT REG_GLSLC_EXECUTABLE)
+    message(FATAL_ERROR
+        "glslc was not found. Reg requires the Shaderc compiler for Vulkan shaders.\n"
+        "Windows/MSYS2 UCRT64: install mingw-w64-ucrt-x86_64-shaderc and configure "
+        "from the UCRT64 shell (or run scripts/windows/bootstrap-ucrt64.ps1).\n"
+        "LunarG Vulkan SDK is also supported when VULKAN_SDK points to the SDK root."
     )
 endif()
 
