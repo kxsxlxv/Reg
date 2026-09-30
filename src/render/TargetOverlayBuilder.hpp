@@ -7,9 +7,14 @@
 
 namespace reg::render {
 
+inline constexpr std::uint16_t kTargetFlagDirectDetector = 0x0001U;
+inline constexpr std::uint16_t kTargetFlagOfaPropagated = 0x0002U;
+
 struct TargetOverlayStyle {
     Color strokeColor{0.1F, 1.0F, 0.1F, 1.0F};
     Color fillColor{0.1F, 1.0F, 0.1F, 0.10F};
+    Color propagatedStrokeColor{1.0F, 0.72F, 0.12F, 1.0F};
+    Color propagatedFillColor{1.0F, 0.72F, 0.12F, 0.08F};
     Color trailColor{0.1F, 1.0F, 0.1F, 0.75F};
     Color textColor{1.0F, 1.0F, 1.0F, 1.0F};
     Color textBackgroundColor{0.0F, 0.0F, 0.0F, 0.70F};
@@ -21,6 +26,7 @@ struct TargetOverlayStyle {
     float labelPaddingPx{4.0F};
 
     LinePattern bboxPattern{LinePattern::Solid};
+    LinePattern propagatedBboxPattern{LinePattern::Dashed};
     LinePattern trailPattern{LinePattern::Solid};
 };
 

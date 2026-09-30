@@ -6,6 +6,7 @@
 #include <vector>
 
 struct SDL_Window;
+struct SDL_Renderer;
 
 namespace reg::platform {
 
@@ -33,9 +34,12 @@ public:
 
     std::vector<DisplayInfo> displays() const;
 
-    // Moves an existing window to the center of the requested display while
-    // preserving its current windowed size. Returns false if that ordinal is
-    // not currently connected.
+    // Places a role window in borderless desktop fullscreen. The legacy role
+    // ordinals used by main are intentionally mapped to the operator layout:
+    //   0 (raw)       -> physical monitor 3
+    //   1 (overlay)   -> physical monitor 2
+    //   2 (telemetry) -> physical monitor 1
+    // With fewer than three displays, ordinals fall back to SDL order.
     bool placeWindowOnDisplay(
         SDL_Window* window,
         std::size_t displayOrdinal);
@@ -64,7 +68,19 @@ public:
     }
 
 private:
+    struct SignalCover {
+        SDL_Window* videoWindow{};
+        SDL_Window* window{};
+        SDL_Renderer* renderer{};
+        bool visible{};
+    };
+
+    void createSignalCover(SDL_Window* videoWindow, const char* title);
+    void placeSignalCover(SDL_Window* videoWindow, const DisplayInfo& display);
+    void updateSignalCovers();
+
     std::vector<SDL_Window*> windows_;
+    std::vector<SignalCover> signalCovers_;
     bool displayTopologyChanged_{false};
     bool rawScreenshotRequested_{false};
     bool overlayScreenshotRequested_{false};
