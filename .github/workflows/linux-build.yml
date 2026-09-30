@@ -102,6 +102,20 @@ jobs:
       - name: Build Reg
         run: cmake --build build --verbose
 
+      - name: Configure headless Jetson probe
+        env:
+          FFMPEG_ROOT: ${{ runner.temp }}/ffmpeg-install
+          VULKAN_HEADERS: ${{ runner.temp }}/vulkan
+        run: |
+          cmake -S tools/jetson_probe -B build-jetson-probe -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DFFMPEG_ROOT="$FFMPEG_ROOT" \
+            -DVulkan_INCLUDE_DIR="$VULKAN_HEADERS/include" \
+            -DVulkan_LIBRARY=/usr/lib/x86_64-linux-gnu/libvulkan.so
+
+      - name: Build headless Jetson probe
+        run: cmake --build build-jetson-probe --target reg_jetson_probe --verbose
+
       - name: Run unit tests
         env:
           LD_LIBRARY_PATH: ${{ runner.temp }}/ffmpeg-install/lib
