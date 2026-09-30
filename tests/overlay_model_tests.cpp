@@ -172,6 +172,52 @@ void sceneBuilderCreatesExpectedTargetPrimitives() {
         "label does not include class ID");
 }
 
+void provenanceFlagsDriveOverlayStyle() {
+    reg::metadata::TrackHistory history(5s, 32);
+    reg::video::VideoTransform transform(
+        1920,
+        1080,
+        1920,
+        1080);
+    reg::render::TargetOverlayBuilder builder;
+
+    auto detectorMetadata = makeMetadata();
+    detectorMetadata.targets[0].flags = 0x0001U;
+    const auto detectorScene =
+        builder.build(detectorMetadata, history, transform);
+
+    require(detectorScene.primitives.size() == 4,
+        "detector scene must contain fill/stroke/crosshair/label");
+    const auto& detectorRect =
+        std::get<reg::render::RectPrimitive>(detectorScene.primitives[1]);
+    const auto& detectorLabel =
+        std::get<reg::render::TextPrimitive>(detectorScene.primitives[3]);
+    require(
+        detectorRect.style.pattern == reg::render::LinePattern::Solid,
+        "YOLO bbox must be solid");
+    require(
+        detectorLabel.utf8.find("YOLO") != std::string::npos,
+        "YOLO label provenance missing");
+
+    auto propagatedMetadata = makeMetadata();
+    propagatedMetadata.targets[0].flags = 0x0002U;
+    const auto propagatedScene =
+        builder.build(propagatedMetadata, history, transform);
+
+    require(propagatedScene.primitives.size() == 4,
+        "propagated scene must contain fill/stroke/crosshair/label");
+    const auto& propagatedRect =
+        std::get<reg::render::RectPrimitive>(propagatedScene.primitives[1]);
+    const auto& propagatedLabel =
+        std::get<reg::render::TextPrimitive>(propagatedScene.primitives[3]);
+    require(
+        propagatedRect.style.pattern == reg::render::LinePattern::Dashed,
+        "OFA bbox must be dashed");
+    require(
+        propagatedLabel.utf8.find("OFA") != std::string::npos,
+        "OFA label provenance missing");
+}
+
 } // namespace
 
 int main() {
@@ -180,6 +226,7 @@ int main() {
         zoomAndPanUseOneCanonicalTransform();
         trackHistoryMaintainsBoundedRecentPoints();
         sceneBuilderCreatesExpectedTargetPrimitives();
+        provenanceFlagsDriveOverlayStyle();
 
         std::cout << "overlay_model_tests: PASS\n";
         return EXIT_SUCCESS;

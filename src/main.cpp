@@ -36,6 +36,27 @@
 
 namespace {
 
+constexpr auto kVideoSignalStaleAfter =
+    std::chrono::milliseconds{1500};
+constexpr auto kNoSignalRefreshInterval =
+    std::chrono::milliseconds{100};
+
+std::int64_t steadyNowNs() noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+std::uint64_t videoFrameAgeMs(
+    const std::int64_t lastFrameNs,
+    const std::int64_t nowNs) noexcept {
+    if (lastFrameNs <= 0 || nowNs <= lastFrameNs) {
+        return 0;
+    }
+    return static_cast<std::uint64_t>(
+        (nowNs - lastFrameNs) / 1'000'000LL);
+}
+
 std::filesystem::path makeScreenshotPath(
     const char* role) {
     static std::uint64_t sequence = 0;
@@ -183,6 +204,10 @@ int runApplication(
             metadataStore);
 
         reg::vulkan::VideoRenderer rawRenderer(vulkan);
+        auto rawSignalRenderer =
+            std::make_unique<reg::render::ImGuiOverlayRenderer>(
+                vulkan,
+                rawWindow.swapchain());
         std::unique_ptr<reg::vulkan::VideoRenderer> overlayRenderer;
         std::unique_ptr<reg::render::ImGuiOverlayRenderer>
             overlaySceneRenderer;
@@ -252,6 +277,7 @@ int runApplication(
         std::atomic_uint64_t overlayMissingIdentity{0};
         std::atomic_uint64_t overlayBufferEvictions{0};
         std::atomic_uint64_t overlayMissingMetadataDrops{0};
+        std::atomic<std::int64_t> lastDecodedFrameNs{0};
 
         std::atomic_bool shutdownRequested{false};
         std::atomic_bool decoderFinished{false};
@@ -292,6 +318,9 @@ int runApplication(
                                     rawMailbox.clear();
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    lastDecodedFrameNs.store(
+                                        0,
+                                        std::memory_order_release);
 
                                     if (blackboxRecorder) {
                                         blackboxRecorder->configure(
@@ -367,6 +396,9 @@ int runApplication(
                                         identityViolation = true;
                                     }
 
+                                    lastDecodedFrameNs.store(
+                                        steadyNowNs(),
+                                        std::memory_order_release);
                                     rawMailbox.publish(frame);
 
                                     if (options.overlayEnabled) {
@@ -424,6 +456,7 @@ int runApplication(
                                         shutdownRequested.store(
                                             true,
                                             std::memory_order_release);
+                                        decoder.requestStop();
                                     }
 
                                     if (options.identityProbeFrames > 0 &&
@@ -432,6 +465,7 @@ int runApplication(
                                         shutdownRequested.store(
                                             true,
                                             std::memory_order_release);
+                                        decoder.requestStop();
                                     }
                                 },
                         });
@@ -657,7 +691,11 @@ int runApplication(
             pendingOverlayFrame;
         std::uint64_t observedSessionGeneration{0};
         bool recorderFailureLogged{false};
+        bool signalStateInitialized{false};
+        bool previousSignalPresent{false};
         auto nextTelemetryRenderAt =
+            std::chrono::steady_clock::now();
+        auto nextNoSignalRenderAt =
             std::chrono::steady_clock::now();
 
         bool rawSurfaceRecoveryPending{false};
@@ -864,164 +902,248 @@ int runApplication(
                     didWork = true;
                 }
 
-                const auto latest = rawMailbox.latest();
-                if (latest &&
-                    latest != lastRawPresented &&
-                    rawWindow.available()) {
-                    try {
-                        if (rawRenderer.render(
-                                latest,
-                                rawWindow.swapchain())) {
-                            lastRawPresented = latest;
-                            didWork = true;
+                const std::int64_t nowNs = steadyNowNs();
+                const std::int64_t lastFrameNs =
+                    lastDecodedFrameNs.load(std::memory_order_acquire);
+                const std::uint64_t frameAgeMs =
+                    videoFrameAgeMs(lastFrameNs, nowNs);
+                const bool signalPresent =
+                    decoderConnected.load(std::memory_order_acquire) &&
+                    lastFrameNs > 0 &&
+                    frameAgeMs <= static_cast<std::uint64_t>(
+                        kVideoSignalStaleAfter.count());
 
-                            const auto count =
-                                rawPresentedFrames.fetch_add(
-                                    1,
-                                    std::memory_order_relaxed) +
-                                1;
+                if (!signalStateInitialized ||
+                    signalPresent != previousSignalPresent) {
+                    signalStateInitialized = true;
+                    previousSignalPresent = signalPresent;
+                    nextNoSignalRenderAt = loopNow;
 
-                            if (count == 1 ||
-                                count % 120 == 0) {
-                                std::cout
-                                    << "[raw] presented="
-                                    << count
-                                    << " source="
-                                    << latest->width()
-                                    << 'x'
-                                    << latest->height()
-                                    << " output="
-                                    << rawWindow.swapchain().extent().width
-                                    << 'x'
-                                    << rawWindow.swapchain().extent().height
-                                    << '\n';
-                            }
-                        }
-                    } catch (const reg::vulkan::SurfaceLostError& error) {
-                        rawSurfaceRecoveryPending = true;
-                        nextRawSurfaceRecovery = loopNow;
+                    if (signalPresent) {
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Info,
+                            "Video signal restored");
+                    } else {
+                        rawMailbox.clear();
+                        overlayFrames.clear();
+                        metadataStore.clear();
+                        pendingOverlayFrame.reset();
+                        lastRawPresented.reset();
+                        trackHistory.clear();
+                        telemetryModel.clearTargets();
                         telemetryModel.log(
                             reg::telemetry::Severity::Warning,
-                            std::string("Raw surface lost: ") +
-                                error.what());
+                            "NO SIGNAL: decoded video is not arriving");
                     }
                 }
 
-                if (options.overlayEnabled &&
-                    overlayWindow &&
-                    overlayWindow->available() &&
-                    overlayRenderer) {
-                    if (!pendingOverlayFrame) {
-                        // Drain a small number of expired frames per iteration.
-                        // Missing metadata is an intentional drop, not a reason
-                        // to stall all later exact pairs.
-                        for (int attempt = 0; attempt < 8; ++attempt) {
-                            auto decision = synchronizer.next(
-                                std::chrono::steady_clock::now());
-
-                            if (decision.type ==
-                                reg::video::SyncDecisionType::None) {
-                                break;
+                if (!signalPresent) {
+                    if (loopNow >= nextNoSignalRenderAt) {
+                        if (rawWindow.available()) {
+                            try {
+                                rawSignalRenderer->prepareNoSignal(
+                                    rawWindow.swapchain());
+                                if (rawRenderer.renderBlank(
+                                        rawWindow.swapchain(),
+                                        rawSignalRenderer.get())) {
+                                    didWork = true;
+                                }
+                            } catch (const reg::vulkan::SurfaceLostError& error) {
+                                rawSurfaceRecoveryPending = true;
+                                nextRawSurfaceRecovery = loopNow;
+                                telemetryModel.log(
+                                    reg::telemetry::Severity::Warning,
+                                    std::string("Raw surface lost: ") +
+                                        error.what());
                             }
+                        }
 
-                            if (decision.type ==
-                                reg::video::SyncDecisionType::
-                                    DropMissingMetadata) {
-                                overlayMissingMetadataDrops.fetch_add(
-                                    1,
-                                    std::memory_order_relaxed);
+                        if (options.overlayEnabled &&
+                            overlayWindow &&
+                            overlayWindow->available() &&
+                            overlayRenderer &&
+                            overlaySceneRenderer) {
+                            try {
+                                overlaySceneRenderer->prepareNoSignal(
+                                    overlayWindow->swapchain());
+                                if (overlayRenderer->renderBlank(
+                                        overlayWindow->swapchain(),
+                                        overlaySceneRenderer.get())) {
+                                    didWork = true;
+                                }
+                            } catch (const reg::vulkan::SurfaceLostError& error) {
+                                overlaySurfaceRecoveryPending = true;
+                                nextOverlaySurfaceRecovery = loopNow;
+                                telemetryModel.log(
+                                    reg::telemetry::Severity::Warning,
+                                    std::string("Overlay surface lost: ") +
+                                        error.what());
+                            }
+                        }
+
+                        nextNoSignalRenderAt =
+                            loopNow + kNoSignalRefreshInterval;
+                    }
+                } else {
+                    const auto latest = rawMailbox.latest();
+                    if (latest &&
+                        latest != lastRawPresented &&
+                        rawWindow.available()) {
+                        try {
+                            if (rawRenderer.render(
+                                    latest,
+                                    rawWindow.swapchain())) {
+                                lastRawPresented = latest;
                                 didWork = true;
-                                continue;
+
+                                const auto count =
+                                    rawPresentedFrames.fetch_add(
+                                        1,
+                                        std::memory_order_relaxed) +
+                                    1;
+
+                                if (count == 1 ||
+                                    count % 120 == 0) {
+                                    std::cout
+                                        << "[raw] presented="
+                                        << count
+                                        << " source="
+                                        << latest->width()
+                                        << 'x'
+                                        << latest->height()
+                                        << " output="
+                                        << rawWindow.swapchain().extent().width
+                                        << 'x'
+                                        << rawWindow.swapchain().extent().height
+                                        << '\n';
+                                }
                             }
-
-                            if (decision.type ==
-                                    reg::video::SyncDecisionType::Present &&
-                                decision.frame) {
-                                trackHistory.update(
-                                    *decision.frame->metadata,
-                                    std::chrono::steady_clock::now());
-
-                                telemetryModel.setTargets(
-                                    *decision.frame->metadata);
-
-                                pendingOverlayFrame =
-                                    std::move(*decision.frame);
-                                break;
-                            }
+                        } catch (const reg::vulkan::SurfaceLostError& error) {
+                            rawSurfaceRecoveryPending = true;
+                            nextRawSurfaceRecovery = loopNow;
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Warning,
+                                std::string("Raw surface lost: ") +
+                                    error.what());
                         }
                     }
 
-                    if (pendingOverlayFrame) {
-                        const auto& synchronized =
-                            *pendingOverlayFrame;
+                    if (options.overlayEnabled &&
+                        overlayWindow &&
+                        overlayWindow->available() &&
+                        overlayRenderer) {
+                        if (!pendingOverlayFrame) {
+                            // Drain a small number of expired frames per iteration.
+                            // Missing metadata is an intentional drop, not a reason
+                            // to stall all later exact pairs.
+                            for (int attempt = 0; attempt < 8; ++attempt) {
+                                auto decision = synchronizer.next(
+                                    std::chrono::steady_clock::now());
 
-                        const auto extent =
-                            overlayWindow->swapchain().extent();
+                                if (decision.type ==
+                                    reg::video::SyncDecisionType::None) {
+                                    break;
+                                }
 
-                        reg::video::VideoTransform transform(
-                            static_cast<std::uint32_t>(
-                                synchronized.buffered.video->width()),
-                            static_cast<std::uint32_t>(
-                                synchronized.buffered.video->height()),
-                            extent.width,
-                            extent.height);
+                                if (decision.type ==
+                                    reg::video::SyncDecisionType::
+                                        DropMissingMetadata) {
+                                    overlayMissingMetadataDrops.fetch_add(
+                                        1,
+                                        std::memory_order_relaxed);
+                                    didWork = true;
+                                    continue;
+                                }
 
-                        const reg::render::OverlayScene scene =
-                            overlayBuilder.build(
-                                *synchronized.metadata,
-                                trackHistory,
-                                transform);
+                                if (decision.type ==
+                                        reg::video::SyncDecisionType::Present &&
+                                    decision.frame) {
+                                    trackHistory.update(
+                                        *decision.frame->metadata,
+                                        std::chrono::steady_clock::now());
 
-                        overlaySceneRenderer->prepare(
-                            scene,
-                            overlayWindow->swapchain());
+                                    telemetryModel.setTargets(
+                                        *decision.frame->metadata);
 
-                        bool overlayPresented = false;
-
-                        try {
-                            overlayPresented =
-                                overlayRenderer->render(
-                                    synchronized.buffered.video,
-                                    overlayWindow->swapchain(),
-                                    overlaySceneRenderer.get());
-                        } catch (const reg::vulkan::SurfaceLostError& error) {
-                            overlaySurfaceRecoveryPending = true;
-                            nextOverlaySurfaceRecovery = loopNow;
-
-                            pendingOverlayFrame.reset();
-                            overlayFrames.clear();
-                            metadataStore.clear();
-                            trackHistory.clear();
-                            telemetryModel.clearTargets();
-
-                            telemetryModel.log(
-                                reg::telemetry::Severity::Warning,
-                                std::string("Overlay surface lost: ") +
-                                    error.what());
+                                    pendingOverlayFrame =
+                                        std::move(*decision.frame);
+                                    break;
+                                }
+                            }
                         }
 
-                        if (overlayPresented) {
-                            const auto count =
-                                overlayPresentedFrames.fetch_add(
-                                    1,
-                                    std::memory_order_relaxed) +
-                                1;
+                        if (pendingOverlayFrame) {
+                            const auto& synchronized =
+                                *pendingOverlayFrame;
 
-                            if (count == 1 || count % 120 == 0) {
-                                std::cout
-                                    << "[overlay] presented="
-                                    << count
-                                    << " epoch="
-                                    << synchronized.buffered.key.streamEpoch
-                                    << " frame="
-                                    << synchronized.buffered.key.frameId
-                                    << " metadata_sequence="
-                                    << synchronized.metadata->sequence
-                                    << '\n';
+                            const auto extent =
+                                overlayWindow->swapchain().extent();
+
+                            reg::video::VideoTransform transform(
+                                static_cast<std::uint32_t>(
+                                    synchronized.buffered.video->width()),
+                                static_cast<std::uint32_t>(
+                                    synchronized.buffered.video->height()),
+                                extent.width,
+                                extent.height);
+
+                            const reg::render::OverlayScene scene =
+                                overlayBuilder.build(
+                                    *synchronized.metadata,
+                                    trackHistory,
+                                    transform);
+
+                            overlaySceneRenderer->prepare(
+                                scene,
+                                overlayWindow->swapchain());
+
+                            bool overlayPresented = false;
+
+                            try {
+                                overlayPresented =
+                                    overlayRenderer->render(
+                                        synchronized.buffered.video,
+                                        overlayWindow->swapchain(),
+                                        overlaySceneRenderer.get());
+                            } catch (const reg::vulkan::SurfaceLostError& error) {
+                                overlaySurfaceRecoveryPending = true;
+                                nextOverlaySurfaceRecovery = loopNow;
+
+                                pendingOverlayFrame.reset();
+                                overlayFrames.clear();
+                                metadataStore.clear();
+                                trackHistory.clear();
+                                telemetryModel.clearTargets();
+
+                                telemetryModel.log(
+                                    reg::telemetry::Severity::Warning,
+                                    std::string("Overlay surface lost: ") +
+                                        error.what());
                             }
 
-                            pendingOverlayFrame.reset();
-                            didWork = true;
+                            if (overlayPresented) {
+                                const auto count =
+                                    overlayPresentedFrames.fetch_add(
+                                        1,
+                                        std::memory_order_relaxed) +
+                                    1;
+
+                                if (count == 1 || count % 120 == 0) {
+                                    std::cout
+                                        << "[overlay] presented="
+                                        << count
+                                        << " epoch="
+                                        << synchronized.buffered.key.streamEpoch
+                                        << " frame="
+                                        << synchronized.buffered.key.frameId
+                                        << " metadata_sequence="
+                                        << synchronized.metadata->sequence
+                                        << '\n';
+                                }
+
+                                pendingOverlayFrame.reset();
+                                didWork = true;
+                            }
                         }
                     }
                 }
@@ -1064,6 +1186,8 @@ int runApplication(
                             .rtspConnected =
                                 decoderConnected.load(
                                     std::memory_order_relaxed),
+                            .videoSignalPresent = signalPresent,
+                            .videoFrameAgeMs = frameAgeMs,
                             .decoderSessions =
                                 decoderSessionGeneration.load(
                                     std::memory_order_relaxed),

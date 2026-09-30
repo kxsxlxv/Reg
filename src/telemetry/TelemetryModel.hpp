@@ -26,6 +26,8 @@ struct Event {
 
 struct Counters {
     bool rtspConnected{};
+    bool videoSignalPresent{};
+    std::uint64_t videoFrameAgeMs{};
     std::uint64_t decoderSessions{};
     std::uint64_t reconnects{};
 

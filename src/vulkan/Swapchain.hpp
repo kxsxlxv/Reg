@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 struct SDL_Window;
@@ -49,8 +50,13 @@ public:
     VkImageView imageView(std::uint32_t index) const noexcept { return imageViews_[index]; }
     std::size_t imageCount() const noexcept { return images_.size(); }
     VkSurfaceKHR surface() const noexcept { return surface_; }
+    float contentScale() const noexcept;
     bool transferSourceSupported() const noexcept {
         return transferSourceSupported_;
+    }
+
+    std::weak_ptr<const int> lifetimeToken() const noexcept {
+        return lifetimeToken_;
     }
 
 private:
@@ -72,6 +78,8 @@ private:
 
     std::vector<VkImage> images_;
     std::vector<VkImageView> imageViews_;
+    std::shared_ptr<const int> lifetimeToken_{
+        std::make_shared<const int>(0)};
 };
 
 } // namespace reg::vulkan

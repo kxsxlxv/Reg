@@ -15,6 +15,7 @@ extern "C" {
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace reg::media {
 namespace {
@@ -73,7 +74,7 @@ void RtspDecoder::run(
     }
 
     // requestStop() is terminal for this decoder object. Never clear
-    // stopRequested_ here: watchdog/device-loss shutdown must not race an
+    // stopRequested_ here: device-loss/application shutdown must not race an
     // automatic reopen of the same decoder object.
     if (stopRequested_.load(
             std::memory_order_acquire)) {
@@ -102,36 +103,36 @@ void RtspDecoder::run(
 
         while (!stopRequested_.load(
             std::memory_order_acquire)) {
-        const int result =
-            av_read_frame(
-                formatContext_,
-                packet.get());
+            const int result =
+                av_read_frame(
+                    formatContext_,
+                    packet.get());
 
-        if (result == AVERROR_EXIT &&
-            stopRequested_.load(
-                std::memory_order_acquire)) {
-            break;
-        }
+            if (result == AVERROR_EXIT &&
+                stopRequested_.load(
+                    std::memory_order_acquire)) {
+                break;
+            }
 
-        if (result == AVERROR(EAGAIN)) {
-            continue;
-        }
+            if (result == AVERROR(EAGAIN)) {
+                continue;
+            }
 
-        if (result == AVERROR_EOF &&
-            config_.inputKind ==
-                VideoInputKind::File) {
-            decodePacket(
-                callbacks.onFrame,
-                nullptr,
-                frame.get());
-            break;
-        }
+            if (result == AVERROR_EOF &&
+                config_.inputKind ==
+                    VideoInputKind::File) {
+                decodePacket(
+                    callbacks.onFrame,
+                    nullptr,
+                    frame.get());
+                break;
+            }
 
-        if (result < 0) {
-            throwFfmpegError(
-                "av_read_frame",
-                result);
-        }
+            if (result < 0) {
+                throwFfmpegError(
+                    "av_read_frame",
+                    result);
+            }
 
             ++packetCount;
 

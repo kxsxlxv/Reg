@@ -1,6 +1,7 @@
 #pragma once
 
 #include "video/VideoFrame.hpp"
+#include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanVideoFrameAccess.hpp"
 
 #include <vulkan/vulkan.h>
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -21,7 +23,7 @@ class VideoOverlayRecorder;
 
 namespace reg::vulkan {
 
-class Swapchain;
+class BlankRenderer;
 class VulkanContext;
 
 class VideoRenderer final {
@@ -39,9 +41,16 @@ public:
         Swapchain& swapchain,
         render::VideoOverlayRecorder* overlay = nullptr);
 
+    // Presents a black frame, optionally with an ImGui overlay. Used for
+    // explicit NO SIGNAL presentation without stopping/restarting the decoder.
+    bool renderBlank(
+        Swapchain& swapchain,
+        render::VideoOverlayRecorder* overlay = nullptr);
+
     // Called on the render thread before an FFmpeg decoder session is
-    // destroyed/reopened. Retires GPU work, releases AVFrame references and
-    // destroys image views that point into the old hardware-frame pool.
+    // destroyed/reopened. Presents black to the last video swapchain first so
+    // a disconnected source never leaves a frozen stale frame on screen, then
+    // retires GPU work and releases old hardware-frame resources.
     void resetVideoSession();
 
     // Queues a one-shot capture of the next frame presented by this renderer.
@@ -85,6 +94,31 @@ private:
         VkDeviceSize byteSize{};
         VkDeviceSize allocationSize{};
         bool coherent{false};
+    };
+
+    // Non-owning pointer whose null comparison also verifies that the
+    // RenderWindow has not destroyed/replaced the referenced Swapchain object.
+    // This preserves the existing lightweight render call while making the
+    // reset-time black-frame presentation safe across surface recovery.
+    struct TrackedSwapchainPtr {
+        Swapchain* pointer{nullptr};
+        std::weak_ptr<const int> lifetime;
+
+        TrackedSwapchainPtr& operator=(Swapchain* value) noexcept {
+            pointer = value;
+            lifetime = value != nullptr
+                ? value->lifetimeToken()
+                : std::weak_ptr<const int>{};
+            return *this;
+        }
+
+        bool operator!=(std::nullptr_t) const noexcept {
+            return pointer != nullptr && !lifetime.expired();
+        }
+
+        Swapchain& operator*() const noexcept {
+            return *pointer;
+        }
     };
 
     static constexpr std::size_t kFramesInFlight = 2;
@@ -135,6 +169,8 @@ private:
 
     const VulkanContext& vulkan_;
     VulkanVideoFrameAccess frameAccess_;
+    std::unique_ptr<BlankRenderer> blankRenderer_;
+    TrackedSwapchainPtr lastSwapchain_{};
 
     VkCommandPool commandPool_{VK_NULL_HANDLE};
     std::array<FrameSlot, kFramesInFlight> frameSlots_{};

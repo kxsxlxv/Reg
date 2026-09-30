@@ -37,6 +37,11 @@ Swapchain::~Swapchain() {
     destroySwapchain();
 }
 
+float Swapchain::contentScale() const noexcept {
+    const float scale = SDL_GetWindowDisplayScale(window_);
+    return scale > 0.0F ? scale : 1.0F;
+}
+
 bool Swapchain::recreate() {
     int pixelWidth = 0;
     int pixelHeight = 0;

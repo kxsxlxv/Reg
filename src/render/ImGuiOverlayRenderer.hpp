@@ -26,6 +26,12 @@ public:
         const OverlayScene& scene,
         const vulkan::Swapchain& swapchain);
 
+    // Prepares a centered Material Symbols + Roboto NO SIGNAL indication. The
+    // caller records it over a black BlankRenderer pass; this does not stop or
+    // restart the RTSP decoder.
+    void prepareNoSignal(
+        const vulkan::Swapchain& swapchain);
+
     void record(
         VkCommandBuffer commandBuffer,
         VkFormat colorAttachmentFormat,

@@ -101,50 +101,56 @@ SDLPlatform::displays() const {
 bool SDLPlatform::placeWindowOnDisplay(
     SDL_Window* window,
     std::size_t displayOrdinal) {
+    // Existing call sites use logical roles in creation order:
+    //   0 = Raw, 1 = Overlay, 2 = Telemetry.
+    // Physical Windows monitor assignment requested for Reg is:
+    //   Raw -> monitor 3, Overlay -> monitor 2, Telemetry -> monitor 1.
+    constexpr std::size_t logicalToPhysical[]{2U, 1U, 0U};
+
+    const std::size_t physicalOrdinal =
+        displayOrdinal < std::size(logicalToPhysical)
+            ? logicalToPhysical[displayOrdinal]
+            : displayOrdinal;
+
+    return placeWindowFullscreenOnDisplay(
+        window,
+        physicalOrdinal);
+}
+
+bool SDLPlatform::placeWindowFullscreenOnDisplay(
+    SDL_Window* window,
+    std::size_t displayOrdinal) {
     if (window == nullptr) {
         throw std::invalid_argument(
-            "placeWindowOnDisplay requires a window");
+            "placeWindowFullscreenOnDisplay requires a window");
     }
 
-    const auto connected =
-        displays();
-
-    if (displayOrdinal >=
-        connected.size()) {
+    const auto connected = displays();
+    if (displayOrdinal >= connected.size()) {
         return false;
     }
 
-    int windowWidth = 0;
-    int windowHeight = 0;
+    const auto& display = connected[displayOrdinal];
 
-    if (!SDL_GetWindowSize(
-            window,
-            &windowWidth,
-            &windowHeight)) {
-        throw std::runtime_error(
-            std::string("SDL_GetWindowSize failed: ") +
-            SDL_GetError());
+    // SDL3 fullscreen defaults to borderless fullscreen desktop when no
+    // exclusive fullscreen mode is selected. Move the window first so Windows
+    // associates it with the intended monitor, then enter fullscreen.
+    if (!SDL_SetWindowFullscreen(window, false)) {
+        return false;
     }
-
-    const auto& display =
-        connected[displayOrdinal];
-
-    const int x =
-        display.x +
-        std::max(
-            0,
-            (display.width - windowWidth) / 2);
-
-    const int y =
-        display.y +
-        std::max(
-            0,
-            (display.height - windowHeight) / 2);
-
-    return SDL_SetWindowPosition(
-        window,
-        x,
-        y);
+    if (!SDL_SetWindowFullscreenMode(window, nullptr)) {
+        return false;
+    }
+    if (!SDL_SetWindowPosition(window, display.x, display.y)) {
+        return false;
+    }
+    if (!SDL_SyncWindow(window)) {
+        return false;
+    }
+    if (!SDL_SetWindowFullscreen(window, true)) {
+        return false;
+    }
+    return SDL_SyncWindow(window);
 }
 
 bool SDLPlatform::pollQuitRequested() {
