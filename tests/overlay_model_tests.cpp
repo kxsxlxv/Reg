@@ -33,7 +33,7 @@ reg::metadata::FrameMetadata makeMetadata() {
     metadata.targets.push_back(reg::metadata::TargetMetadata{
         .id = 7,
         .classId = 3,
-        .flags = 0,
+        .flags = reg::render::kTargetFlagDirectDetector,
         .confidence = 0.92F,
         .bbox = {
             .x = 0.25F,
@@ -165,11 +165,45 @@ void sceneBuilderCreatesExpectedTargetPrimitives() {
         std::get<reg::render::TextPrimitive>(
             scene.primitives[4]);
     require(
+        label.utf8.find("YOLO") != std::string::npos,
+        "direct detector label does not identify YOLO");
+    require(
         label.utf8.find("ID 7") != std::string::npos,
         "label does not include target ID");
     require(
         label.utf8.find("C3") != std::string::npos,
         "label does not include class ID");
+}
+
+void propagatedTargetUsesDistinctStyle() {
+    auto metadata = makeMetadata();
+    metadata.targets[0].flags = reg::render::kTargetFlagOfaPropagated;
+
+    reg::metadata::TrackHistory history(5s, 32);
+    history.update(metadata, std::chrono::steady_clock::time_point{1s});
+
+    reg::video::VideoTransform transform(
+        1920,
+        1080,
+        1920,
+        1080);
+
+    reg::render::TargetOverlayBuilder builder;
+    const auto scene = builder.build(metadata, history, transform);
+
+    require(scene.primitives.size() == 4, "unexpected propagated primitive count");
+
+    const auto& stroke =
+        std::get<reg::render::RectPrimitive>(scene.primitives[1]);
+    require(
+        stroke.style.pattern == reg::render::LinePattern::Dashed,
+        "OFA bbox must use dashed provenance style");
+
+    const auto& label =
+        std::get<reg::render::TextPrimitive>(scene.primitives[3]);
+    require(
+        label.utf8.find("OFA") != std::string::npos,
+        "propagated label does not identify OFA");
 }
 
 } // namespace
@@ -180,6 +214,7 @@ int main() {
         zoomAndPanUseOneCanonicalTransform();
         trackHistoryMaintainsBoundedRecentPoints();
         sceneBuilderCreatesExpectedTargetPrimitives();
+        propagatedTargetUsesDistinctStyle();
 
         std::cout << "overlay_model_tests: PASS\n";
         return EXIT_SUCCESS;

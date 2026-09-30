@@ -1,5 +1,6 @@
 #pragma once
 
+#include "video/SignalState.hpp"
 #include "video/VideoFrame.hpp"
 
 #include <atomic>
@@ -11,6 +12,7 @@ namespace reg::video {
 class RawFrameMailbox final {
 public:
     void publish(VideoFramePtr frame) noexcept {
+        SignalState::markFrame();
         latest_.store(std::move(frame), std::memory_order_release);
     }
 
@@ -20,6 +22,7 @@ public:
 
     void clear() noexcept {
         latest_.store({}, std::memory_order_release);
+        SignalState::markNoSignal();
     }
 
 private:

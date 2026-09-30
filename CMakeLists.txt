@@ -44,11 +44,14 @@ add_library(reg_imgui STATIC
     imgui/imgui_tables.cpp
     imgui/imgui_widgets.cpp
     imgui/backends/imgui_impl_vulkan.cpp
+    third_party/implot/implot.cpp
+    third_party/implot/implot_items.cpp
 )
 
 target_include_directories(reg_imgui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
     "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/implot"
 )
 
 target_link_libraries(reg_imgui PUBLIC Vulkan::Vulkan)

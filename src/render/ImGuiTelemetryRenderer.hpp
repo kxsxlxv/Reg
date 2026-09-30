@@ -35,3 +35,5 @@ private:
 };
 
 } // namespace reg::render
+
+#include "render/TelemetryUiBridge.hpp"
