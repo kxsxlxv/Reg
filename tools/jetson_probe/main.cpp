@@ -92,6 +92,12 @@ Options parseOptions(int argc, char** argv) {
             return argv[++i];
         };
 
+        const auto parseOptionInteger = [&]() -> long long {
+            const std::string optionName(argument);
+            const char* value = requireValue();
+            return parseInteger(value, optionName.c_str());
+        };
+
         if (argument == "--url") {
             options.url = requireValue();
             if (options.url.empty()) {
@@ -100,30 +106,26 @@ Options parseOptions(int argc, char** argv) {
         } else if (
             argument == "--frames" ||
             argument == "--identity-probe-frames") {
-            const long long value =
-                parseInteger(requireValue(), argv[i - 1]);
+            const long long value = parseOptionInteger();
             if (value <= 0) {
                 usageError("probe frame count must be greater than zero");
             }
             options.frames = static_cast<std::uint64_t>(value);
         } else if (argument == "--max-delay-us") {
-            const long long value =
-                parseInteger(requireValue(), argv[i - 1]);
+            const long long value = parseOptionInteger();
             if (value < 0) {
                 usageError("--max-delay-us must be non-negative");
             }
             options.maxDelayUs = static_cast<std::int64_t>(value);
         } else if (argument == "--reorder-queue-size") {
-            const long long value =
-                parseInteger(requireValue(), argv[i - 1]);
+            const long long value = parseOptionInteger();
             if (value < 0 ||
                 value > std::numeric_limits<int>::max()) {
                 usageError("--reorder-queue-size is out of range");
             }
             options.reorderQueueSize = static_cast<int>(value);
         } else if (argument == "--extra-hw-frames") {
-            const long long value =
-                parseInteger(requireValue(), argv[i - 1]);
+            const long long value = parseOptionInteger();
             if (value <= 0 ||
                 value > std::numeric_limits<int>::max()) {
                 usageError("--extra-hw-frames is out of range");
