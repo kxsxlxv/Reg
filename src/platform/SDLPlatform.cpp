@@ -30,10 +30,10 @@ bool placeBorderlessWindow(
     }
 
     // Deliberately use a normal borderless window rather than SDL fullscreen.
-    // On Windows a real fullscreen state can cause WSI/swapchain transitions
-    // when focus moves between our three outputs. A borderless window sized to
-    // the monitor desktop rectangle is visually fullscreen without that focus
-    // transition and therefore avoids the one-frame black flash.
+    // On Windows a real fullscreen state can cause WSI/swapchain transitions.
+    // Focus ownership is handled independently: secondary output windows are
+    // created non-focusable, so operator clicks do not migrate foreground focus
+    // between three monitor-sized Vulkan surfaces.
     if (!SDL_SetWindowBordered(window, false)) {
         return false;
     }
@@ -262,18 +262,35 @@ SDLPlatform::~SDLPlatform() {
 SDL_Window* SDLPlatform::createVulkanWindow(
     const char* title,
     int width,
-    int height) {
+    int height,
+    bool focusable) {
+    SDL_WindowFlags flags =
+        SDL_WINDOW_VULKAN |
+        SDL_WINDOW_RESIZABLE;
+
+    if (!focusable) {
+        flags |= SDL_WINDOW_NOT_FOCUSABLE;
+    }
+
     SDL_Window* window = SDL_CreateWindow(
         title,
         width,
         height,
-        SDL_WINDOW_VULKAN |
-            SDL_WINDOW_RESIZABLE);
+        flags);
 
     if (window == nullptr) {
         throw std::runtime_error(
             std::string("SDL_CreateWindow failed: ") +
             SDL_GetError());
+    }
+
+    if (!focusable &&
+        !SDL_SetWindowFocusable(window, false)) {
+        const std::string error = SDL_GetError();
+        SDL_DestroyWindow(window);
+        throw std::runtime_error(
+            std::string("SDL_SetWindowFocusable(false) failed: ") +
+            error);
     }
 
     windows_.push_back(window);
