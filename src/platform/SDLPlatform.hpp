@@ -33,18 +33,18 @@ public:
 
     std::vector<DisplayInfo> displays() const;
 
-    // Existing Reg call sites pass logical output roles in creation order:
-    // Raw=0, Overlay=1, Telemetry=2. This maps those roles to the requested
-    // physical monitor layout (3, 2, 1 respectively) and uses borderless
-    // fullscreen desktop. Returns false when the target monitor is unavailable.
+    // Call sites pass logical roles in creation order: Raw=0, Overlay=1,
+    // Telemetry=2. On Windows these are mapped to the actual DISPLAY numbers
+    // shown by Windows Settings: Raw=DISPLAY3, Overlay=DISPLAY2,
+    // Telemetry=DISPLAY1. Windows placement uses normal borderless windows
+    // sized to each monitor rather than OS fullscreen state so focus changes do
+    // not trigger a fullscreen/swapchain transition.
     bool placeWindowOnDisplay(
         SDL_Window* window,
-        std::size_t displayOrdinal);
+        std::size_t logicalRole);
 
-    // Places the window on the requested physical display ordinal and switches
-    // it to SDL3 borderless fullscreen-desktop mode. This deliberately does not
-    // request an exclusive display mode, so each monitor keeps its native
-    // desktop timing/resolution and Windows multi-monitor topology remains intact.
+    // Portable ordinal fallback used outside Windows. Despite the retained API
+    // name this uses a borderless monitor-sized window, not SDL fullscreen.
     bool placeWindowFullscreenOnDisplay(
         SDL_Window* window,
         std::size_t displayOrdinal);
