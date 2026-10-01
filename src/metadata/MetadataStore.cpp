@@ -1,10 +1,21 @@
 #include "metadata/MetadataStore.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
 
 namespace reg::metadata {
+namespace {
+
+bool sequenceIsNewer(
+    const std::uint32_t candidate,
+    const std::uint32_t current) noexcept {
+    const std::uint32_t delta = candidate - current;
+    return delta != 0U && delta < 0x80000000U;
+}
+
+} // namespace
 
 MetadataStore::MetadataStore(std::size_t capacity)
     : capacity_(capacity) {
@@ -19,8 +30,20 @@ InsertResult MetadataStore::insert(FrameMetadata metadata) {
 
     std::scoped_lock lock(mutex_);
 
-    if (metadata_.contains(key)) {
-        return InsertResult::Duplicate;
+    if (const auto existing = metadata_.find(key);
+        existing != metadata_.end()) {
+        if (!sequenceIsNewer(
+                value->sequence,
+                existing->second->sequence)) {
+            return InsertResult::Duplicate;
+        }
+
+        // Same exact FrameKey, newer CVM1 snapshot. Keep its position in the
+        // bounded insertion-order queue and upgrade only the value. This is not
+        // approximate synchronization: both packets explicitly name the same
+        // canonical source frame.
+        existing->second = std::move(value);
+        return InsertResult::Replaced;
     }
 
     InsertResult result = InsertResult::Inserted;
