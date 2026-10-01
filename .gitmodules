@@ -7,3 +7,6 @@
 [submodule "implot"]
 	path = implot
 	url = https://github.com/epezent/implot.git
+[submodule "netimgui"]
+	path = netimgui
+	url = https://github.com/sammyfreg/netImgui.git
