@@ -34,11 +34,12 @@ public:
     std::vector<DisplayInfo> displays() const;
 
     // Call sites pass logical roles in creation order: Raw=0, Overlay=1,
-    // Telemetry=2. On Windows these are mapped to the actual DISPLAY numbers
-    // shown by Windows Settings: Raw=DISPLAY3, Overlay=DISPLAY2,
-    // Telemetry=DISPLAY1. Windows placement uses normal borderless windows
-    // sized to each monitor rather than OS fullscreen state so focus changes do
-    // not trigger a fullscreen/swapchain transition.
+    // Telemetry=2. On Windows these are mapped to the numbers shown by
+    // Settings -> System -> Display -> Identify using active CCD
+    // QueryDisplayConfig path ordering: Raw=3, Overlay=2, Telemetry=1.
+    // Placement uses normal borderless monitor-sized windows rather than OS
+    // fullscreen state so focus changes do not trigger a fullscreen/swapchain
+    // transition.
     bool placeWindowOnDisplay(
         SDL_Window* window,
         std::size_t logicalRole);
