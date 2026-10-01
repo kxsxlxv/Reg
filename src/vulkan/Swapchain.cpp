@@ -6,12 +6,31 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace reg::vulkan {
+namespace {
+
+const char* presentModeName(VkPresentModeKHR mode) noexcept {
+    switch (mode) {
+    case VK_PRESENT_MODE_IMMEDIATE_KHR:
+        return "IMMEDIATE";
+    case VK_PRESENT_MODE_MAILBOX_KHR:
+        return "MAILBOX";
+    case VK_PRESENT_MODE_FIFO_KHR:
+        return "FIFO";
+    case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+        return "FIFO_RELAXED";
+    default:
+        return "OTHER";
+    }
+}
+
+} // namespace
 
 Swapchain::Swapchain(
     const VulkanContext& vulkan,
@@ -185,6 +204,17 @@ bool Swapchain::recreate() {
     transferSourceSupported_ =
         newTransferSourceSupported;
 
+    std::cout
+        << "[swapchain] present_mode="
+        << presentModeName(presentMode_)
+        << " extent=" << extent_.width << 'x' << extent_.height
+        << " refresh_independent="
+        << (presentMode_ == VK_PRESENT_MODE_IMMEDIATE_KHR ||
+                    presentMode_ == VK_PRESENT_MODE_MAILBOX_KHR
+                ? "yes"
+                : "no(FIFO-only-surface)")
+        << '\n';
+
     std::uint32_t actualImageCount = 0;
     checkVk(
         vkGetSwapchainImagesKHR(vulkan_.device(), swapchain_, &actualImageCount, nullptr),
@@ -324,18 +354,17 @@ VkSurfaceFormatKHR Swapchain::chooseSurfaceFormat(const std::vector<VkSurfaceFor
 }
 
 VkPresentModeKHR Swapchain::choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const {
-    if (presentPolicy_ == PresentPolicy::LowLatencyTearingAllowed) {
-        if (std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-            return VK_PRESENT_MODE_IMMEDIATE_KHR;
-        }
-        if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
-            return VK_PRESENT_MODE_MAILBOX_KHR;
-        }
-        return VK_PRESENT_MODE_FIFO_KHR;
-    }
+    // Reg's processing cadence must never be intentionally synchronized to the
+    // desktop refresh rate. Prefer IMMEDIATE for every output role; MAILBOX is
+    // the next best non-blocking option. FIFO is used only when the platform
+    // exposes no refresh-independent present mode (Vulkan requires FIFO).
+    // Decoder/metadata processing already lives off the presentation thread, so
+    // even a FIFO-only surface cannot throttle source ingest.
+    (void)presentPolicy_;
 
-    // Overlay/telemetry windows already tolerate deliberate buffering. Prefer
-    // tear-free low-queue-depth presentation before falling back to FIFO.
+    if (std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
+        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
     if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
         return VK_PRESENT_MODE_MAILBOX_KHR;
     }
