@@ -188,12 +188,17 @@ void drawStatus(const telemetry::Counters& counters) {
             2,
             ImGuiTableFlags_BordersInnerH |
                 ImGuiTableFlags_RowBg |
-                ImGuiTableFlags_SizingStretchProp)) {
+                ImGuiTableFlags_SizingFixedFit)) {
         return;
     }
 
-    ImGui::TableSetupColumn("Metric", ImGuiTableColumnFlags_WidthStretch, 1.20F);
-    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.80F);
+    ImGui::TableSetupColumn(
+        "Metric",
+        ImGuiTableColumnFlags_WidthFixed,
+        126.0F);
+    ImGui::TableSetupColumn(
+        "Value",
+        ImGuiTableColumnFlags_WidthStretch);
 
     statusRowColored(
         "RTSP",
@@ -201,21 +206,37 @@ void drawStatus(const telemetry::Counters& counters) {
         counters.rtspConnected ? kIconCheckCircle : kIconWarning,
         counters.rtspConnected ? "CONNECTED" : "DISCONNECTED");
     statusRowColored(
-        "Video signal",
+        "Video",
         counters.videoSignalPresent ? kSignalGreen : kWarningAmber,
         counters.videoSignalPresent ? kIconCheckCircle : kIconVideoOff,
         counters.videoSignalPresent ? "SIGNAL" : "NO SIGNAL");
+    statusRowColored(
+        "CVM1 / Jetson",
+        counters.cvSignalPresent ? kSignalGreen : kWarningAmber,
+        counters.cvSignalPresent ? kIconCheckCircle : kIconVideoOff,
+        counters.cvSignalPresent ? "SIGNAL" : "NO SIGNAL");
 
     char buffer[128]{};
     if (counters.decodedFrames == 0U) {
-        statusRow("Last decoded frame", "never");
+        statusRow("Video age", "never");
     } else {
         std::snprintf(
             buffer,
             sizeof(buffer),
-            "%llu ms ago",
+            "%llu ms",
             static_cast<unsigned long long>(counters.videoFrameAgeMs));
-        statusRow("Last decoded frame", buffer);
+        statusRow("Video age", buffer);
+    }
+
+    if (counters.metadataPackets == 0U) {
+        statusRow("CVM1 age", "never");
+    } else {
+        std::snprintf(
+            buffer,
+            sizeof(buffer),
+            "%llu ms",
+            static_cast<unsigned long long>(counters.cvPacketAgeMs));
+        statusRow("CVM1 age", buffer);
     }
 
     const auto addU64 = [&](const char* label, std::uint64_t value) {
@@ -227,8 +248,14 @@ void drawStatus(const telemetry::Counters& counters) {
         statusRow(label, buffer);
     };
 
-    addU64("Sessions", counters.decoderSessions);
-    addU64("Reconnects", counters.reconnects);
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%llu / %llu",
+        static_cast<unsigned long long>(counters.decoderSessions),
+        static_cast<unsigned long long>(counters.reconnects));
+    statusRow("Sessions / rec.", buffer);
+
     addU64("Decoded", counters.decodedFrames);
 
     std::snprintf(
@@ -237,10 +264,15 @@ void drawStatus(const telemetry::Counters& counters) {
         "%llu / %llu",
         static_cast<unsigned long long>(counters.rawPresentedFrames),
         static_cast<unsigned long long>(counters.overlayPresentedFrames));
-    statusRow("Presented raw / overlay", buffer);
+    statusRow("Raw / overlay", buffer);
 
-    addU64("Overlay exact-key drops", counters.overlayMissingMetadataDrops);
-    addU64("UDP sequence gaps", counters.metadataSequenceGaps);
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%llu / %llu",
+        static_cast<unsigned long long>(counters.overlayMissingMetadataDrops),
+        static_cast<unsigned long long>(counters.metadataSequenceGaps));
+    statusRow("Exact / UDP drops", buffer);
 
     std::snprintf(
         buffer,
@@ -248,11 +280,16 @@ void drawStatus(const telemetry::Counters& counters) {
         "%zu / %zu",
         counters.overlayBufferDepth,
         counters.metadataStoreDepth);
-    statusRow("Overlay / metadata depth", buffer);
-    std::snprintf(buffer, sizeof(buffer), "%zu", counters.recorderQueueDepth);
-    statusRow("Recorder queue", buffer);
-    addU64("Recorder drops", counters.recorderQueueDrops);
-    addU64("Recorder failures", counters.recorderFailures);
+    statusRow("Overlay / CV buf", buffer);
+
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%zu / %llu / %llu",
+        counters.recorderQueueDepth,
+        static_cast<unsigned long long>(counters.recorderQueueDrops),
+        static_cast<unsigned long long>(counters.recorderFailures));
+    statusRow("Rec q/drop/fail", buffer);
 
     ImGui::EndTable();
 }
@@ -368,6 +405,43 @@ void drawPerformance(const RateHistory& history) {
     }
 
     ImPlot::EndPlot();
+}
+
+void drawStatusAndPerformance(
+    const telemetry::Counters& counters,
+    const RateHistory& history) {
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+    const float statusWidth = std::clamp(
+        availableWidth * 0.30F,
+        260.0F,
+        340.0F);
+
+    if (!ImGui::BeginTable(
+            "status_performance",
+            2,
+            ImGuiTableFlags_BordersInnerV |
+                ImGuiTableFlags_SizingStretchProp)) {
+        return;
+    }
+
+    ImGui::TableSetupColumn(
+        "Status",
+        ImGuiTableColumnFlags_WidthFixed,
+        statusWidth);
+    ImGui::TableSetupColumn(
+        "Performance",
+        ImGuiTableColumnFlags_WidthStretch);
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::SeparatorText("STATUS");
+    drawStatus(counters);
+
+    ImGui::TableNextColumn();
+    ImGui::SeparatorText("PERFORMANCE");
+    drawPerformance(history);
+
+    ImGui::EndTable();
 }
 
 void drawTargets(const std::vector<telemetry::Target>& targets) {
@@ -607,9 +681,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         ImGui::TextUnformatted("REG / TELEMETRY & BLACKBOX");
         ImGui::PopStyleColor();
         ImGui::Separator();
-        drawStatus(snapshot.counters);
-        ImGui::SeparatorText("PERFORMANCE");
-        drawPerformance(rateHistory);
+        drawStatusAndPerformance(snapshot.counters, rateHistory);
         ImGui::SeparatorText("CURRENT TARGETS");
         drawTargets(snapshot.targets);
         ImGui::SeparatorText("EVENTS / LAST 5 MINUTES");
