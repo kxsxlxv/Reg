@@ -69,8 +69,8 @@ function(reg_add_netimgui_client_compat_target)
 
     reg_netimgui_third_party_warnings(reg_netimgui_client)
 
-    # The first integration checkpoint also compiles the reusable receiving side.
     reg_add_netimgui_server_core_target()
+    reg_add_netimgui_remote_renderer_target()
 endfunction()
 
 function(reg_add_netimgui_server_core_target)
@@ -113,4 +113,33 @@ function(reg_add_netimgui_server_core_target)
     endif()
 
     reg_netimgui_third_party_warnings(reg_netimgui_server_core)
+endfunction()
+
+function(reg_add_netimgui_remote_renderer_target)
+    add_library(reg_remote_imgui STATIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/render/RemoteImGuiRenderer.cpp"
+    )
+
+    target_include_directories(reg_remote_imgui PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+
+    target_link_libraries(reg_remote_imgui
+        PUBLIC
+            reg_netimgui_server_core
+            reg_imgui
+            Vulkan::Vulkan
+    )
+
+    if(MSVC)
+        target_compile_options(reg_remote_imgui PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_remote_imgui PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wconversion
+            -Wshadow
+        )
+    endif()
 endfunction()
