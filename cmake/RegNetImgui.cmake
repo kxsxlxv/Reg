@@ -83,6 +83,7 @@ function(reg_add_netimgui_server_core_target)
         "${_netimgui_server}/NetImguiServer_RemoteClient.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/remote/NetImguiEmbeddedConfig.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/remote/NetImguiEmbeddedApp.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/remote/NetImguiHost.cpp"
     )
 
     target_include_directories(reg_netimgui_server_core
