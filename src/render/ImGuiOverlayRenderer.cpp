@@ -384,7 +384,12 @@ struct ImGuiOverlayRenderer::Impl {
         drawData = ImGui::GetDrawData();
     }
 
-    void drawNoSignal(const vulkan::Swapchain& swapchain) {
+    void drawNoSignal(
+        const vulkan::Swapchain& swapchain,
+        const char* subtitle) {
+        const char* safeSubtitle =
+            subtitle != nullptr ? subtitle : "SIGNAL UNAVAILABLE";
+
         ImDrawList* drawList = beginFrame(swapchain);
         const VkExtent2D extent = swapchain.extent();
         ImFont* font = ImGui::GetFont();
@@ -405,7 +410,7 @@ struct ImGuiOverlayRenderer::Impl {
             subtitleSize,
             FLT_MAX,
             0.0F,
-            "VIDEO INPUT UNAVAILABLE");
+            safeSubtitle);
 
         const float contentWidth = std::max(
             {iconExtent.x, titleExtent.x, subtitleExtent.x});
@@ -464,7 +469,7 @@ struct ImGuiOverlayRenderer::Impl {
                 panelMin.x + (panelWidth - subtitleExtent.x) * 0.5F,
                 y),
             mutedColor,
-            "VIDEO INPUT UNAVAILABLE");
+            safeSubtitle);
 
         endFrame();
     }
@@ -524,8 +529,9 @@ void ImGuiOverlayRenderer::prepare(
 }
 
 void ImGuiOverlayRenderer::prepareNoSignal(
-    const vulkan::Swapchain& swapchain) {
-    impl_->drawNoSignal(swapchain);
+    const vulkan::Swapchain& swapchain,
+    const char* subtitle) {
+    impl_->drawNoSignal(swapchain, subtitle);
 }
 
 void ImGuiOverlayRenderer::record(
