@@ -260,7 +260,7 @@ AcquireStatus Swapchain::acquire(VkSemaphore imageAvailable, std::uint32_t& imag
 
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
         // SUBOPTIMAL still acquires an image and signals imageAvailable. Consume it
-        // normally; vkQueuePresentKHR will request recreation if it remains necessary.
+        // normally; an actual OUT_OF_DATE result remains the hard recreation gate.
         return AcquireStatus::Ready;
     }
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -287,10 +287,16 @@ bool Swapchain::present(std::uint32_t imageIndex, VkSemaphore renderFinished) {
     presentInfo.pImageIndices = &imageIndex;
 
     const VkResult result = vkQueuePresentKHR(vulkan_.presentQueue().handle, &presentInfo);
-    if (result == VK_SUCCESS) {
+    if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+        // VK_SUBOPTIMAL_KHR is a success code: the image was presented and the
+        // current swapchain may continue to be used. Recreating immediately on
+        // transient Win32 surface/focus changes forces queue-idle + swapchain
+        // replacement and can produce a visible one-frame black flash between
+        // our borderless monitor windows. Defer recreation until WSI reports
+        // VK_ERROR_OUT_OF_DATE_KHR, where presentation can no longer continue.
         return true;
     }
-    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         return false;
     }
     if (result == VK_ERROR_SURFACE_LOST_KHR) {
