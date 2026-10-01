@@ -96,6 +96,7 @@ jobs:
             -DFFMPEG_ROOT="$FFMPEG_ROOT" \
             -DREG_ENABLE_VALIDATION=OFF \
             -DREG_BUILD_TESTS=ON \
+            -DREG_ENABLE_NETIMGUI_REMOTE=ON \
             -DVulkan_INCLUDE_DIR="$VULKAN_HEADERS/include" \
             -DVulkan_LIBRARY=/usr/lib/x86_64-linux-gnu/libvulkan.so
 
