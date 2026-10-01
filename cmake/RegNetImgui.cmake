@@ -27,6 +27,11 @@ function(reg_add_netimgui_client_compat_target)
         )
     endif()
 
+    # Upstream NetImgui Server is intentionally built with 32-bit indices so it
+    # can reconstruct frames produced by either 16-bit or 32-bit clients. The
+    # definition is PUBLIC to keep every ImGui/ImPlot consumer in Reg ABI-identical.
+    target_compile_definitions(reg_imgui PUBLIC ImDrawIdx=ImU32)
+
     # Upstream's NetImgui library project builds the complete Code/Client tree;
     # platform-specific translation units select themselves through NetImgui's
     # configuration macros. Keep the source set explicit enough to make upstream
@@ -63,6 +68,9 @@ function(reg_add_netimgui_client_compat_target)
     endif()
 
     reg_netimgui_third_party_warnings(reg_netimgui_client)
+
+    # The first integration checkpoint also compiles the reusable receiving side.
+    reg_add_netimgui_server_core_target()
 endfunction()
 
 function(reg_add_netimgui_server_core_target)
