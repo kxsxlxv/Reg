@@ -28,11 +28,10 @@ public:
 
     // Prepares a centered Material Symbols + Roboto NO SIGNAL indication. The
     // caller records it over a black BlankRenderer pass; this does not stop or
-    // restart the RTSP decoder. subtitle distinguishes raw-video loss from a
-    // CVM1/Jetson metadata outage while Raw remains live.
+    // restart either the RTSP decoder or the CVM1 receiver.
     void prepareNoSignal(
         const vulkan::Swapchain& swapchain,
-        const char* subtitle = "VIDEO INPUT UNAVAILABLE");
+        const char* subtitle = "SIGNAL UNAVAILABLE");
 
     void record(
         VkCommandBuffer commandBuffer,
