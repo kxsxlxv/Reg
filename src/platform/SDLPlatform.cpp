@@ -3,10 +3,243 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace reg::platform {
+namespace {
+
+bool placeBorderlessWindow(
+    SDL_Window* window,
+    int x,
+    int y,
+    int width,
+    int height) {
+    const SDL_WindowFlags flags = SDL_GetWindowFlags(window);
+    if ((flags & SDL_WINDOW_FULLSCREEN) != 0U &&
+        !SDL_SetWindowFullscreen(window, false)) {
+        return false;
+    }
+
+    // Deliberately use a normal borderless window rather than SDL fullscreen.
+    // On Windows a real fullscreen state can cause WSI/swapchain transitions.
+    // Focus ownership is handled independently: secondary output windows are
+    // created non-focusable, so operator clicks do not migrate foreground focus
+    // between three monitor-sized Vulkan surfaces.
+    if (!SDL_SetWindowBordered(window, false)) {
+        return false;
+    }
+    if (!SDL_SetWindowResizable(window, false)) {
+        return false;
+    }
+    if (!SDL_SetWindowPosition(window, x, y)) {
+        return false;
+    }
+    if (!SDL_SetWindowSize(window, width, height)) {
+        return false;
+    }
+    return SDL_SyncWindow(window);
+}
+
+#ifdef _WIN32
+struct WindowsSettingsDisplay final {
+    int settingsNumber{};
+    int x{};
+    int y{};
+    int width{};
+    int height{};
+};
+
+struct MonitorRectLookup final {
+    std::wstring deviceName;
+    std::optional<RECT> rect;
+};
+
+BOOL CALLBACK monitorRectCallback(
+    HMONITOR monitor,
+    HDC,
+    LPRECT,
+    LPARAM userData) {
+    auto* lookup =
+        reinterpret_cast<MonitorRectLookup*>(userData);
+    if (lookup == nullptr) {
+        return FALSE;
+    }
+
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (!GetMonitorInfoW(
+            monitor,
+            reinterpret_cast<MONITORINFO*>(&info))) {
+        return TRUE;
+    }
+
+    if (lstrcmpiW(
+            info.szDevice,
+            lookup->deviceName.c_str()) != 0) {
+        return TRUE;
+    }
+
+    lookup->rect = info.rcMonitor;
+    return FALSE;
+}
+
+std::optional<RECT> desktopMonitorRectForPath(
+    const DISPLAYCONFIG_PATH_INFO& path) {
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName{};
+    sourceName.header.type =
+        DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+    sourceName.header.size = sizeof(sourceName);
+    sourceName.header.adapterId = path.sourceInfo.adapterId;
+    sourceName.header.id = path.sourceInfo.id;
+
+    if (DisplayConfigGetDeviceInfo(
+            &sourceName.header) != ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+
+    MonitorRectLookup lookup{
+        .deviceName = sourceName.viewGdiDeviceName,
+        .rect = std::nullopt,
+    };
+
+    static_cast<void>(
+        EnumDisplayMonitors(
+            nullptr,
+            nullptr,
+            monitorRectCallback,
+            reinterpret_cast<LPARAM>(&lookup)));
+
+    return lookup.rect;
+}
+
+std::vector<WindowsSettingsDisplay> windowsSettingsDisplays() {
+    UINT32 pathCount = 0U;
+    UINT32 modeCount = 0U;
+
+    LONG result = GetDisplayConfigBufferSizes(
+        QDC_ONLY_ACTIVE_PATHS,
+        &pathCount,
+        &modeCount);
+    if (result != ERROR_SUCCESS) {
+        return {};
+    }
+
+    // The topology can change between the size query and QueryDisplayConfig.
+    // Retry on ERROR_INSUFFICIENT_BUFFER instead of using stale array sizes.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+        std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+
+        UINT32 actualPathCount = pathCount;
+        UINT32 actualModeCount = modeCount;
+        result = QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &actualPathCount,
+            paths.data(),
+            &actualModeCount,
+            modes.data(),
+            nullptr);
+
+        if (result == ERROR_INSUFFICIENT_BUFFER) {
+            result = GetDisplayConfigBufferSizes(
+                QDC_ONLY_ACTIVE_PATHS,
+                &pathCount,
+                &modeCount);
+            if (result != ERROR_SUCCESS) {
+                return {};
+            }
+            continue;
+        }
+        if (result != ERROR_SUCCESS) {
+            return {};
+        }
+
+        paths.resize(actualPathCount);
+        modes.resize(actualModeCount);
+
+        std::vector<WindowsSettingsDisplay> displays;
+        displays.reserve(paths.size());
+
+        // Windows Settings "Identify" numbering follows the active CCD path
+        // order: paths[0] -> display 1, paths[1] -> display 2, ... . Do not use
+        // SDL enumeration or the GDI \\.\DISPLAYn suffix for numbering.
+        //
+        // The GDI monitor rectangle is still used for geometry after a path is
+        // identified. It is expressed in the actual desktop coordinate space
+        // and therefore already contains the effective portrait/landscape
+        // orientation. Using DISPLAYCONFIG_SOURCE_MODE width/height directly
+        // can describe the source surface rather than the rotated desktop
+        // rectangle on a portrait target.
+        for (std::size_t index = 0U; index < paths.size(); ++index) {
+            const auto& path = paths[index];
+            const UINT32 modeIndex = path.sourceInfo.modeInfoIdx;
+            if (modeIndex == DISPLAYCONFIG_PATH_MODE_IDX_INVALID ||
+                modeIndex >= modes.size()) {
+                continue;
+            }
+
+            const auto& mode = modes[modeIndex];
+            if (mode.infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) {
+                continue;
+            }
+
+            const auto monitorRect =
+                desktopMonitorRectForPath(path);
+            if (monitorRect.has_value()) {
+                displays.push_back(
+                    WindowsSettingsDisplay{
+                        .settingsNumber = static_cast<int>(index + 1U),
+                        .x = monitorRect->left,
+                        .y = monitorRect->top,
+                        .width = monitorRect->right - monitorRect->left,
+                        .height = monitorRect->bottom - monitorRect->top,
+                    });
+                continue;
+            }
+
+            // Conservative fallback for unusual display drivers where the CCD
+            // source cannot be mapped back to an HMONITOR.
+            const auto& source = mode.sourceMode;
+            displays.push_back(
+                WindowsSettingsDisplay{
+                    .settingsNumber = static_cast<int>(index + 1U),
+                    .x = source.position.x,
+                    .y = source.position.y,
+                    .width = static_cast<int>(source.width),
+                    .height = static_cast<int>(source.height),
+                });
+        }
+        return displays;
+    }
+
+    return {};
+}
+
+std::optional<WindowsSettingsDisplay>
+windowsSettingsDisplayByNumber(int settingsNumber) {
+    const auto displays = windowsSettingsDisplays();
+    const auto it = std::ranges::find_if(
+        displays,
+        [settingsNumber](const WindowsSettingsDisplay& display) {
+            return display.settingsNumber == settingsNumber;
+        });
+    if (it == displays.end()) {
+        return std::nullopt;
+    }
+    return *it;
+}
+#endif
+
+} // namespace
 
 SDLPlatform::SDLPlatform() {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -29,18 +262,35 @@ SDLPlatform::~SDLPlatform() {
 SDL_Window* SDLPlatform::createVulkanWindow(
     const char* title,
     int width,
-    int height) {
+    int height,
+    bool focusable) {
+    SDL_WindowFlags flags =
+        SDL_WINDOW_VULKAN |
+        SDL_WINDOW_RESIZABLE;
+
+    if (!focusable) {
+        flags |= SDL_WINDOW_NOT_FOCUSABLE;
+    }
+
     SDL_Window* window = SDL_CreateWindow(
         title,
         width,
         height,
-        SDL_WINDOW_VULKAN |
-            SDL_WINDOW_RESIZABLE);
+        flags);
 
     if (window == nullptr) {
         throw std::runtime_error(
             std::string("SDL_CreateWindow failed: ") +
             SDL_GetError());
+    }
+
+    if (!focusable &&
+        !SDL_SetWindowFocusable(window, false)) {
+        const std::string error = SDL_GetError();
+        SDL_DestroyWindow(window);
+        throw std::runtime_error(
+            std::string("SDL_SetWindowFocusable(false) failed: ") +
+            error);
     }
 
     windows_.push_back(window);
@@ -100,51 +350,63 @@ SDLPlatform::displays() const {
 
 bool SDLPlatform::placeWindowOnDisplay(
     SDL_Window* window,
-    std::size_t displayOrdinal) {
+    std::size_t logicalRole) {
     if (window == nullptr) {
         throw std::invalid_argument(
             "placeWindowOnDisplay requires a window");
     }
 
-    const auto connected =
-        displays();
+    // Call sites use logical roles in creation order:
+    //   0 = Raw, 1 = Overlay, 2 = Telemetry.
+    // These numbers are the numbers shown by Windows Settings -> Display ->
+    // Identify, not SDL ordinals and not GDI \\.\DISPLAYn suffixes.
+    constexpr std::array<int, 3> roleToWindowsSettingsDisplay{3, 2, 1};
 
-    if (displayOrdinal >=
-        connected.size()) {
+#ifdef _WIN32
+    if (logicalRole < roleToWindowsSettingsDisplay.size()) {
+        const int settingsNumber =
+            roleToWindowsSettingsDisplay[logicalRole];
+        const auto display =
+            windowsSettingsDisplayByNumber(settingsNumber);
+        if (!display.has_value()) {
+            return false;
+        }
+
+        return placeBorderlessWindow(
+            window,
+            display->x,
+            display->y,
+            display->width,
+            display->height);
+    }
+#endif
+
+    // Portable fallback: use SDL enumeration order. This path is only for
+    // non-Windows platforms; Windows uses CCD path numbering above so the
+    // operator-facing Settings numbers are authoritative.
+    return placeWindowFullscreenOnDisplay(window, logicalRole);
+}
+
+bool SDLPlatform::placeWindowFullscreenOnDisplay(
+    SDL_Window* window,
+    std::size_t displayOrdinal) {
+    if (window == nullptr) {
+        throw std::invalid_argument(
+            "placeWindowFullscreenOnDisplay requires a window");
+    }
+
+    const auto connected = displays();
+    if (displayOrdinal >= connected.size()) {
         return false;
     }
 
-    int windowWidth = 0;
-    int windowHeight = 0;
-
-    if (!SDL_GetWindowSize(
-            window,
-            &windowWidth,
-            &windowHeight)) {
-        throw std::runtime_error(
-            std::string("SDL_GetWindowSize failed: ") +
-            SDL_GetError());
-    }
-
-    const auto& display =
-        connected[displayOrdinal];
-
-    const int x =
-        display.x +
-        std::max(
-            0,
-            (display.width - windowWidth) / 2);
-
-    const int y =
-        display.y +
-        std::max(
-            0,
-            (display.height - windowHeight) / 2);
-
-    return SDL_SetWindowPosition(
+    const auto& display = connected[displayOrdinal];
+    return placeBorderlessWindow(
         window,
-        x,
-        y);
+        display.x,
+        display.y,
+        display.width,
+        display.height);
 }
 
 bool SDLPlatform::pollQuitRequested() {
@@ -169,14 +431,16 @@ bool SDLPlatform::pollQuitRequested() {
             }
         }
 
+        // A window merely changing its current display/focus is not a physical
+        // topology change and must not cause all three borderless windows to be
+        // repositioned/recreated. Only actual display topology events trigger
+        // remapping.
         if (event.type ==
                 SDL_EVENT_DISPLAY_ADDED ||
             event.type ==
                 SDL_EVENT_DISPLAY_REMOVED ||
             event.type ==
-                SDL_EVENT_DISPLAY_MOVED ||
-            event.type ==
-                SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
+                SDL_EVENT_DISPLAY_MOVED) {
             displayTopologyChanged_ = true;
         }
     }

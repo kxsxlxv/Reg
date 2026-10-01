@@ -16,6 +16,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(Vulkan 1.3 REQUIRED)
 find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
 
+include(RegFonts)
+
 if(REG_FETCH_SDL3)
     include(FetchContent)
 
@@ -52,6 +54,17 @@ target_include_directories(reg_imgui PUBLIC
 )
 
 target_link_libraries(reg_imgui PUBLIC Vulkan::Vulkan)
+
+add_library(reg_implot STATIC
+    implot/implot.cpp
+    implot/implot_items.cpp
+)
+
+target_include_directories(reg_implot PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/implot"
+)
+
+target_link_libraries(reg_implot PUBLIC reg_imgui)
 
 add_library(reg_frame_identity_source STATIC
     src/media/FrameIdentity.cpp
@@ -160,6 +173,7 @@ add_executable(reg_probe
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
     src/vulkan/VideoRenderer.cpp
+    src/vulkan/VideoRendererBlank.cpp
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
     src/media/FrameIdentityAvFrame.cpp
@@ -176,6 +190,7 @@ add_executable(reg_probe
     src/video/FrameSynchronizer.cpp
     src/video/VideoTransform.cpp
     src/render/TargetOverlayBuilder.cpp
+    src/render/ImGuiTheme.cpp
     src/render/ImGuiOverlayRenderer.cpp
     src/render/ImGuiTelemetryRenderer.cpp
     src/telemetry/TelemetryModel.cpp
@@ -195,6 +210,7 @@ target_link_libraries(reg_probe PRIVATE
     FFmpeg::avformat
     FFmpeg::avutil
     reg_imgui
+    reg_implot
 )
 
 if(WIN32)
@@ -204,6 +220,7 @@ endif()
 target_compile_definitions(reg_probe PRIVATE
     REG_ENABLE_VALIDATION=$<BOOL:${REG_ENABLE_VALIDATION}>
     REG_SHADER_DIR=\"${REG_SHADER_OUTPUT_DIR}\"
+    REG_FONT_DIR=\"${REG_FONT_OUTPUT_DIR}\"
 )
 
 if(MSVC)
@@ -211,7 +228,6 @@ if(MSVC)
 else()
     target_compile_options(reg_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 endif()
-
 
 add_executable(reg_replay
     src/replay_main.cpp
@@ -233,6 +249,7 @@ add_executable(reg_replay
     src/video/VideoFrame.cpp
     src/video/VideoTransform.cpp
     src/render/TargetOverlayBuilder.cpp
+    src/render/ImGuiTheme.cpp
     src/render/ImGuiOverlayRenderer.cpp
     src/recorder/MetadataJournal.cpp
     src/replay/ReplayMetadataIndex.cpp
@@ -259,6 +276,7 @@ endif()
 target_compile_definitions(reg_replay PRIVATE
     REG_ENABLE_VALIDATION=$<BOOL:${REG_ENABLE_VALIDATION}>
     REG_SHADER_DIR=\"${REG_SHADER_OUTPUT_DIR}\"
+    REG_FONT_DIR=\"${REG_FONT_OUTPUT_DIR}\"
 )
 
 if(MSVC)

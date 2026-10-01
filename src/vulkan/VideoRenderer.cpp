@@ -2,6 +2,7 @@
 
 #include "capture/BmpWriter.hpp"
 #include "render/VideoOverlayRecorder.hpp"
+#include "vulkan/BlankRenderer.hpp"
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanError.hpp"
 #include "vulkan/VulkanContext.hpp"
@@ -79,7 +80,8 @@ std::pair<VkChromaLocation, VkChromaLocation> chromaOffsetsFor(AVChromaLocation 
 
 VideoRenderer::VideoRenderer(const VulkanContext& vulkan)
     : vulkan_(vulkan),
-      frameAccess_(vulkan) {
+      frameAccess_(vulkan),
+      blankRenderer_(std::make_unique<BlankRenderer>(vulkan)) {
     createCommandResources();
 }
 
@@ -103,6 +105,19 @@ void VideoRenderer::resetVideoSession() {
         vkQueueWaitIdle(
             vulkan_.graphicsQueue().handle),
         "vkQueueWaitIdle(video session reset)");
+
+    // The swapchain keeps its last presented image until something new is
+    // presented. Explicitly clear it before retiring decoder resources so a
+    // dead/reconnecting source cannot leave a stale frozen video frame visible.
+    if (lastSwapchain_ != nullptr && blankRenderer_) {
+        try {
+            static_cast<void>(
+                blankRenderer_->render(*lastSwapchain_));
+        } catch (const SurfaceLostError&) {
+            // Surface recovery is owned by RenderWindow/main. Session cleanup
+            // must still proceed even when the output disappeared concurrently.
+        }
+    }
 
     for (auto& slot : frameSlots_) {
         slot.retainedFrame.reset();
@@ -1065,6 +1080,8 @@ bool VideoRenderer::render(
     if (!frame) {
         return false;
     }
+
+    lastSwapchain_ = &swapchain;
 
     FrameSlot& slot = frameSlots_[nextFrameSlot_];
 

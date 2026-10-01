@@ -9,6 +9,12 @@
 #include <vector>
 
 namespace reg::render {
+namespace {
+
+constexpr std::uint16_t kDetectorFlag = 0x0001U;
+constexpr std::uint16_t kPropagatedFlag = 0x0002U;
+
+} // namespace
 
 TargetOverlayBuilder::TargetOverlayBuilder(
     TargetOverlayStyle style)
@@ -38,6 +44,21 @@ OverlayScene TargetOverlayBuilder::build(
     scene.primitives.reserve(metadata.targets.size() * 5U);
 
     for (const metadata::TargetMetadata& target : metadata.targets) {
+        const bool propagated =
+            (target.flags & kPropagatedFlag) != 0U;
+        const bool detector =
+            (target.flags & kDetectorFlag) != 0U;
+
+        const Color strokeColor = propagated
+            ? style_.propagatedStrokeColor
+            : style_.detectorStrokeColor;
+        const Color fillColor = propagated
+            ? style_.propagatedFillColor
+            : style_.detectorFillColor;
+        const LinePattern bboxPattern = propagated
+            ? style_.propagatedPattern
+            : style_.detectorPattern;
+
         const video::RectF normalizedRect{
             .x = target.bbox.x,
             .y = target.bbox.y,
@@ -49,15 +70,15 @@ OverlayScene TargetOverlayBuilder::build(
 
         scene.primitives.emplace_back(FilledRectPrimitive{
             .rect = screenRect,
-            .color = applyMasterAlpha(style_.fillColor),
+            .color = applyMasterAlpha(fillColor),
         });
 
         scene.primitives.emplace_back(RectPrimitive{
             .rect = screenRect,
             .style = LineStyle{
-                .color = applyMasterAlpha(style_.strokeColor),
+                .color = applyMasterAlpha(strokeColor),
                 .thickness = style_.bboxThicknessPx,
-                .pattern = style_.bboxPattern,
+                .pattern = bboxPattern,
             },
         });
 
@@ -70,7 +91,7 @@ OverlayScene TargetOverlayBuilder::build(
             .center = center,
             .armLengthPx = style_.crosshairArmPx,
             .style = LineStyle{
-                .color = applyMasterAlpha(style_.strokeColor),
+                .color = applyMasterAlpha(strokeColor),
                 .thickness = style_.bboxThicknessPx,
                 .pattern = LinePattern::Solid,
             },
@@ -80,9 +101,14 @@ OverlayScene TargetOverlayBuilder::build(
         if (trackPoints.size() >= 2) {
             PolylinePrimitive trail;
             trail.style = LineStyle{
-                .color = applyMasterAlpha(style_.trailColor),
+                .color = applyMasterAlpha(
+                    propagated
+                        ? style_.propagatedStrokeColor
+                        : style_.trailColor),
                 .thickness = style_.trailThicknessPx,
-                .pattern = style_.trailPattern,
+                .pattern = propagated
+                    ? LinePattern::Dashed
+                    : style_.trailPattern,
             };
             trail.points.reserve(trackPoints.size());
 
@@ -95,11 +121,16 @@ OverlayScene TargetOverlayBuilder::build(
             scene.primitives.emplace_back(std::move(trail));
         }
 
+        const char* source = propagated
+            ? "OFA"
+            : (detector ? "YOLO" : "CV");
+
         char label[128]{};
         std::snprintf(
             label,
             sizeof(label),
-            "ID %llu  C%u  %.0f%%",
+            "%s  ID %llu  C%u  %.0f%%",
+            source,
             static_cast<unsigned long long>(target.id),
             static_cast<unsigned>(target.classId),
             static_cast<double>(target.confidence * 100.0F));

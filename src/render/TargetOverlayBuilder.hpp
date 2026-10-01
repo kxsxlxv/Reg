@@ -8,8 +8,10 @@
 namespace reg::render {
 
 struct TargetOverlayStyle {
-    Color strokeColor{0.1F, 1.0F, 0.1F, 1.0F};
-    Color fillColor{0.1F, 1.0F, 0.1F, 0.10F};
+    Color detectorStrokeColor{0.1F, 1.0F, 0.1F, 1.0F};
+    Color detectorFillColor{0.1F, 1.0F, 0.1F, 0.10F};
+    Color propagatedStrokeColor{1.0F, 0.72F, 0.12F, 1.0F};
+    Color propagatedFillColor{1.0F, 0.72F, 0.12F, 0.08F};
     Color trailColor{0.1F, 1.0F, 0.1F, 0.75F};
     Color textColor{1.0F, 1.0F, 1.0F, 1.0F};
     Color textBackgroundColor{0.0F, 0.0F, 0.0F, 0.70F};
@@ -20,7 +22,8 @@ struct TargetOverlayStyle {
     float fontSizePx{18.0F};
     float labelPaddingPx{4.0F};
 
-    LinePattern bboxPattern{LinePattern::Solid};
+    LinePattern detectorPattern{LinePattern::Solid};
+    LinePattern propagatedPattern{LinePattern::Dashed};
     LinePattern trailPattern{LinePattern::Solid};
 };
 

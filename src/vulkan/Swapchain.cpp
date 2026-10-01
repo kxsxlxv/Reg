@@ -6,12 +6,31 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace reg::vulkan {
+namespace {
+
+const char* presentModeName(VkPresentModeKHR mode) noexcept {
+    switch (mode) {
+    case VK_PRESENT_MODE_IMMEDIATE_KHR:
+        return "IMMEDIATE";
+    case VK_PRESENT_MODE_MAILBOX_KHR:
+        return "MAILBOX";
+    case VK_PRESENT_MODE_FIFO_KHR:
+        return "FIFO";
+    case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+        return "FIFO_RELAXED";
+    default:
+        return "OTHER";
+    }
+}
+
+} // namespace
 
 Swapchain::Swapchain(
     const VulkanContext& vulkan,
@@ -35,6 +54,11 @@ Swapchain::Swapchain(
 
 Swapchain::~Swapchain() {
     destroySwapchain();
+}
+
+float Swapchain::contentScale() const noexcept {
+    const float scale = SDL_GetWindowDisplayScale(window_);
+    return scale > 0.0F ? scale : 1.0F;
 }
 
 bool Swapchain::recreate() {
@@ -180,6 +204,17 @@ bool Swapchain::recreate() {
     transferSourceSupported_ =
         newTransferSourceSupported;
 
+    std::cout
+        << "[swapchain] present_mode="
+        << presentModeName(presentMode_)
+        << " extent=" << extent_.width << 'x' << extent_.height
+        << " refresh_independent="
+        << (presentMode_ == VK_PRESENT_MODE_IMMEDIATE_KHR ||
+                    presentMode_ == VK_PRESENT_MODE_MAILBOX_KHR
+                ? "yes"
+                : "no(FIFO-only-surface)")
+        << '\n';
+
     std::uint32_t actualImageCount = 0;
     checkVk(
         vkGetSwapchainImagesKHR(vulkan_.device(), swapchain_, &actualImageCount, nullptr),
@@ -225,7 +260,7 @@ AcquireStatus Swapchain::acquire(VkSemaphore imageAvailable, std::uint32_t& imag
 
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
         // SUBOPTIMAL still acquires an image and signals imageAvailable. Consume it
-        // normally; vkQueuePresentKHR will request recreation if it remains necessary.
+        // normally; an actual OUT_OF_DATE result remains the hard recreation gate.
         return AcquireStatus::Ready;
     }
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -252,10 +287,16 @@ bool Swapchain::present(std::uint32_t imageIndex, VkSemaphore renderFinished) {
     presentInfo.pImageIndices = &imageIndex;
 
     const VkResult result = vkQueuePresentKHR(vulkan_.presentQueue().handle, &presentInfo);
-    if (result == VK_SUCCESS) {
+    if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+        // VK_SUBOPTIMAL_KHR is a success code: the image was presented and the
+        // current swapchain may continue to be used. Recreating immediately on
+        // transient Win32 surface/focus changes forces queue-idle + swapchain
+        // replacement and can produce a visible one-frame black flash between
+        // our borderless monitor windows. Defer recreation until WSI reports
+        // VK_ERROR_OUT_OF_DATE_KHR, where presentation can no longer continue.
         return true;
     }
-    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         return false;
     }
     if (result == VK_ERROR_SURFACE_LOST_KHR) {
@@ -319,18 +360,17 @@ VkSurfaceFormatKHR Swapchain::chooseSurfaceFormat(const std::vector<VkSurfaceFor
 }
 
 VkPresentModeKHR Swapchain::choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const {
-    if (presentPolicy_ == PresentPolicy::LowLatencyTearingAllowed) {
-        if (std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-            return VK_PRESENT_MODE_IMMEDIATE_KHR;
-        }
-        if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
-            return VK_PRESENT_MODE_MAILBOX_KHR;
-        }
-        return VK_PRESENT_MODE_FIFO_KHR;
-    }
+    // Reg's processing cadence must never be intentionally synchronized to the
+    // desktop refresh rate. Prefer IMMEDIATE for every output role; MAILBOX is
+    // the next best non-blocking option. FIFO is used only when the platform
+    // exposes no refresh-independent present mode (Vulkan requires FIFO).
+    // Decoder/metadata processing already lives off the presentation thread, so
+    // even a FIFO-only surface cannot throttle source ingest.
+    (void)presentPolicy_;
 
-    // Overlay/telemetry windows already tolerate deliberate buffering. Prefer
-    // tear-free low-queue-depth presentation before falling back to FIFO.
+    if (std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
+        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
     if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
         return VK_PRESENT_MODE_MAILBOX_KHR;
     }

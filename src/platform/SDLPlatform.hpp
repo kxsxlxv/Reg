@@ -29,14 +29,26 @@ public:
     SDL_Window* createVulkanWindow(
         const char* title,
         int width,
-        int height);
+        int height,
+        bool focusable = true);
 
     std::vector<DisplayInfo> displays() const;
 
-    // Moves an existing window to the center of the requested display while
-    // preserving its current windowed size. Returns false if that ordinal is
-    // not currently connected.
+    // Call sites pass logical roles in creation order: Raw=0, Overlay=1,
+    // Telemetry=2. On Windows these are mapped to the numbers shown by
+    // Settings -> System -> Display -> Identify using active CCD
+    // QueryDisplayConfig path ordering: Raw=3, Overlay=2, Telemetry=1.
+    // Placement uses normal borderless monitor-sized windows rather than OS
+    // fullscreen state. Secondary output windows are created non-focusable so
+    // clicking them cannot trigger a foreground/focus transition between the
+    // three Vulkan presentation surfaces.
     bool placeWindowOnDisplay(
+        SDL_Window* window,
+        std::size_t logicalRole);
+
+    // Portable ordinal fallback used outside Windows. Despite the retained API
+    // name this uses a borderless monitor-sized window, not SDL fullscreen.
+    bool placeWindowFullscreenOnDisplay(
         SDL_Window* window,
         std::size_t displayOrdinal);
 

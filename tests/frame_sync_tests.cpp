@@ -105,24 +105,39 @@ void invalidNormalizedRectIsRejected() {
     require(threw, "invalid normalized bbox must fail encoding");
 }
 
-void metadataStoreRejectsDuplicateAndStaysBounded() {
+void metadataStoreUpgradesExactKeyAndStaysBounded() {
     reg::metadata::MetadataStore store(2);
 
     require(
-        store.insert(makeMetadata(1, 10, 1)) ==
+        store.insert(makeMetadata(1, 10, 10)) ==
             reg::metadata::InsertResult::Inserted,
         "first metadata insert failed");
+
+    auto upgraded = makeMetadata(1, 10, 11);
+    upgraded.targets[0].flags = 0x0001U;
     require(
-        store.insert(makeMetadata(1, 10, 2)) ==
-            reg::metadata::InsertResult::Duplicate,
-        "duplicate FrameKey was not detected");
+        store.insert(std::move(upgraded)) ==
+            reg::metadata::InsertResult::Replaced,
+        "newer snapshot for exact FrameKey did not replace pending value");
+
+    const auto current = store.find({1, 10});
+    require(current != nullptr, "upgraded exact-key metadata disappeared");
+    require(current->sequence == 11U, "exact-key upgrade kept old sequence");
+    require(
+        current->targets[0].flags == 0x0001U,
+        "exact-key upgrade kept old target provenance");
 
     require(
-        store.insert(makeMetadata(1, 11, 3)) ==
+        store.insert(makeMetadata(1, 10, 10)) ==
+            reg::metadata::InsertResult::Duplicate,
+        "older exact-key packet was allowed to replace newer snapshot");
+
+    require(
+        store.insert(makeMetadata(1, 11, 12)) ==
             reg::metadata::InsertResult::Inserted,
         "second unique metadata insert failed");
     require(
-        store.insert(makeMetadata(1, 12, 4)) ==
+        store.insert(makeMetadata(1, 12, 13)) ==
             reg::metadata::InsertResult::EvictedOldest,
         "bounded store did not evict oldest entry");
 
@@ -261,7 +276,7 @@ int main() {
         protocolRoundTripPreservesFrameIdentity();
         corruptedPacketIsRejected();
         invalidNormalizedRectIsRejected();
-        metadataStoreRejectsDuplicateAndStaysBounded();
+        metadataStoreUpgradesExactKeyAndStaysBounded();
         overlayBufferHonorsDeadlineAndCapacity();
         synchronizerPresentsOnlyExactFrameKey();
         packetSequenceTrackerHandlesLossReorderAndWrap();

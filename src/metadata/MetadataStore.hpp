@@ -12,6 +12,7 @@ namespace reg::metadata {
 
 enum class InsertResult {
     Inserted,
+    Replaced,
     Duplicate,
     EvictedOldest,
 };
@@ -20,6 +21,11 @@ class MetadataStore final {
 public:
     explicit MetadataStore(std::size_t capacity = 512);
 
+    // Exact FrameKey remains the only correspondence key. If another snapshot
+    // for the same key arrives with a newer CVM1 packet sequence, replace the
+    // pending snapshot in-place. This permits a late detector anchor to upgrade
+    // an OFA snapshot for that exact source frame without any timestamp/order
+    // based frame reassignment.
     InsertResult insert(FrameMetadata metadata);
 
     FrameMetadataPtr find(media::FrameKey key) const;
