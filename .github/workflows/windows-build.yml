@@ -56,7 +56,7 @@ jobs:
       - name: Configure Reg
         shell: msys2 {0}
         run: |
-          cmake -S . -B build-win -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DFFMPEG_ROOT="$PWD/.ci/ffmpeg-install"             -DREG_ENABLE_VALIDATION=OFF             -DREG_BUILD_TESTS=ON             -DVulkan_INCLUDE_DIR=/ucrt64/include             -DVulkan_LIBRARY=/ucrt64/lib/libvulkan-1.dll.a
+          cmake -S . -B build-win -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DFFMPEG_ROOT="$PWD/.ci/ffmpeg-install"             -DREG_ENABLE_VALIDATION=OFF             -DREG_BUILD_TESTS=ON             -DREG_ENABLE_NETIMGUI_REMOTE=ON             -DVulkan_INCLUDE_DIR=/ucrt64/include             -DVulkan_LIBRARY=/ucrt64/lib/libvulkan-1.dll.a
 
       - name: Build Reg
         shell: msys2 {0}
