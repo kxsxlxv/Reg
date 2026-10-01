@@ -13,10 +13,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -25,11 +27,27 @@ namespace {
 
 constexpr std::uint16_t kDetectorFlag = 0x0001U;
 constexpr std::uint16_t kPropagatedFlag = 0x0002U;
+constexpr double kPerformanceWindowSeconds = 60.0;
 
 const ImVec4 kAccentBlue{0.290F, 0.565F, 0.851F, 1.000F};
 const ImVec4 kSignalGreen{0.25F, 1.0F, 0.25F, 1.0F};
 const ImVec4 kWarningAmber{1.0F, 0.72F, 0.12F, 1.0F};
 const ImVec4 kErrorRed{1.0F, 0.35F, 0.32F, 1.0F};
+
+struct RateHistory {
+    std::vector<double> secondsAgo;
+    std::vector<double> decodedFps;
+    std::vector<double> rawFps;
+    std::vector<double> overlayFps;
+};
+
+struct RateStats {
+    double current{};
+    double minimum{};
+    double average{};
+    double maximum{};
+    bool valid{};
+};
 
 double ratePerSecond(
     std::uint64_t current,
@@ -46,36 +64,100 @@ double ratePerSecond(
 
 void buildRateHistory(
     const telemetry::Snapshot& snapshot,
-    std::vector<double>& seconds,
-    std::vector<double>& rawFps,
-    std::vector<double>& overlayFps) {
-    seconds.clear();
-    rawFps.clear();
-    overlayFps.clear();
+    std::chrono::steady_clock::time_point now,
+    RateHistory& history) {
+    history.secondsAgo.clear();
+    history.decodedFps.clear();
+    history.rawFps.clear();
+    history.overlayFps.clear();
+
     if (snapshot.samples.size() < 2U) {
         return;
     }
 
-    const auto first = snapshot.samples.front().time;
-    seconds.reserve(snapshot.samples.size() - 1U);
-    rawFps.reserve(snapshot.samples.size() - 1U);
-    overlayFps.reserve(snapshot.samples.size() - 1U);
+    const auto cutoff =
+        now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                  std::chrono::duration<double>{kPerformanceWindowSeconds});
+
+    const std::size_t reserveCount = snapshot.samples.size() - 1U;
+    history.secondsAgo.reserve(reserveCount);
+    history.decodedFps.reserve(reserveCount);
+    history.rawFps.reserve(reserveCount);
+    history.overlayFps.reserve(reserveCount);
 
     for (std::size_t i = 1; i < snapshot.samples.size(); ++i) {
         const auto& previous = snapshot.samples[i - 1U];
         const auto& current = snapshot.samples[i];
+        if (current.time < cutoff) {
+            continue;
+        }
+
         const auto elapsed = current.time - previous.time;
-        seconds.push_back(
-            std::chrono::duration<double>(current.time - first).count());
-        rawFps.push_back(ratePerSecond(
+        history.secondsAgo.push_back(
+            std::chrono::duration<double>(current.time - now).count());
+        history.decodedFps.push_back(ratePerSecond(
+            current.counters.decodedFrames,
+            previous.counters.decodedFrames,
+            elapsed));
+        history.rawFps.push_back(ratePerSecond(
             current.counters.rawPresentedFrames,
             previous.counters.rawPresentedFrames,
             elapsed));
-        overlayFps.push_back(ratePerSecond(
+        history.overlayFps.push_back(ratePerSecond(
             current.counters.overlayPresentedFrames,
             previous.counters.overlayPresentedFrames,
             elapsed));
     }
+}
+
+RateStats rateStats(const std::vector<double>& values) {
+    RateStats stats{};
+    if (values.empty()) {
+        return stats;
+    }
+
+    double sum = 0.0;
+    std::size_t count = 0U;
+    stats.minimum = std::numeric_limits<double>::infinity();
+    stats.maximum = -std::numeric_limits<double>::infinity();
+
+    for (const double value : values) {
+        if (!std::isfinite(value)) {
+            continue;
+        }
+        stats.minimum = std::min(stats.minimum, value);
+        stats.maximum = std::max(stats.maximum, value);
+        sum += value;
+        ++count;
+    }
+
+    if (count == 0U) {
+        return {};
+    }
+
+    stats.current = values.back();
+    stats.average = sum / static_cast<double>(count);
+    stats.valid = true;
+    return stats;
+}
+
+void drawRateStatsLine(
+    const char* label,
+    const ImVec4& color,
+    const RateStats& stats) {
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    if (!stats.valid) {
+        ImGui::Text("%-8s  --.- FPS", label);
+    } else {
+        ImGui::Text(
+            "%-8s  %6.2f FPS    MIN %6.2f | AVG %6.2f | MAX %6.2f",
+            label,
+            stats.current,
+            stats.minimum,
+            stats.average,
+            stats.maximum);
+    }
+    ImGui::PopStyleColor();
 }
 
 void statusRow(const char* label, const char* value) {
@@ -175,37 +257,71 @@ void drawStatus(const telemetry::Counters& counters) {
     ImGui::EndTable();
 }
 
-void drawPerformance(
-    const std::vector<double>& seconds,
-    const std::vector<double>& rawFps,
-    const std::vector<double>& overlayFps) {
-    if (seconds.empty()) {
+void drawPerformance(const RateHistory& history) {
+    ImGui::TextDisabled(
+        "Rolling 60 s, raw samples (no smoothing / interpolation)");
+
+    drawRateStatsLine(
+        "Decoded",
+        kSignalGreen,
+        rateStats(history.decodedFps));
+    drawRateStatsLine(
+        "Raw",
+        kAccentBlue,
+        rateStats(history.rawFps));
+    drawRateStatsLine(
+        "Overlay",
+        kWarningAmber,
+        rateStats(history.overlayFps));
+
+    if (history.secondsAgo.empty()) {
         ImGui::TextDisabled("Collecting performance samples...");
         return;
     }
 
     if (!ImPlot::BeginPlot(
             "##fps",
-            ImVec2(-1.0F, 230.0F),
+            ImVec2(-1.0F, 250.0F),
             ImPlotFlags_NoTitle)) {
         return;
     }
 
-    ImPlot::SetupAxes(
-        "time (s)",
+    ImPlot::SetupAxis(
+        ImAxis_X1,
+        "seconds ago",
+        ImPlotAxisFlags_NoMenus);
+    ImPlot::SetupAxisLimits(
+        ImAxis_X1,
+        -kPerformanceWindowSeconds,
+        0.0,
+        ImPlotCond_Always);
+    ImPlot::SetupAxis(
+        ImAxis_Y1,
         "FPS",
-        ImPlotAxisFlags_AutoFit,
-        ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit);
+        ImPlotAxisFlags_AutoFit |
+            ImPlotAxisFlags_RangeFit |
+            ImPlotAxisFlags_NoMenus);
     ImPlot::SetupLegend(ImPlotLocation_NorthEast);
 
-    const int count = static_cast<int>(seconds.size());
+    const int count = static_cast<int>(history.secondsAgo.size());
+
+    ImPlotSpec decodedSpec;
+    decodedSpec.LineColor = kSignalGreen;
+    decodedSpec.LineWeight = 2.0F;
+    ImPlot::PlotLine(
+        "Decoded",
+        history.secondsAgo.data(),
+        history.decodedFps.data(),
+        count,
+        decodedSpec);
+
     ImPlotSpec rawSpec;
     rawSpec.LineColor = kAccentBlue;
     rawSpec.LineWeight = 2.0F;
     ImPlot::PlotLine(
         "Raw",
-        seconds.data(),
-        rawFps.data(),
+        history.secondsAgo.data(),
+        history.rawFps.data(),
         count,
         rawSpec);
 
@@ -214,10 +330,43 @@ void drawPerformance(
     overlaySpec.LineWeight = 2.0F;
     ImPlot::PlotLine(
         "Overlay",
-        seconds.data(),
-        overlayFps.data(),
+        history.secondsAgo.data(),
+        history.overlayFps.data(),
         count,
         overlaySpec);
+
+    if (ImPlot::IsPlotHovered()) {
+        const ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+        const auto nearest = std::min_element(
+            history.secondsAgo.begin(),
+            history.secondsAgo.end(),
+            [&](double lhs, double rhs) {
+                return std::abs(lhs - mouse.x) <
+                    std::abs(rhs - mouse.x);
+            });
+
+        if (nearest != history.secondsAgo.end()) {
+            const std::size_t index = static_cast<std::size_t>(
+                std::distance(history.secondsAgo.begin(), nearest));
+            ImGui::BeginTooltip();
+            ImGui::Text("t = %.2f s", history.secondsAgo[index]);
+            ImGui::Separator();
+            ImGui::TextColored(
+                kSignalGreen,
+                "Decoded  %.2f FPS",
+                history.decodedFps[index]);
+            ImGui::TextColored(
+                kAccentBlue,
+                "Raw      %.2f FPS",
+                history.rawFps[index]);
+            ImGui::TextColored(
+                kWarningAmber,
+                "Overlay  %.2f FPS",
+                history.overlayFps[index]);
+            ImGui::EndTooltip();
+        }
+    }
+
     ImPlot::EndPlot();
 }
 
@@ -331,9 +480,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
     std::chrono::steady_clock::time_point lastFrameTime{
         std::chrono::steady_clock::now()};
-    std::vector<double> seconds;
-    std::vector<double> rawFps;
-    std::vector<double> overlayFps;
+    RateHistory rateHistory;
 
     void setCurrentContext() const {
         ImGui::SetCurrentContext(context);
@@ -435,8 +582,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
 
     void buildDashboard(
         const telemetry::Snapshot& snapshot,
-        VkExtent2D extent) {
-        buildRateHistory(snapshot, seconds, rawFps, overlayFps);
+        VkExtent2D extent,
+        std::chrono::steady_clock::time_point now) {
+        buildRateHistory(snapshot, now, rateHistory);
         ImGui::SetNextWindowPos(ImVec2(0.0F, 0.0F), ImGuiCond_Always);
         ImGui::SetNextWindowSize(
             ImVec2(
@@ -461,11 +609,11 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         ImGui::Separator();
         drawStatus(snapshot.counters);
         ImGui::SeparatorText("PERFORMANCE");
-        drawPerformance(seconds, rawFps, overlayFps);
+        drawPerformance(rateHistory);
         ImGui::SeparatorText("CURRENT TARGETS");
         drawTargets(snapshot.targets);
         ImGui::SeparatorText("EVENTS / LAST 5 MINUTES");
-        drawEvents(snapshot.events, std::chrono::steady_clock::now());
+        drawEvents(snapshot.events, now);
         ImGui::End();
     }
 
@@ -486,7 +634,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         io.DeltaTime = std::max(delta.count(), 1.0F / 1000.0F);
         ImGui_ImplVulkan_NewFrame();
         ImGui::NewFrame();
-        buildDashboard(snapshot, extent);
+        buildDashboard(snapshot, extent, now);
         ImGui::Render();
         drawData = ImGui::GetDrawData();
     }
