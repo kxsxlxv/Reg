@@ -38,8 +38,12 @@ namespace {
 
 constexpr auto kVideoSignalStaleAfter =
     std::chrono::milliseconds{1500};
+constexpr auto kCvSignalStaleAfter =
+    std::chrono::milliseconds{1000};
 constexpr auto kNoSignalRefreshInterval =
     std::chrono::milliseconds{100};
+constexpr auto kTelemetryRenderInterval =
+    std::chrono::milliseconds{16};
 
 std::int64_t steadyNowNs() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -47,14 +51,14 @@ std::int64_t steadyNowNs() noexcept {
         .count();
 }
 
-std::uint64_t videoFrameAgeMs(
-    const std::int64_t lastFrameNs,
+std::uint64_t signalAgeMs(
+    const std::int64_t lastSignalNs,
     const std::int64_t nowNs) noexcept {
-    if (lastFrameNs <= 0 || nowNs <= lastFrameNs) {
+    if (lastSignalNs <= 0 || nowNs <= lastSignalNs) {
         return 0;
     }
     return static_cast<std::uint64_t>(
-        (nowNs - lastFrameNs) / 1'000'000LL);
+        (nowNs - lastSignalNs) / 1'000'000LL);
 }
 
 std::filesystem::path makeScreenshotPath(
@@ -110,7 +114,8 @@ int runApplication(
             SDL_Window* overlaySdlWindow = platform.createVulkanWindow(
                 "Reg - Exact CV Overlay",
                 1280,
-                720);
+                720,
+                false);
 
             if (!platform.placeWindowOnDisplay(
                     overlaySdlWindow,
@@ -130,7 +135,8 @@ int runApplication(
                 platform.createVulkanWindow(
                     "Reg - Telemetry",
                     1280,
-                    720);
+                    720,
+                    false);
 
             if (!platform.placeWindowOnDisplay(
                     telemetrySdlWindow,
@@ -248,6 +254,8 @@ int runApplication(
                         telemetryWindow->swapchain());
         }
 
+        std::atomic<std::int64_t> lastAcceptedMetadataNs{0};
+
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
         if (options.overlayEnabled) {
             metadataReceiver =
@@ -259,6 +267,13 @@ int runApplication(
                         .receiveTimeoutMs = 100,
                     },
                     [&](reg::metadata::FrameMetadata metadata) {
+                        // This callback only runs for valid CVM1 snapshots that
+                        // were accepted into the exact-key store. Duplicates do
+                        // not artificially keep the CV signal watchdog alive.
+                        lastAcceptedMetadataNs.store(
+                            steadyNowNs(),
+                            std::memory_order_release);
+
                         if (blackboxRecorder) {
                             static_cast<void>(
                                 blackboxRecorder->submitMetadata(
@@ -319,6 +334,9 @@ int runApplication(
                                     overlayFrames.clear();
                                     metadataStore.clear();
                                     lastDecodedFrameNs.store(
+                                        0,
+                                        std::memory_order_release);
+                                    lastAcceptedMetadataNs.store(
                                         0,
                                         std::memory_order_release);
 
@@ -691,8 +709,10 @@ int runApplication(
             pendingOverlayFrame;
         std::uint64_t observedSessionGeneration{0};
         bool recorderFailureLogged{false};
-        bool signalStateInitialized{false};
-        bool previousSignalPresent{false};
+        bool videoSignalStateInitialized{false};
+        bool previousVideoSignalPresent{false};
+        bool cvSignalStateInitialized{false};
+        bool previousCvSignalPresent{false};
         auto nextTelemetryRenderAt =
             std::chrono::steady_clock::now();
         auto nextNoSignalRenderAt =
@@ -866,6 +886,9 @@ int runApplication(
                     rawMailbox.clear();
                     overlayFrames.clear();
                     metadataStore.clear();
+                    lastAcceptedMetadataNs.store(
+                        0,
+                        std::memory_order_release);
 
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
@@ -905,18 +928,28 @@ int runApplication(
                 const std::int64_t nowNs = steadyNowNs();
                 const std::int64_t lastFrameNs =
                     lastDecodedFrameNs.load(std::memory_order_acquire);
+                const std::int64_t lastMetadataNs =
+                    lastAcceptedMetadataNs.load(std::memory_order_acquire);
                 const std::uint64_t frameAgeMs =
-                    videoFrameAgeMs(lastFrameNs, nowNs);
+                    signalAgeMs(lastFrameNs, nowNs);
+                const std::uint64_t cvPacketAgeMs =
+                    signalAgeMs(lastMetadataNs, nowNs);
                 const bool signalPresent =
                     decoderConnected.load(std::memory_order_acquire) &&
                     lastFrameNs > 0 &&
                     frameAgeMs <= static_cast<std::uint64_t>(
                         kVideoSignalStaleAfter.count());
+                const bool cvSignalPresent =
+                    options.overlayEnabled &&
+                    signalPresent &&
+                    lastMetadataNs > 0 &&
+                    cvPacketAgeMs <= static_cast<std::uint64_t>(
+                        kCvSignalStaleAfter.count());
 
-                if (!signalStateInitialized ||
-                    signalPresent != previousSignalPresent) {
-                    signalStateInitialized = true;
-                    previousSignalPresent = signalPresent;
+                if (!videoSignalStateInitialized ||
+                    signalPresent != previousVideoSignalPresent) {
+                    videoSignalStateInitialized = true;
+                    previousVideoSignalPresent = signalPresent;
                     nextNoSignalRenderAt = loopNow;
 
                     if (signalPresent) {
@@ -934,6 +967,29 @@ int runApplication(
                         telemetryModel.log(
                             reg::telemetry::Severity::Warning,
                             "NO SIGNAL: decoded video is not arriving");
+                    }
+                }
+
+                if (options.overlayEnabled &&
+                    (!cvSignalStateInitialized ||
+                     cvSignalPresent != previousCvSignalPresent)) {
+                    cvSignalStateInitialized = true;
+                    previousCvSignalPresent = cvSignalPresent;
+                    nextNoSignalRenderAt = loopNow;
+
+                    if (cvSignalPresent) {
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Info,
+                            "CVM1 / Jetson signal restored");
+                    } else if (signalPresent) {
+                        overlayFrames.clear();
+                        metadataStore.clear();
+                        pendingOverlayFrame.reset();
+                        trackHistory.clear();
+                        telemetryModel.clearTargets();
+                        telemetryModel.log(
+                            reg::telemetry::Severity::Warning,
+                            "NO SIGNAL: CVM1 metadata is not arriving");
                     }
                 }
 
@@ -1031,118 +1087,143 @@ int runApplication(
                     if (options.overlayEnabled &&
                         overlayWindow &&
                         overlayWindow->available() &&
-                        overlayRenderer) {
-                        if (!pendingOverlayFrame) {
-                            // Drain a small number of expired frames per iteration.
-                            // Missing metadata is an intentional drop, not a reason
-                            // to stall all later exact pairs.
-                            for (int attempt = 0; attempt < 8; ++attempt) {
-                                auto decision = synchronizer.next(
-                                    std::chrono::steady_clock::now());
-
-                                if (decision.type ==
-                                    reg::video::SyncDecisionType::None) {
-                                    break;
+                        overlayRenderer &&
+                        overlaySceneRenderer) {
+                        if (!cvSignalPresent) {
+                            if (loopNow >= nextNoSignalRenderAt) {
+                                try {
+                                    overlaySceneRenderer->prepareNoSignal(
+                                        overlayWindow->swapchain());
+                                    if (overlayRenderer->renderBlank(
+                                            overlayWindow->swapchain(),
+                                            overlaySceneRenderer.get())) {
+                                        didWork = true;
+                                    }
+                                } catch (const reg::vulkan::SurfaceLostError& error) {
+                                    overlaySurfaceRecoveryPending = true;
+                                    nextOverlaySurfaceRecovery = loopNow;
+                                    telemetryModel.log(
+                                        reg::telemetry::Severity::Warning,
+                                        std::string("Overlay surface lost: ") +
+                                            error.what());
                                 }
 
-                                if (decision.type ==
-                                    reg::video::SyncDecisionType::
-                                        DropMissingMetadata) {
-                                    overlayMissingMetadataDrops.fetch_add(
-                                        1,
-                                        std::memory_order_relaxed);
-                                    didWork = true;
-                                    continue;
-                                }
-
-                                if (decision.type ==
-                                        reg::video::SyncDecisionType::Present &&
-                                    decision.frame) {
-                                    trackHistory.update(
-                                        *decision.frame->metadata,
+                                nextNoSignalRenderAt =
+                                    loopNow + kNoSignalRefreshInterval;
+                            }
+                        } else {
+                            if (!pendingOverlayFrame) {
+                                // Drain a small number of expired frames per iteration.
+                                // Missing metadata is an intentional drop, not a reason
+                                // to stall all later exact pairs.
+                                for (int attempt = 0; attempt < 8; ++attempt) {
+                                    auto decision = synchronizer.next(
                                         std::chrono::steady_clock::now());
 
-                                    telemetryModel.setTargets(
-                                        *decision.frame->metadata);
+                                    if (decision.type ==
+                                        reg::video::SyncDecisionType::None) {
+                                        break;
+                                    }
 
-                                    pendingOverlayFrame =
-                                        std::move(*decision.frame);
-                                    break;
+                                    if (decision.type ==
+                                        reg::video::SyncDecisionType::
+                                            DropMissingMetadata) {
+                                        overlayMissingMetadataDrops.fetch_add(
+                                            1,
+                                            std::memory_order_relaxed);
+                                        didWork = true;
+                                        continue;
+                                    }
+
+                                    if (decision.type ==
+                                            reg::video::SyncDecisionType::Present &&
+                                        decision.frame) {
+                                        trackHistory.update(
+                                            *decision.frame->metadata,
+                                            std::chrono::steady_clock::now());
+
+                                        telemetryModel.setTargets(
+                                            *decision.frame->metadata);
+
+                                        pendingOverlayFrame =
+                                            std::move(*decision.frame);
+                                        break;
+                                    }
                                 }
                             }
-                        }
 
-                        if (pendingOverlayFrame) {
-                            const auto& synchronized =
-                                *pendingOverlayFrame;
+                            if (pendingOverlayFrame) {
+                                const auto& synchronized =
+                                    *pendingOverlayFrame;
 
-                            const auto extent =
-                                overlayWindow->swapchain().extent();
+                                const auto extent =
+                                    overlayWindow->swapchain().extent();
 
-                            reg::video::VideoTransform transform(
-                                static_cast<std::uint32_t>(
-                                    synchronized.buffered.video->width()),
-                                static_cast<std::uint32_t>(
-                                    synchronized.buffered.video->height()),
-                                extent.width,
-                                extent.height);
+                                reg::video::VideoTransform transform(
+                                    static_cast<std::uint32_t>(
+                                        synchronized.buffered.video->width()),
+                                    static_cast<std::uint32_t>(
+                                        synchronized.buffered.video->height()),
+                                    extent.width,
+                                    extent.height);
 
-                            const reg::render::OverlayScene scene =
-                                overlayBuilder.build(
-                                    *synchronized.metadata,
-                                    trackHistory,
-                                    transform);
+                                const reg::render::OverlayScene scene =
+                                    overlayBuilder.build(
+                                        *synchronized.metadata,
+                                        trackHistory,
+                                        transform);
 
-                            overlaySceneRenderer->prepare(
-                                scene,
-                                overlayWindow->swapchain());
+                                overlaySceneRenderer->prepare(
+                                    scene,
+                                    overlayWindow->swapchain());
 
-                            bool overlayPresented = false;
+                                bool overlayPresented = false;
 
-                            try {
-                                overlayPresented =
-                                    overlayRenderer->render(
-                                        synchronized.buffered.video,
-                                        overlayWindow->swapchain(),
-                                        overlaySceneRenderer.get());
-                            } catch (const reg::vulkan::SurfaceLostError& error) {
-                                overlaySurfaceRecoveryPending = true;
-                                nextOverlaySurfaceRecovery = loopNow;
+                                try {
+                                    overlayPresented =
+                                        overlayRenderer->render(
+                                            synchronized.buffered.video,
+                                            overlayWindow->swapchain(),
+                                            overlaySceneRenderer.get());
+                                } catch (const reg::vulkan::SurfaceLostError& error) {
+                                    overlaySurfaceRecoveryPending = true;
+                                    nextOverlaySurfaceRecovery = loopNow;
 
-                                pendingOverlayFrame.reset();
-                                overlayFrames.clear();
-                                metadataStore.clear();
-                                trackHistory.clear();
-                                telemetryModel.clearTargets();
+                                    pendingOverlayFrame.reset();
+                                    overlayFrames.clear();
+                                    metadataStore.clear();
+                                    trackHistory.clear();
+                                    telemetryModel.clearTargets();
 
-                                telemetryModel.log(
-                                    reg::telemetry::Severity::Warning,
-                                    std::string("Overlay surface lost: ") +
-                                        error.what());
-                            }
-
-                            if (overlayPresented) {
-                                const auto count =
-                                    overlayPresentedFrames.fetch_add(
-                                        1,
-                                        std::memory_order_relaxed) +
-                                    1;
-
-                                if (count == 1 || count % 120 == 0) {
-                                    std::cout
-                                        << "[overlay] presented="
-                                        << count
-                                        << " epoch="
-                                        << synchronized.buffered.key.streamEpoch
-                                        << " frame="
-                                        << synchronized.buffered.key.frameId
-                                        << " metadata_sequence="
-                                        << synchronized.metadata->sequence
-                                        << '\n';
+                                    telemetryModel.log(
+                                        reg::telemetry::Severity::Warning,
+                                        std::string("Overlay surface lost: ") +
+                                            error.what());
                                 }
 
-                                pendingOverlayFrame.reset();
-                                didWork = true;
+                                if (overlayPresented) {
+                                    const auto count =
+                                        overlayPresentedFrames.fetch_add(
+                                            1,
+                                            std::memory_order_relaxed) +
+                                        1;
+
+                                    if (count == 1 || count % 120 == 0) {
+                                        std::cout
+                                            << "[overlay] presented="
+                                            << count
+                                            << " epoch="
+                                            << synchronized.buffered.key.streamEpoch
+                                            << " frame="
+                                            << synchronized.buffered.key.frameId
+                                            << " metadata_sequence="
+                                            << synchronized.metadata->sequence
+                                            << '\n';
+                                    }
+
+                                    pendingOverlayFrame.reset();
+                                    didWork = true;
+                                }
                             }
                         }
                     }
@@ -1188,6 +1269,8 @@ int runApplication(
                                     std::memory_order_relaxed),
                             .videoSignalPresent = signalPresent,
                             .videoFrameAgeMs = frameAgeMs,
+                            .cvSignalPresent = cvSignalPresent,
+                            .cvPacketAgeMs = cvPacketAgeMs,
                             .decoderSessions =
                                 decoderSessionGeneration.load(
                                     std::memory_order_relaxed),
@@ -1255,7 +1338,7 @@ int runApplication(
 
                     nextTelemetryRenderAt =
                         telemetryNow +
-                        std::chrono::milliseconds{100};
+                        kTelemetryRenderInterval;
                 }
 
                 if (!didWork) {
