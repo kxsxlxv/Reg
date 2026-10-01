@@ -3,6 +3,19 @@
 # NetImgui is kept as a pinned submodule. Reg intentionally owns SDL/Vulkan
 # presentation; the upstream NetImgui ServerApp renderer is not used here.
 
+function(reg_netimgui_third_party_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
+    else()
+        # NetImgui is third-party code; don't promote its warnings to Reg policy.
+        target_compile_options(${target} PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+        )
+    endif()
+endfunction()
+
 function(reg_add_netimgui_client_compat_target)
     set(_netimgui_root "${CMAKE_CURRENT_SOURCE_DIR}/netimgui")
     set(_netimgui_client "${_netimgui_root}/Code/Client")
@@ -49,14 +62,46 @@ function(reg_add_netimgui_client_compat_target)
         target_link_libraries(reg_netimgui_client PRIVATE ws2_32)
     endif()
 
-    if(MSVC)
-        target_compile_options(reg_netimgui_client PRIVATE /W4 /permissive- /EHsc)
-    else()
-        # NetImgui is third-party code; don't promote its warnings to Reg policy.
-        target_compile_options(reg_netimgui_client PRIVATE
-            -Wall
-            -Wextra
-            -Wpedantic
-        )
+    reg_netimgui_third_party_warnings(reg_netimgui_client)
+endfunction()
+
+function(reg_add_netimgui_server_core_target)
+    set(_netimgui_root "${CMAKE_CURRENT_SOURCE_DIR}/netimgui")
+    set(_netimgui_client "${_netimgui_root}/Code/Client")
+    set(_netimgui_server "${_netimgui_root}/Code/ServerApp/Source")
+
+    add_library(reg_netimgui_server_core STATIC
+        "${_netimgui_server}/NetImguiServer_Network.cpp"
+        "${_netimgui_server}/NetImguiServer_RemoteClient.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/remote/NetImguiEmbeddedConfig.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/remote/NetImguiEmbeddedApp.cpp"
+    )
+
+    target_include_directories(reg_netimgui_server_core
+        PUBLIC
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        PRIVATE
+            "${_netimgui_client}"
+            "${_netimgui_server}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+    )
+
+    # Keep upstream's server-side conditionals, but deliberately do not compile
+    # any Win32/DX11, GLFW/OpenGL or Sokol ServerApp/HAL source files.
+    target_compile_definitions(reg_netimgui_server_core
+        PRIVATE
+            IS_NETIMGUISERVER=1
+    )
+
+    target_link_libraries(reg_netimgui_server_core
+        PUBLIC
+            reg_netimgui_client
+            reg_imgui
+    )
+
+    if(WIN32)
+        target_link_libraries(reg_netimgui_server_core PRIVATE ws2_32)
     endif()
+
+    reg_netimgui_third_party_warnings(reg_netimgui_server_core)
 endfunction()
