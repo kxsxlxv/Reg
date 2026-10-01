@@ -58,6 +58,69 @@ struct WindowsSettingsDisplay final {
     int height{};
 };
 
+struct MonitorRectLookup final {
+    std::wstring deviceName;
+    std::optional<RECT> rect;
+};
+
+BOOL CALLBACK monitorRectCallback(
+    HMONITOR monitor,
+    HDC,
+    LPRECT,
+    LPARAM userData) {
+    auto* lookup =
+        reinterpret_cast<MonitorRectLookup*>(userData);
+    if (lookup == nullptr) {
+        return FALSE;
+    }
+
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (!GetMonitorInfoW(
+            monitor,
+            reinterpret_cast<MONITORINFO*>(&info))) {
+        return TRUE;
+    }
+
+    if (lstrcmpiW(
+            info.szDevice,
+            lookup->deviceName.c_str()) != 0) {
+        return TRUE;
+    }
+
+    lookup->rect = info.rcMonitor;
+    return FALSE;
+}
+
+std::optional<RECT> desktopMonitorRectForPath(
+    const DISPLAYCONFIG_PATH_INFO& path) {
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName{};
+    sourceName.header.type =
+        DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+    sourceName.header.size = sizeof(sourceName);
+    sourceName.header.adapterId = path.sourceInfo.adapterId;
+    sourceName.header.id = path.sourceInfo.id;
+
+    if (DisplayConfigGetDeviceInfo(
+            &sourceName.header) != ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+
+    MonitorRectLookup lookup{
+        .deviceName = sourceName.viewGdiDeviceName,
+        .rect = std::nullopt,
+    };
+
+    static_cast<void>(
+        EnumDisplayMonitors(
+            nullptr,
+            nullptr,
+            monitorRectCallback,
+            reinterpret_cast<LPARAM>(&lookup)));
+
+    return lookup.rect;
+}
+
 std::vector<WindowsSettingsDisplay> windowsSettingsDisplays() {
     UINT32 pathCount = 0U;
     UINT32 modeCount = 0U;
@@ -108,8 +171,14 @@ std::vector<WindowsSettingsDisplay> windowsSettingsDisplays() {
 
         // Windows Settings "Identify" numbering follows the active CCD path
         // order: paths[0] -> display 1, paths[1] -> display 2, ... . Do not use
-        // SDL enumeration or the GDI \\.\DISPLAYn suffix here; those identifiers
-        // can have a different ordering from the number shown to the operator.
+        // SDL enumeration or the GDI \\.\DISPLAYn suffix for numbering.
+        //
+        // The GDI monitor rectangle is still used for geometry after a path is
+        // identified. It is expressed in the actual desktop coordinate space
+        // and therefore already contains the effective portrait/landscape
+        // orientation. Using DISPLAYCONFIG_SOURCE_MODE width/height directly
+        // can describe the source surface rather than the rotated desktop
+        // rectangle on a portrait target.
         for (std::size_t index = 0U; index < paths.size(); ++index) {
             const auto& path = paths[index];
             const UINT32 modeIndex = path.sourceInfo.modeInfoIdx;
@@ -123,6 +192,22 @@ std::vector<WindowsSettingsDisplay> windowsSettingsDisplays() {
                 continue;
             }
 
+            const auto monitorRect =
+                desktopMonitorRectForPath(path);
+            if (monitorRect.has_value()) {
+                displays.push_back(
+                    WindowsSettingsDisplay{
+                        .settingsNumber = static_cast<int>(index + 1U),
+                        .x = monitorRect->left,
+                        .y = monitorRect->top,
+                        .width = monitorRect->right - monitorRect->left,
+                        .height = monitorRect->bottom - monitorRect->top,
+                    });
+                continue;
+            }
+
+            // Conservative fallback for unusual display drivers where the CCD
+            // source cannot be mapped back to an HMONITOR.
             const auto& source = mode.sourceMode;
             displays.push_back(
                 WindowsSettingsDisplay{
