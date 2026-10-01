@@ -113,6 +113,24 @@ function(reg_add_netimgui_server_core_target)
     endif()
 
     reg_netimgui_third_party_warnings(reg_netimgui_server_core)
+
+    add_executable(reg_netimgui_core_link_smoke
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/remote/NetImguiCoreLinkSmoke.cpp"
+    )
+    target_link_libraries(reg_netimgui_core_link_smoke PRIVATE
+        reg_netimgui_server_core
+    )
+    if(MSVC)
+        target_compile_options(reg_netimgui_core_link_smoke PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_netimgui_core_link_smoke PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wconversion
+            -Wshadow
+        )
+    endif()
 endfunction()
 
 function(reg_add_netimgui_remote_renderer_target)
