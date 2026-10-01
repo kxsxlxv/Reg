@@ -7,13 +7,11 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-
-#include <cwchar>
-#include <vector>
 #endif
 
 namespace reg::platform {
@@ -34,7 +32,7 @@ bool placeBorderlessWindow(
     // Deliberately use a normal borderless window rather than SDL fullscreen.
     // On Windows a real fullscreen state can cause WSI/swapchain transitions
     // when focus moves between our three outputs. A borderless window sized to
-    // the monitor client rectangle is visually fullscreen without that focus
+    // the monitor desktop rectangle is visually fullscreen without that focus
     // transition and therefore avoids the one-frame black flash.
     if (!SDL_SetWindowBordered(window, false)) {
         return false;
@@ -52,77 +50,104 @@ bool placeBorderlessWindow(
 }
 
 #ifdef _WIN32
-struct WindowsMonitor final {
-    int displayNumber{};
-    RECT bounds{};
+struct WindowsSettingsDisplay final {
+    int settingsNumber{};
+    int x{};
+    int y{};
+    int width{};
+    int height{};
 };
 
-int parseWindowsDisplayNumber(const wchar_t* deviceName) noexcept {
-    if (deviceName == nullptr) {
-        return 0;
+std::vector<WindowsSettingsDisplay> windowsSettingsDisplays() {
+    UINT32 pathCount = 0U;
+    UINT32 modeCount = 0U;
+
+    LONG result = GetDisplayConfigBufferSizes(
+        QDC_ONLY_ACTIVE_PATHS,
+        &pathCount,
+        &modeCount);
+    if (result != ERROR_SUCCESS) {
+        return {};
     }
 
-    constexpr wchar_t prefix[] = L"\\\\.\\DISPLAY";
-    constexpr std::size_t prefixLength =
-        (sizeof(prefix) / sizeof(prefix[0])) - 1U;
+    // The topology can change between the size query and QueryDisplayConfig.
+    // Retry on ERROR_INSUFFICIENT_BUFFER instead of using stale array sizes.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+        std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
 
-    if (std::wcsncmp(deviceName, prefix, prefixLength) != 0) {
-        return 0;
+        UINT32 actualPathCount = pathCount;
+        UINT32 actualModeCount = modeCount;
+        result = QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &actualPathCount,
+            paths.data(),
+            &actualModeCount,
+            modes.data(),
+            nullptr);
+
+        if (result == ERROR_INSUFFICIENT_BUFFER) {
+            result = GetDisplayConfigBufferSizes(
+                QDC_ONLY_ACTIVE_PATHS,
+                &pathCount,
+                &modeCount);
+            if (result != ERROR_SUCCESS) {
+                return {};
+            }
+            continue;
+        }
+        if (result != ERROR_SUCCESS) {
+            return {};
+        }
+
+        paths.resize(actualPathCount);
+        modes.resize(actualModeCount);
+
+        std::vector<WindowsSettingsDisplay> displays;
+        displays.reserve(paths.size());
+
+        // Windows Settings "Identify" numbering follows the active CCD path
+        // order: paths[0] -> display 1, paths[1] -> display 2, ... . Do not use
+        // SDL enumeration or the GDI \\.\DISPLAYn suffix here; those identifiers
+        // can have a different ordering from the number shown to the operator.
+        for (std::size_t index = 0U; index < paths.size(); ++index) {
+            const auto& path = paths[index];
+            const UINT32 modeIndex = path.sourceInfo.modeInfoIdx;
+            if (modeIndex == DISPLAYCONFIG_PATH_MODE_IDX_INVALID ||
+                modeIndex >= modes.size()) {
+                continue;
+            }
+
+            const auto& mode = modes[modeIndex];
+            if (mode.infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) {
+                continue;
+            }
+
+            const auto& source = mode.sourceMode;
+            displays.push_back(
+                WindowsSettingsDisplay{
+                    .settingsNumber = static_cast<int>(index + 1U),
+                    .x = source.position.x,
+                    .y = source.position.y,
+                    .width = static_cast<int>(source.width),
+                    .height = static_cast<int>(source.height),
+                });
+        }
+        return displays;
     }
 
-    wchar_t* end = nullptr;
-    const long value = std::wcstol(deviceName + prefixLength, &end, 10);
-    if (end == deviceName + prefixLength || value <= 0L) {
-        return 0;
-    }
-    return static_cast<int>(value);
+    return {};
 }
 
-BOOL CALLBACK collectWindowsMonitor(
-    HMONITOR monitor,
-    HDC,
-    LPRECT,
-    LPARAM userData) {
-    auto* monitors =
-        reinterpret_cast<std::vector<WindowsMonitor>*>(userData);
-
-    MONITORINFOEXW info{};
-    info.cbSize = sizeof(info);
-    if (!GetMonitorInfoW(monitor, &info)) {
-        return TRUE;
-    }
-
-    const int displayNumber =
-        parseWindowsDisplayNumber(info.szDevice);
-    if (displayNumber <= 0) {
-        return TRUE;
-    }
-
-    monitors->push_back(
-        WindowsMonitor{
-            .displayNumber = displayNumber,
-            .bounds = info.rcMonitor,
-        });
-    return TRUE;
-}
-
-std::optional<WindowsMonitor>
-windowsMonitorByDisplayNumber(int displayNumber) {
-    std::vector<WindowsMonitor> monitors;
-    if (!EnumDisplayMonitors(
-            nullptr,
-            nullptr,
-            &collectWindowsMonitor,
-            reinterpret_cast<LPARAM>(&monitors))) {
-        return std::nullopt;
-    }
-
+std::optional<WindowsSettingsDisplay>
+windowsSettingsDisplayByNumber(int settingsNumber) {
+    const auto displays = windowsSettingsDisplays();
     const auto it = std::ranges::find_if(
-        monitors,
-        [displayNumber](const WindowsMonitor& monitor) {
-            return monitor.displayNumber == displayNumber;
+        displays,
+        [settingsNumber](const WindowsSettingsDisplay& display) {
+            return display.settingsNumber == settingsNumber;
         });
-    if (it == monitors.end()) {
+    if (it == displays.end()) {
         return std::nullopt;
     }
     return *it;
@@ -231,32 +256,32 @@ bool SDLPlatform::placeWindowOnDisplay(
 
     // Call sites use logical roles in creation order:
     //   0 = Raw, 1 = Overlay, 2 = Telemetry.
-    // The operator refers to monitor numbers exactly as Windows Settings does:
-    //   Raw -> DISPLAY3, Overlay -> DISPLAY2, Telemetry -> DISPLAY1.
-    constexpr std::array<int, 3> roleToWindowsDisplay{3, 2, 1};
+    // These numbers are the numbers shown by Windows Settings -> Display ->
+    // Identify, not SDL ordinals and not GDI \\.\DISPLAYn suffixes.
+    constexpr std::array<int, 3> roleToWindowsSettingsDisplay{3, 2, 1};
 
 #ifdef _WIN32
-    if (logicalRole < roleToWindowsDisplay.size()) {
-        const int displayNumber = roleToWindowsDisplay[logicalRole];
-        const auto monitor =
-            windowsMonitorByDisplayNumber(displayNumber);
-        if (!monitor.has_value()) {
+    if (logicalRole < roleToWindowsSettingsDisplay.size()) {
+        const int settingsNumber =
+            roleToWindowsSettingsDisplay[logicalRole];
+        const auto display =
+            windowsSettingsDisplayByNumber(settingsNumber);
+        if (!display.has_value()) {
             return false;
         }
 
-        const RECT bounds = monitor->bounds;
         return placeBorderlessWindow(
             window,
-            bounds.left,
-            bounds.top,
-            bounds.right - bounds.left,
-            bounds.bottom - bounds.top);
+            display->x,
+            display->y,
+            display->width,
+            display->height);
     }
 #endif
 
     // Portable fallback: use SDL enumeration order. This path is only for
-    // non-Windows platforms; Windows always uses the explicit DISPLAYn mapping
-    // above so SDL ordering cannot silently swap operator displays.
+    // non-Windows platforms; Windows uses CCD path numbering above so the
+    // operator-facing Settings numbers are authoritative.
     return placeWindowFullscreenOnDisplay(window, logicalRole);
 }
 
