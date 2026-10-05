@@ -3,6 +3,7 @@
 #include "remote/NetImguiHost.hpp"
 #include "render/VideoOverlayRecorder.hpp"
 
+#include <cstdint>
 #include <memory>
 
 namespace reg::vulkan {
@@ -11,6 +12,16 @@ class VulkanContext;
 }
 
 namespace reg::render {
+
+struct NetImguiRuntimeStatus {
+    bool active{};
+    std::uint16_t port{8888};
+    remote::NetImguiHostStatus host{};
+};
+
+// Last published runtime state for the Telemetry diagnostics tab. The snapshot
+// is lock-free and remains valid even while no remote renderer instance exists.
+NetImguiRuntimeStatus netImguiRuntimeStatus() noexcept;
 
 // Vulkan overlay endpoint for Dear ImGui draw data produced by a remote
 // NetImgui client. UI construction remains entirely in the remote application.
