@@ -216,6 +216,13 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
         }
         return canvas.render(swapchain, this);
     }
+
+    bool renderOrClear(vulkan::Swapchain& swapchain, bool active) {
+        prepare(swapchain, active);
+        return canvas.render(
+            swapchain,
+            drawData != nullptr ? this : nullptr);
+    }
 };
 
 RemoteImGuiRenderer::RemoteImGuiRenderer(
@@ -291,6 +298,12 @@ bool RemoteImGuiRenderer::render(
     vulkan::Swapchain& swapchain,
     bool active) {
     return impl_->render(swapchain, active);
+}
+
+bool RemoteImGuiRenderer::renderOrClear(
+    vulkan::Swapchain& swapchain,
+    bool active) {
+    return impl_->renderOrClear(swapchain, active);
 }
 
 remote::NetImguiHostStatus RemoteImGuiRenderer::status() const noexcept {
