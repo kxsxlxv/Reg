@@ -388,7 +388,7 @@ struct ImGuiOverlayRenderer::Impl {
         const vulkan::Swapchain& swapchain,
         const char* subtitle) {
         const char* safeSubtitle =
-            subtitle != nullptr ? subtitle : "SIGNAL UNAVAILABLE";
+            subtitle != nullptr ? subtitle : "СИГНАЛ НЕДОСТУПЕН";
 
         ImDrawList* drawList = beginFrame(swapchain);
         const VkExtent2D extent = swapchain.extent();
@@ -405,7 +405,7 @@ struct ImGuiOverlayRenderer::Impl {
         const ImVec2 iconExtent = font->CalcTextSizeA(
             iconSize, FLT_MAX, 0.0F, kIconVideoOff);
         const ImVec2 titleExtent = font->CalcTextSizeA(
-            titleSize, FLT_MAX, 0.0F, "NO SIGNAL");
+            titleSize, FLT_MAX, 0.0F, "НЕТ СИГНАЛА");
         const ImVec2 subtitleExtent = font->CalcTextSizeA(
             subtitleSize,
             FLT_MAX,
@@ -459,7 +459,7 @@ struct ImGuiOverlayRenderer::Impl {
                 panelMin.x + (panelWidth - titleExtent.x) * 0.5F,
                 y),
             textColor,
-            "NO SIGNAL");
+            "НЕТ СИГНАЛА");
         y += titleExtent.y + gap * 0.55F;
 
         drawList->AddText(
