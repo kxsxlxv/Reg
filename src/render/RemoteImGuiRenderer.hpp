@@ -25,8 +25,16 @@ public:
     RemoteImGuiRenderer& operator=(const RemoteImGuiRenderer&) = delete;
 
     // Non-blocking with respect to Vulkan presentation. The NetImgui network
-    // exchange itself runs on worker threads owned by NetImgui.
+    // exchange itself runs on worker threads owned by NetImgui. Returns false
+    // while no drawable remote frame is available so callers may keep an
+    // existing local fallback visible.
     bool render(vulkan::Swapchain& swapchain, bool active = true);
+
+    // Dedicated remote-window path. Uses the same internal BlankRenderer as
+    // remote draw submission, but presents a cleared frame while the client is
+    // disconnected or the next correctly-sized remote frame is still pending.
+    // Keeping both paths on one canvas preserves swapchain image-layout state.
+    bool renderOrClear(vulkan::Swapchain& swapchain, bool active = true);
 
     remote::NetImguiHostStatus status() const noexcept;
 
