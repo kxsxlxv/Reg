@@ -87,7 +87,6 @@ ServerTexture* CreateTexture(
     texture->mTexData.Status = ImTextureStatus_WantCreate;
     texture->mTexData.UseColors =
         command.mFormat == NetImgui::eTexFormat::kTexFmtRGBA8;
-    ImGui::RegisterUserTexture(&texture->mTexData);
     gServerTextures.push_back(texture);
     return texture;
 }
@@ -171,7 +170,6 @@ void processNetImguiServerTextures() {
         }
 
         if (data.Status == ImTextureStatus_Destroyed) {
-            ImGui::UnregisterUserTexture(&data);
             delete texture;
             it = gServerTextures.erase(it);
             continue;
@@ -189,10 +187,6 @@ void processNetImguiServerTextures() {
 
 void destroyNetImguiServerTextures() {
     for (auto* texture : gServerTextures) {
-        if (texture == nullptr) {
-            continue;
-        }
-        ImGui::UnregisterUserTexture(&texture->mTexData);
         delete texture;
     }
     gServerTextures.clear();
@@ -200,6 +194,13 @@ void destroyNetImguiServerTextures() {
 
 std::size_t netImguiServerTextureCount() noexcept {
     return gServerTextures.size();
+}
+
+ImTextureData* netImguiServerTexture(std::size_t index) noexcept {
+    if (index >= gServerTextures.size() || gServerTextures[index] == nullptr) {
+        return nullptr;
+    }
+    return &gServerTextures[index]->mTexData;
 }
 
 } // namespace reg::remote
