@@ -7,9 +7,6 @@
 #include "platform/SDLPlatform.hpp"
 #include "render/ImGuiOverlayRenderer.hpp"
 #include "render/ImGuiTelemetryRenderer.hpp"
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-#include "render/RemoteImGuiRenderer.hpp"
-#endif
 #include "render/TargetOverlayBuilder.hpp"
 #include "recorder/BlackboxRecorder.hpp"
 #include "telemetry/TelemetryModel.hpp"
@@ -47,10 +44,6 @@ constexpr auto kNoSignalRefreshInterval =
     std::chrono::milliseconds{100};
 constexpr auto kTelemetryRenderInterval =
     std::chrono::milliseconds{16};
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-constexpr auto kRemoteUiRenderInterval =
-    std::chrono::milliseconds{16};
-#endif
 
 std::int64_t steadyNowNs() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -116,9 +109,6 @@ int runApplication(
 
         std::unique_ptr<reg::vulkan::RenderWindow> overlayWindow;
         std::unique_ptr<reg::vulkan::RenderWindow> telemetryWindow;
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-        std::unique_ptr<reg::vulkan::RenderWindow> remoteUiWindow;
-#endif
 
         if (options.overlayEnabled) {
             SDL_Window* overlaySdlWindow = platform.createVulkanWindow(
@@ -162,22 +152,6 @@ int runApplication(
                     reg::vulkan::PresentPolicy::
                         LowLatencyTearingAllowed);
         }
-
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-        {
-            SDL_Window* remoteUiSdlWindow =
-                platform.createVulkanWindow(
-                    "Reg - NetImgui Remote UI",
-                    1280,
-                    720);
-
-            remoteUiWindow =
-                std::make_unique<reg::vulkan::RenderWindow>(
-                    vulkan,
-                    remoteUiSdlWindow,
-                    reg::vulkan::PresentPolicy::Stable);
-        }
-#endif
 
         reg::media::VulkanHwDevice hwDevice(vulkan);
 
@@ -245,10 +219,6 @@ int runApplication(
             overlaySceneRenderer;
         std::unique_ptr<reg::render::ImGuiTelemetryRenderer>
             telemetryRenderer;
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-        std::unique_ptr<reg::render::RemoteImGuiRenderer>
-            remoteUiRenderer;
-#endif
 
         reg::telemetry::TelemetryModel telemetryModel(
             std::chrono::minutes{5},
@@ -283,40 +253,6 @@ int runApplication(
                         vulkan,
                         telemetryWindow->swapchain());
         }
-
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-        if (remoteUiWindow) {
-            try {
-                remoteUiRenderer =
-                    std::make_unique<
-                        reg::render::RemoteImGuiRenderer>(
-                        vulkan,
-                        remoteUiWindow->swapchain(),
-                        reg::remote::NetImguiHostConfig{
-                            .port = 8888,
-                            .maxClients = 1,
-                            .activeFps = 60.0F,
-                            .inactiveFps = 10.0F,
-                            .compression = true,
-                        });
-
-                telemetryModel.log(
-                    reg::telemetry::Severity::Info,
-                    "NetImgui: ожидание подключения, TCP 8888");
-                std::cout
-                    << "[netimgui] listening tcp=8888\n";
-            } catch (const std::exception& error) {
-                telemetryModel.log(
-                    reg::telemetry::Severity::Warning,
-                    std::string("NetImgui: ошибка запуска: ") +
-                        error.what());
-                std::cerr
-                    << "[netimgui] startup failed: "
-                    << error.what()
-                    << '\n';
-            }
-        }
-#endif
 
         std::atomic<std::int64_t> lastAcceptedMetadataNs{0};
 
@@ -779,20 +715,12 @@ int runApplication(
         bool previousCvSignalPresent{false};
         auto nextTelemetryRenderAt =
             std::chrono::steady_clock::now();
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-        auto nextRemoteUiRenderAt =
-            std::chrono::steady_clock::now();
-        std::optional<bool> remoteUiConnectedState;
-#endif
         auto nextNoSignalRenderAt =
             std::chrono::steady_clock::now();
 
         bool rawSurfaceRecoveryPending{false};
         bool overlaySurfaceRecoveryPending{false};
         bool telemetrySurfaceRecoveryPending{false};
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-        bool remoteUiSurfaceRecoveryPending{false};
-#endif
 
         auto nextRawSurfaceRecovery =
             std::chrono::steady_clock::time_point{};
@@ -800,10 +728,6 @@ int runApplication(
             std::chrono::steady_clock::time_point{};
         auto nextTelemetrySurfaceRecovery =
             std::chrono::steady_clock::time_point{};
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-        auto nextRemoteUiSurfaceRecovery =
-            std::chrono::steady_clock::time_point{};
-#endif
 
         try {
             while (!decoderFinished.load(
@@ -891,9 +815,6 @@ int runApplication(
                     nextRawSurfaceRecovery = loopNow;
                     nextOverlaySurfaceRecovery = loopNow;
                     nextTelemetrySurfaceRecovery = loopNow;
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-                    nextRemoteUiSurfaceRecovery = loopNow;
-#endif
                 }
 
                 const auto recoverWindow =
@@ -950,17 +871,6 @@ int runApplication(
                             nextTelemetrySurfaceRecovery,
                             "Telemetry"));
                 }
-
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-                if (remoteUiWindow) {
-                    static_cast<void>(
-                        recoverWindow(
-                            *remoteUiWindow,
-                            remoteUiSurfaceRecoveryPending,
-                            nextRemoteUiSurfaceRecovery,
-                            "NetImgui"));
-                }
-#endif
 
                 bool didWork = false;
 
@@ -1430,65 +1340,6 @@ int runApplication(
                         telemetryNow +
                         kTelemetryRenderInterval;
                 }
-
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-                if (remoteUiWindow &&
-                    remoteUiWindow->available() &&
-                    remoteUiRenderer &&
-                    telemetryNow >= nextRemoteUiRenderAt) {
-                    try {
-                        if (remoteUiRenderer->renderOrClear(
-                                remoteUiWindow->swapchain(),
-                                true)) {
-                            didWork = true;
-                        }
-
-                        const auto remoteStatus =
-                            remoteUiRenderer->status();
-
-                        if (!remoteUiConnectedState.has_value()) {
-                            remoteUiConnectedState =
-                                remoteStatus.connected;
-                        } else if (
-                            *remoteUiConnectedState !=
-                            remoteStatus.connected) {
-                            remoteUiConnectedState =
-                                remoteStatus.connected;
-
-                            if (remoteStatus.connected) {
-                                telemetryModel.log(
-                                    reg::telemetry::Severity::Info,
-                                    std::string(
-                                        "NetImgui: клиент подключён, клиентов: ") +
-                                        std::to_string(
-                                            remoteStatus.connectedClients));
-                                std::cout
-                                    << "[netimgui] client connected count="
-                                    << remoteStatus.connectedClients
-                                    << '\n';
-                            } else {
-                                telemetryModel.log(
-                                    reg::telemetry::Severity::Info,
-                                    "NetImgui: клиент отключён");
-                                std::cout
-                                    << "[netimgui] client disconnected\n";
-                            }
-                        }
-                    } catch (const reg::vulkan::SurfaceLostError& error) {
-                        remoteUiSurfaceRecoveryPending = true;
-                        nextRemoteUiSurfaceRecovery = loopNow;
-
-                        telemetryModel.log(
-                            reg::telemetry::Severity::Warning,
-                            std::string("NetImgui surface lost: ") +
-                                error.what());
-                    }
-
-                    nextRemoteUiRenderAt =
-                        telemetryNow +
-                        kRemoteUiRenderInterval;
-                }
-#endif
 
                 if (!didWork) {
                     std::this_thread::sleep_for(
