@@ -1,9 +1,11 @@
+#include "app/RuntimeUiState.hpp"
 #include "platform/SDLPlatform.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <array>
+#include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -40,6 +42,60 @@ const char* localizedWindowTitle(const char* title) noexcept {
         return "Reg Replay — Overlay (точный)";
     }
     return title;
+}
+
+const char* tracedWindowEventName(std::uint32_t type) noexcept {
+    switch (type) {
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        return "FOCUS_GAINED";
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        return "FOCUS_LOST";
+    case SDL_EVENT_WINDOW_EXPOSED:
+        return "EXPOSED";
+    case SDL_EVENT_WINDOW_RESIZED:
+        return "RESIZED";
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        return "PIXEL_SIZE_CHANGED";
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+        return "DISPLAY_CHANGED";
+    default:
+        return nullptr;
+    }
+}
+
+void traceWindowEvent(const SDL_Event& event) {
+    const char* name = tracedWindowEventName(event.type);
+    if (name == nullptr) {
+        return;
+    }
+
+    SDL_Window* window =
+        SDL_GetWindowFromID(event.window.windowID);
+    const char* title =
+        window != nullptr
+            ? SDL_GetWindowTitle(window)
+            : nullptr;
+    const SDL_WindowFlags flags =
+        window != nullptr
+            ? SDL_GetWindowFlags(window)
+            : 0U;
+
+    std::cerr
+        << "[window-event] "
+        << name
+        << " id="
+        << event.window.windowID
+        << " title=\""
+        << (title != nullptr ? title : "<unknown>")
+        << "\" data="
+        << event.window.data1
+        << 'x'
+        << event.window.data2
+        << " flags=0x"
+        << std::hex
+        << static_cast<unsigned long long>(flags)
+        << std::dec
+        << '\n';
 }
 
 bool placeBorderlessWindow(
@@ -438,6 +494,8 @@ bool SDLPlatform::pollQuitRequested() {
     SDL_Event event{};
 
     while (SDL_PollEvent(&event)) {
+        traceWindowEvent(event);
+
         if (event.type ==
                 SDL_EVENT_QUIT ||
             event.type ==
@@ -448,7 +506,15 @@ bool SDLPlatform::pollQuitRequested() {
         if (event.type ==
                 SDL_EVENT_KEY_DOWN &&
             !event.key.repeat) {
-            if (event.key.key == SDLK_F11) {
+            if (event.key.key == SDLK_F10) {
+                app::toggleTelemetryPage();
+                std::cout
+                    << "[telemetry] page="
+                    << (app::telemetryPage() == app::TelemetryPage::NetImgui
+                            ? "NetImgui"
+                            : "Overview")
+                    << '\n';
+            } else if (event.key.key == SDLK_F11) {
                 rawScreenshotRequested_ = true;
             } else if (
                 event.key.key == SDLK_F12) {
