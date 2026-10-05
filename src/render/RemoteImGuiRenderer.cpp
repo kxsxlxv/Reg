@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 namespace reg::render {
@@ -110,13 +111,36 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
 
     bool updateRemoteTextures() {
         bool changed = false;
-        for (ImTextureData* texture : ImGui::GetPlatformIO().Textures) {
-            if (texture != nullptr && texture->Status != ImTextureStatus_OK) {
+        const auto textureCount = remote::netImguiServerTextureCount();
+        for (std::size_t index = 0; index < textureCount; ++index) {
+            ImTextureData* texture = remote::netImguiServerTexture(index);
+            if (texture != nullptr && texture->Status != ImTextureStatus_OK &&
+                texture->Status != ImTextureStatus_Destroyed) {
                 ImGui_ImplVulkan_UpdateTexture(texture);
                 changed = true;
             }
         }
         return changed;
+    }
+
+    void destroyRemoteGpuTextures() {
+        if (!backendInitialized) {
+            return;
+        }
+
+        setCurrentContext();
+        const auto textureCount = remote::netImguiServerTextureCount();
+        for (std::size_t index = 0; index < textureCount; ++index) {
+            ImTextureData* texture = remote::netImguiServerTexture(index);
+            if (texture == nullptr || texture->Status == ImTextureStatus_Destroyed) {
+                continue;
+            }
+
+            texture->WantDestroyNextFrame = false;
+            texture->UnusedFrames = std::numeric_limits<int>::max();
+            texture->Status = ImTextureStatus_WantDestroy;
+            ImGui_ImplVulkan_UpdateTexture(texture);
+        }
     }
 
     void prepare(const vulkan::Swapchain& swapchain, bool active) {
@@ -138,7 +162,7 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
         host->update(extent.width, extent.height, active);
 
         // Reconstructed NetImgui draw data does not originate from this local
-        // context's ImGui::Render(), so drive managed texture uploads explicitly.
+        // context's ImGui::Render(), so drive remote texture uploads explicitly.
         // A second host update lets a frame deferred on WantCreate become visible
         // immediately after its texture reaches ImTextureStatus_OK.
         if (updateRemoteTextures()) {
@@ -230,10 +254,12 @@ RemoteImGuiRenderer::~RemoteImGuiRenderer() {
 
     impl_->setCurrentContext();
 
-    // Stop network producers before destroying renderer-owned GPU resources.
+    // Stop network producers first, then explicitly release every Vulkan texture
+    // owned by remote NetImgui clients before shutting down the ImGui backend.
     impl_->host.reset();
-    impl_->shutdownBackend();
+    impl_->destroyRemoteGpuTextures();
     remote::destroyNetImguiServerTextures();
+    impl_->shutdownBackend();
 
     if (impl_->descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(
