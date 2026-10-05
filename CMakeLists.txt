@@ -10,6 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(REG_FETCH_SDL3 "Fetch a pinned SDL3 release instead of using a system package" ON)
 option(REG_ENABLE_VALIDATION "Enable Vulkan validation-layer integration in development builds" ON)
 option(REG_BUILD_TESTS "Build lightweight unit tests" ON)
+option(REG_ENABLE_NETIMGUI_REMOTE "Build the experimental NetImgui remote-UI integration" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -54,6 +55,11 @@ target_include_directories(reg_imgui PUBLIC
 )
 
 target_link_libraries(reg_imgui PUBLIC Vulkan::Vulkan)
+
+if(REG_ENABLE_NETIMGUI_REMOTE)
+    include(RegNetImgui)
+    reg_add_netimgui_client_compat_target()
+endif()
 
 add_library(reg_implot STATIC
     implot/implot.cpp
