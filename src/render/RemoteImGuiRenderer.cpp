@@ -294,6 +294,22 @@ RemoteImGuiRenderer::~RemoteImGuiRenderer() {
     impl_->context = nullptr;
 }
 
+void RemoteImGuiRenderer::prepare(
+    const vulkan::Swapchain& swapchain,
+    bool active) {
+    impl_->prepare(swapchain, active);
+}
+
+void RemoteImGuiRenderer::record(
+    VkCommandBuffer commandBuffer,
+    VkFormat colorAttachmentFormat,
+    VkExtent2D framebufferExtent) {
+    impl_->record(
+        commandBuffer,
+        colorAttachmentFormat,
+        framebufferExtent);
+}
+
 bool RemoteImGuiRenderer::render(
     vulkan::Swapchain& swapchain,
     bool active) {
