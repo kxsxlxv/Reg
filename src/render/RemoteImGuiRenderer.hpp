@@ -1,6 +1,7 @@
 #pragma once
 
 #include "remote/NetImguiHost.hpp"
+#include "render/VideoOverlayRecorder.hpp"
 
 #include <memory>
 
@@ -11,9 +12,11 @@ class VulkanContext;
 
 namespace reg::render {
 
-// Vulkan presentation endpoint for Dear ImGui draw data produced by a remote
+// Vulkan overlay endpoint for Dear ImGui draw data produced by a remote
 // NetImgui client. UI construction remains entirely in the remote application.
-class RemoteImGuiRenderer final {
+// prepare() receives/reconstructs the latest remote frame and record() appends
+// it to an existing Vulkan dynamic-rendering pass (for example, over Raw video).
+class RemoteImGuiRenderer final : public VideoOverlayRecorder {
 public:
     RemoteImGuiRenderer(
         const vulkan::VulkanContext& vulkan,
@@ -24,16 +27,22 @@ public:
     RemoteImGuiRenderer(const RemoteImGuiRenderer&) = delete;
     RemoteImGuiRenderer& operator=(const RemoteImGuiRenderer&) = delete;
 
-    // Non-blocking with respect to Vulkan presentation. The NetImgui network
-    // exchange itself runs on worker threads owned by NetImgui. Returns false
-    // while no drawable remote frame is available so callers may keep an
-    // existing local fallback visible.
-    bool render(vulkan::Swapchain& swapchain, bool active = true);
+    // Main/render-thread update. Non-blocking with respect to Vulkan
+    // presentation; NetImgui network exchange runs on its worker threads.
+    void prepare(
+        const vulkan::Swapchain& swapchain,
+        bool active = true);
 
-    // Dedicated remote-window path. Uses the same internal BlankRenderer as
-    // remote draw submission, but presents a cleared frame while the client is
-    // disconnected or the next correctly-sized remote frame is still pending.
-    // Keeping both paths on one canvas preserves swapchain image-layout state.
+    // VideoOverlayRecorder implementation. No-op until prepare() has produced
+    // correctly-sized remote ImDrawData for the target framebuffer.
+    void record(
+        VkCommandBuffer commandBuffer,
+        VkFormat colorAttachmentFormat,
+        VkExtent2D framebufferExtent) override;
+
+    // Standalone presentation paths retained for diagnostics/smoke tests. Reg's
+    // product runtime uses prepare()+record() over the Raw video swapchain.
+    bool render(vulkan::Swapchain& swapchain, bool active = true);
     bool renderOrClear(vulkan::Swapchain& swapchain, bool active = true);
 
     remote::NetImguiHostStatus status() const noexcept;
