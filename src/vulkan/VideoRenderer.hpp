@@ -184,7 +184,7 @@ private:
     VkViewport videoViewport(const video::VideoFrame& frame, VkExtent2D extent) const;
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-    render::RemoteImGuiRenderer* ensureNetImguiOverlay(Swapchain& swapchain);
+    render::VideoOverlayRecorder* ensureNetImguiOverlay(Swapchain& swapchain);
 #endif
 
     const VulkanContext& vulkan_;
