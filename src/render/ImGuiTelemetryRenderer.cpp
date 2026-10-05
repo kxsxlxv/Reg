@@ -651,6 +651,76 @@ void drawEvents(
     ImGui::EndChild();
 }
 
+void drawNetImguiDiagnostics(const NetImguiDiagnostics& diagnostics) {
+    ImGui::SeparatorText("NETIMGUI / RAW OVERLAY");
+    ImGui::TextDisabled(
+        "Удалённый Dear ImGui рендерится поверх декодированного Raw-видео.");
+    ImGui::Spacing();
+
+    if (!ImGui::BeginTable(
+            "netimgui_diagnostics",
+            2,
+            ImGuiTableFlags_BordersInnerH |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingFixedFit)) {
+        return;
+    }
+
+    ImGui::TableSetupColumn(
+        "Метрика",
+        ImGuiTableColumnFlags_WidthFixed,
+        220.0F);
+    ImGui::TableSetupColumn(
+        "Значение",
+        ImGuiTableColumnFlags_WidthStretch);
+
+    statusRowColored(
+        "Server",
+        diagnostics.listening ? kSignalGreen : kErrorRed,
+        diagnostics.listening ? kIconCheckCircle : kIconWarning,
+        diagnostics.listening ? "СЛУШАЕТ" : "НЕ СЛУШАЕТ");
+    statusRowColored(
+        "Client",
+        diagnostics.connected ? kSignalGreen : kWarningAmber,
+        diagnostics.connected ? kIconCheckCircle : kIconWarning,
+        diagnostics.connected ? "ПОДКЛЮЧЕН" : "ОЖИДАНИЕ");
+
+    char buffer[128]{};
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "TCP %u",
+        static_cast<unsigned>(diagnostics.port));
+    statusRow("Порт", buffer);
+
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%u",
+        static_cast<unsigned>(diagnostics.connectedClients));
+    statusRow("Клиенты", buffer);
+
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%llu B",
+        static_cast<unsigned long long>(diagnostics.bytesReceived));
+    statusRow("RX", buffer);
+
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%llu B",
+        static_cast<unsigned long long>(diagnostics.bytesSent));
+    statusRow("TX", buffer);
+
+    ImGui::EndTable();
+
+    ImGui::Spacing();
+    ImGui::TextDisabled(
+        "Input forwarding пока отключён: текущий этап проверяет network + draw data + Vulkan overlay.");
+}
+
 } // namespace
 
 struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
@@ -772,8 +842,19 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         initializeBackend(swapchain);
     }
 
+    void drawOverview(
+        const telemetry::Snapshot& snapshot,
+        std::chrono::steady_clock::time_point now) {
+        drawStatusAndPerformance(snapshot.counters, rateHistory);
+        ImGui::SeparatorText("ТЕКУЩИЕ ЦЕЛИ");
+        drawTargets(snapshot.targets);
+        ImGui::SeparatorText("СОБЫТИЯ / ПОСЛЕДНИЕ 5 МИНУТ");
+        drawEvents(snapshot.events, now);
+    }
+
     void buildDashboard(
         const telemetry::Snapshot& snapshot,
+        const NetImguiDiagnostics& netImgui,
         VkExtent2D extent,
         std::chrono::steady_clock::time_point now) {
         buildRateHistory(snapshot, now, rateHistory);
@@ -799,16 +880,27 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         ImGui::TextUnformatted("REG / ТЕЛЕМЕТРИЯ / BLACKBOX");
         ImGui::PopStyleColor();
         ImGui::Separator();
-        drawStatusAndPerformance(snapshot.counters, rateHistory);
-        ImGui::SeparatorText("ТЕКУЩИЕ ЦЕЛИ");
-        drawTargets(snapshot.targets);
-        ImGui::SeparatorText("СОБЫТИЯ / ПОСЛЕДНИЕ 5 МИНУТ");
-        drawEvents(snapshot.events, now);
+
+        if (!netImgui.enabled) {
+            drawOverview(snapshot, now);
+        } else if (ImGui::BeginTabBar("telemetry_tabs")) {
+            if (ImGui::BeginTabItem("Обзор")) {
+                drawOverview(snapshot, now);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("NetImgui")) {
+                drawNetImguiDiagnostics(netImgui);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
         ImGui::End();
     }
 
     void prepare(
         const telemetry::Snapshot& snapshot,
+        const NetImguiDiagnostics& netImgui,
         const vulkan::Swapchain& swapchain) {
         setCurrentContext();
         ensureBackend(swapchain);
@@ -824,7 +916,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         io.DeltaTime = std::max(delta.count(), 1.0F / 1000.0F);
         ImGui_ImplVulkan_NewFrame();
         ImGui::NewFrame();
-        buildDashboard(snapshot, extent, now);
+        buildDashboard(snapshot, netImgui, extent, now);
         ImGui::Render();
         drawData = ImGui::GetDrawData();
     }
@@ -853,8 +945,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
 
     bool render(
         const telemetry::Snapshot& snapshot,
-        vulkan::Swapchain& swapchain) {
-        prepare(snapshot, swapchain);
+        vulkan::Swapchain& swapchain,
+        const NetImguiDiagnostics& netImgui) {
+        prepare(snapshot, netImgui, swapchain);
         return canvas.render(swapchain, this);
     }
 };
@@ -915,8 +1008,9 @@ ImGuiTelemetryRenderer::~ImGuiTelemetryRenderer() {
 
 bool ImGuiTelemetryRenderer::render(
     const telemetry::Snapshot& snapshot,
-    vulkan::Swapchain& swapchain) {
-    return impl_->render(snapshot, swapchain);
+    vulkan::Swapchain& swapchain,
+    const NetImguiDiagnostics& netImgui) {
+    return impl_->render(snapshot, swapchain, netImgui);
 }
 
 } // namespace reg::render
