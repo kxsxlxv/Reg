@@ -170,6 +170,19 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
         }
 
         drawData = host->drawData();
+        if (drawData == nullptr) {
+            return;
+        }
+
+        const auto width = static_cast<std::uint32_t>(
+            std::max(drawData->DisplaySize.x, 0.0F));
+        const auto height = static_cast<std::uint32_t>(
+            std::max(drawData->DisplaySize.y, 0.0F));
+        if (width != extent.width || height != extent.height) {
+            // Resize is asynchronous across TCP. Treat the old-size frame as
+            // unavailable so the caller can keep its local fallback visible.
+            drawData = nullptr;
+        }
     }
 
     void record(
@@ -189,8 +202,6 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
             std::max(drawData->DisplaySize.y, 0.0F));
         if (width != framebufferExtent.width ||
             height != framebufferExtent.height) {
-            // Resize is asynchronous across TCP. Wait for the first draw frame
-            // produced with the new requested viewport instead of stretching it.
             return;
         }
 
@@ -200,6 +211,9 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
 
     bool render(vulkan::Swapchain& swapchain, bool active) {
         prepare(swapchain, active);
+        if (drawData == nullptr) {
+            return false;
+        }
         return canvas.render(swapchain, this);
     }
 };
