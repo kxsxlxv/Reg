@@ -123,7 +123,7 @@ OverlayScene TargetOverlayBuilder::build(
 
         const char* source = propagated
             ? "OFA"
-            : (detector ? "YOLO" : "CV");
+            : (detector ? "DETR" : "CV");
 
         char label[128]{};
         std::snprintf(
