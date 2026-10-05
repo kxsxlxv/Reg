@@ -26,12 +26,12 @@ public:
         const OverlayScene& scene,
         const vulkan::Swapchain& swapchain);
 
-    // Prepares a centered Material Symbols + Roboto NO SIGNAL indication. The
+    // Prepares a centered Material Symbols + Roboto no-signal indication. The
     // caller records it over a black BlankRenderer pass; this does not stop or
     // restart either the RTSP decoder or the CVM1 receiver.
     void prepareNoSignal(
         const vulkan::Swapchain& swapchain,
-        const char* subtitle = "SIGNAL UNAVAILABLE");
+        const char* subtitle = "СИГНАЛ НЕДОСТУПЕН");
 
     void record(
         VkCommandBuffer commandBuffer,

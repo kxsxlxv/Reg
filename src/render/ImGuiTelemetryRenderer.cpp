@@ -20,6 +20,8 @@
 #include <iterator>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace reg::render {
@@ -193,50 +195,50 @@ void drawStatus(const telemetry::Counters& counters) {
     }
 
     ImGui::TableSetupColumn(
-        "Metric",
+        "Метрика",
         ImGuiTableColumnFlags_WidthFixed,
-        126.0F);
+        176.0F);
     ImGui::TableSetupColumn(
-        "Value",
+        "Значение",
         ImGuiTableColumnFlags_WidthStretch);
 
     statusRowColored(
         "RTSP",
         counters.rtspConnected ? kSignalGreen : kErrorRed,
         counters.rtspConnected ? kIconCheckCircle : kIconWarning,
-        counters.rtspConnected ? "CONNECTED" : "DISCONNECTED");
+        counters.rtspConnected ? "ПОДКЛЮЧЕН" : "ОТКЛЮЧЕН");
     statusRowColored(
-        "Video",
+        "Видео",
         counters.videoSignalPresent ? kSignalGreen : kWarningAmber,
         counters.videoSignalPresent ? kIconCheckCircle : kIconVideoOff,
-        counters.videoSignalPresent ? "SIGNAL" : "NO SIGNAL");
+        counters.videoSignalPresent ? "СИГНАЛ" : "НЕТ СИГНАЛА");
     statusRowColored(
         "CVM1 / Jetson",
         counters.cvSignalPresent ? kSignalGreen : kWarningAmber,
         counters.cvSignalPresent ? kIconCheckCircle : kIconVideoOff,
-        counters.cvSignalPresent ? "SIGNAL" : "NO SIGNAL");
+        counters.cvSignalPresent ? "СИГНАЛ" : "НЕТ СИГНАЛА");
 
     char buffer[128]{};
     if (counters.decodedFrames == 0U) {
-        statusRow("Video age", "never");
+        statusRow("Возраст кадра", "нет данных");
     } else {
         std::snprintf(
             buffer,
             sizeof(buffer),
-            "%llu ms",
+            "%llu мс",
             static_cast<unsigned long long>(counters.videoFrameAgeMs));
-        statusRow("Video age", buffer);
+        statusRow("Возраст кадра", buffer);
     }
 
     if (counters.metadataPackets == 0U) {
-        statusRow("CVM1 age", "never");
+        statusRow("Возраст CVM1", "нет данных");
     } else {
         std::snprintf(
             buffer,
             sizeof(buffer),
-            "%llu ms",
+            "%llu мс",
             static_cast<unsigned long long>(counters.cvPacketAgeMs));
-        statusRow("CVM1 age", buffer);
+        statusRow("Возраст CVM1", buffer);
     }
 
     const auto addU64 = [&](const char* label, std::uint64_t value) {
@@ -254,9 +256,9 @@ void drawStatus(const telemetry::Counters& counters) {
         "%llu / %llu",
         static_cast<unsigned long long>(counters.decoderSessions),
         static_cast<unsigned long long>(counters.reconnects));
-    statusRow("Sessions / rec.", buffer);
+    statusRow("Сессии / реконнекты", buffer);
 
-    addU64("Decoded", counters.decodedFrames);
+    addU64("Декодировано", counters.decodedFrames);
 
     std::snprintf(
         buffer,
@@ -264,7 +266,7 @@ void drawStatus(const telemetry::Counters& counters) {
         "%llu / %llu",
         static_cast<unsigned long long>(counters.rawPresentedFrames),
         static_cast<unsigned long long>(counters.overlayPresentedFrames));
-    statusRow("Raw / overlay", buffer);
+    statusRow("Raw / Overlay", buffer);
 
     std::snprintf(
         buffer,
@@ -272,7 +274,7 @@ void drawStatus(const telemetry::Counters& counters) {
         "%llu / %llu",
         static_cast<unsigned long long>(counters.overlayMissingMetadataDrops),
         static_cast<unsigned long long>(counters.metadataSequenceGaps));
-    statusRow("Exact / UDP drops", buffer);
+    statusRow("Exact / потери UDP", buffer);
 
     std::snprintf(
         buffer,
@@ -280,7 +282,7 @@ void drawStatus(const telemetry::Counters& counters) {
         "%zu / %zu",
         counters.overlayBufferDepth,
         counters.metadataStoreDepth);
-    statusRow("Overlay / CV buf", buffer);
+    statusRow("Overlay / буфер CV", buffer);
 
     std::snprintf(
         buffer,
@@ -289,17 +291,17 @@ void drawStatus(const telemetry::Counters& counters) {
         counters.recorderQueueDepth,
         static_cast<unsigned long long>(counters.recorderQueueDrops),
         static_cast<unsigned long long>(counters.recorderFailures));
-    statusRow("Rec q/drop/fail", buffer);
+    statusRow("Запись q/drop/fail", buffer);
 
     ImGui::EndTable();
 }
 
 void drawPerformance(const RateHistory& history) {
     ImGui::TextDisabled(
-        "Rolling 60 s, raw samples (no smoothing / interpolation)");
+        "Окно 60 с, исходные измерения (без сглаживания / интерполяции)");
 
     drawRateStatsLine(
-        "Decoded",
+        "Декодер",
         kSignalGreen,
         rateStats(history.decodedFps));
     drawRateStatsLine(
@@ -312,7 +314,7 @@ void drawPerformance(const RateHistory& history) {
         rateStats(history.overlayFps));
 
     if (history.secondsAgo.empty()) {
-        ImGui::TextDisabled("Collecting performance samples...");
+        ImGui::TextDisabled("Сбор данных производительности...");
         return;
     }
 
@@ -325,7 +327,7 @@ void drawPerformance(const RateHistory& history) {
 
     ImPlot::SetupAxis(
         ImAxis_X1,
-        "seconds ago",
+        "секунд назад",
         ImPlotAxisFlags_NoMenus);
     ImPlot::SetupAxisLimits(
         ImAxis_X1,
@@ -346,7 +348,7 @@ void drawPerformance(const RateHistory& history) {
     decodedSpec.LineColor = kSignalGreen;
     decodedSpec.LineWeight = 2.0F;
     ImPlot::PlotLine(
-        "Decoded",
+        "Декодер",
         history.secondsAgo.data(),
         history.decodedFps.data(),
         count,
@@ -386,11 +388,11 @@ void drawPerformance(const RateHistory& history) {
             const std::size_t index = static_cast<std::size_t>(
                 std::distance(history.secondsAgo.begin(), nearest));
             ImGui::BeginTooltip();
-            ImGui::Text("t = %.2f s", history.secondsAgo[index]);
+            ImGui::Text("t = %.2f с", history.secondsAgo[index]);
             ImGui::Separator();
             ImGui::TextColored(
                 kSignalGreen,
-                "Decoded  %.2f FPS",
+                "Декодер  %.2f FPS",
                 history.decodedFps[index]);
             ImGui::TextColored(
                 kAccentBlue,
@@ -412,9 +414,9 @@ void drawStatusAndPerformance(
     const RateHistory& history) {
     const float availableWidth = ImGui::GetContentRegionAvail().x;
     const float statusWidth = std::clamp(
-        availableWidth * 0.30F,
-        260.0F,
-        340.0F);
+        availableWidth * 0.34F,
+        330.0F,
+        420.0F);
 
     if (!ImGui::BeginTable(
             "status_performance",
@@ -425,20 +427,20 @@ void drawStatusAndPerformance(
     }
 
     ImGui::TableSetupColumn(
-        "Status",
+        "Статус",
         ImGuiTableColumnFlags_WidthFixed,
         statusWidth);
     ImGui::TableSetupColumn(
-        "Performance",
+        "Производительность",
         ImGuiTableColumnFlags_WidthStretch);
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::SeparatorText("STATUS");
+    ImGui::SeparatorText("СТАТУС");
     drawStatus(counters);
 
     ImGui::TableNextColumn();
-    ImGui::SeparatorText("PERFORMANCE");
+    ImGui::SeparatorText("ПРОИЗВОДИТЕЛЬНОСТЬ");
     drawPerformance(history);
 
     ImGui::EndTable();
@@ -456,7 +458,7 @@ void drawTargets(const std::vector<telemetry::Target>& targets) {
     }
 
     ImGui::Text(
-        "Targets: %zu   YOLO: %zu   OFA: %zu",
+        "Цели: %zu   DETR: %zu   OFA: %zu",
         targets.size(),
         detectorCount,
         propagatedCount);
@@ -471,13 +473,13 @@ void drawTargets(const std::vector<telemetry::Target>& targets) {
         return;
     }
 
-    ImGui::TableSetupColumn("Target");
+    ImGui::TableSetupColumn("Цель");
     ImGui::TableHeadersRow();
     for (const auto& target : targets) {
         const bool propagated = (target.flags & kPropagatedFlag) != 0U;
         const char* source = propagated
             ? "OFA"
-            : ((target.flags & kDetectorFlag) != 0U ? "YOLO" : "CV");
+            : ((target.flags & kDetectorFlag) != 0U ? "DETR" : "CV");
 
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
@@ -497,6 +499,121 @@ void drawTargets(const std::vector<telemetry::Target>& targets) {
         ImGui::PopStyleColor();
     }
     ImGui::EndTable();
+}
+
+std::string localizeEventMessage(std::string_view message) {
+    if (message == "Application started") {
+        return "Приложение запущено";
+    }
+    if (message == "RTSP session opened") {
+        return "RTSP-сессия открыта";
+    }
+    if (message == "RTSP decoder session ended unexpectedly") {
+        return "RTSP-сессия декодера неожиданно завершена";
+    }
+    if (message == "RTSP session failed: unknown error") {
+        return "Ошибка RTSP-сессии: неизвестная ошибка";
+    }
+    if (message.starts_with("RTSP session failed: ")) {
+        constexpr std::string_view prefix = "RTSP session failed: ";
+        return std::string("Ошибка RTSP-сессии: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    if (message.starts_with("RTSP reconnect attempt ")) {
+        constexpr std::string_view prefix = "RTSP reconnect attempt ";
+        std::string_view rest = message.substr(prefix.size());
+        const std::size_t after = rest.find(" after ");
+        if (after != std::string_view::npos) {
+            const std::string_view attempt = rest.substr(0, after);
+            std::string_view delay = rest.substr(after + 7U);
+            if (delay.ends_with(" ms")) {
+                delay.remove_suffix(3U);
+                return std::string("Попытка переподключения RTSP ") +
+                    std::string(attempt) + " через " +
+                    std::string(delay) + " мс";
+            }
+        }
+        return std::string("Попытка переподключения RTSP ") +
+            std::string(rest);
+    }
+    if (message == "Metadata receiver failed") {
+        return "Ошибка приёмника метаданных";
+    }
+    if (message.starts_with("Metadata receiver failed: ")) {
+        constexpr std::string_view prefix = "Metadata receiver failed: ";
+        return std::string("Ошибка приёмника метаданных: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    if (message.starts_with("Raw screenshot requested: ")) {
+        constexpr std::string_view prefix = "Raw screenshot requested: ";
+        return std::string("Запрошен снимок Raw: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    if (message ==
+        "Raw screenshot request ignored because one is already pending") {
+        return "Запрос снимка Raw пропущен: предыдущий ещё обрабатывается";
+    }
+    if (message.starts_with("Overlay screenshot requested: ")) {
+        constexpr std::string_view prefix = "Overlay screenshot requested: ";
+        return std::string("Запрошен снимок Overlay: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    if (message ==
+        "Overlay screenshot request ignored because one is already pending") {
+        return "Запрос снимка Overlay пропущен: предыдущий ещё обрабатывается";
+    }
+    if (message ==
+        "Overlay screenshot requested while Overlay output is disabled") {
+        return "Запрошен снимок Overlay при отключённом выводе Overlay";
+    }
+    if (message == "Display topology changed") {
+        return "Топология дисплеев изменилась";
+    }
+    if (message == "Raw Vulkan surface recovered") {
+        return "Поверхность Vulkan Raw восстановлена";
+    }
+    if (message == "Overlay Vulkan surface recovered") {
+        return "Поверхность Vulkan Overlay восстановлена";
+    }
+    if (message == "Telemetry Vulkan surface recovered") {
+        return "Поверхность Vulkan телеметрии восстановлена";
+    }
+    if (message == "Retiring Vulkan video session resources") {
+        return "Освобождение ресурсов видеосессии Vulkan";
+    }
+    if (message == "Video signal restored") {
+        return "Видеосигнал восстановлен";
+    }
+    if (message == "NO SIGNAL: decoded video is not arriving") {
+        return "НЕТ СИГНАЛА: декодированное видео не поступает";
+    }
+    if (message == "CVM1 / Jetson signal restored") {
+        return "Сигнал CVM1 / Jetson восстановлен";
+    }
+    if (message == "NO SIGNAL: CVM1 metadata is not arriving") {
+        return "НЕТ СИГНАЛА: метаданные CVM1 не поступают";
+    }
+    if (message.starts_with("Raw surface lost: ")) {
+        constexpr std::string_view prefix = "Raw surface lost: ";
+        return std::string("Потеряна поверхность Raw: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    if (message.starts_with("Overlay surface lost: ")) {
+        constexpr std::string_view prefix = "Overlay surface lost: ";
+        return std::string("Потеряна поверхность Overlay: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    if (message.starts_with("Telemetry surface lost: ")) {
+        constexpr std::string_view prefix = "Telemetry surface lost: ";
+        return std::string("Потеряна поверхность телеметрии: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    if (message.starts_with("Blackbox recorder degraded: ")) {
+        constexpr std::string_view prefix = "Blackbox recorder degraded: ";
+        return std::string("Деградация Blackbox recorder: ") +
+            std::string(message.substr(prefix.size()));
+    }
+    return std::string(message);
 }
 
 void drawEvents(
@@ -522,12 +639,13 @@ void drawEvents(
             color = kErrorRed;
         }
 
+        const std::string message = localizeEventMessage(event.message);
         ImGui::PushStyleColor(ImGuiCol_Text, color);
         ImGui::Text(
-            "-%7.2fs  %-5s  %s",
+            "-%7.2fс  %-5s  %s",
             ageSeconds,
             telemetry::toString(event.severity),
-            event.message.c_str());
+            message.c_str());
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
@@ -672,19 +790,19 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_NoBringToFrontOnFocus;
-        if (!ImGui::Begin("Reg Telemetry", nullptr, flags)) {
+        if (!ImGui::Begin("Reg Телеметрия", nullptr, flags)) {
             ImGui::End();
             return;
         }
 
         ImGui::PushStyleColor(ImGuiCol_Text, kAccentBlue);
-        ImGui::TextUnformatted("REG / TELEMETRY & BLACKBOX");
+        ImGui::TextUnformatted("REG / ТЕЛЕМЕТРИЯ / BLACKBOX");
         ImGui::PopStyleColor();
         ImGui::Separator();
         drawStatusAndPerformance(snapshot.counters, rateHistory);
-        ImGui::SeparatorText("CURRENT TARGETS");
+        ImGui::SeparatorText("ТЕКУЩИЕ ЦЕЛИ");
         drawTargets(snapshot.targets);
-        ImGui::SeparatorText("EVENTS / LAST 5 MINUTES");
+        ImGui::SeparatorText("СОБЫТИЯ / ПОСЛЕДНИЕ 5 МИНУТ");
         drawEvents(snapshot.events, now);
         ImGui::End();
     }

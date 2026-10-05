@@ -194,10 +194,10 @@ void provenanceFlagsDriveOverlayStyle() {
         std::get<reg::render::TextPrimitive>(detectorScene.primitives[3]);
     require(
         detectorRect.style.pattern == reg::render::LinePattern::Solid,
-        "YOLO bbox must be solid");
+        "DETR bbox must be solid");
     require(
-        detectorLabel.utf8.find("YOLO") != std::string::npos,
-        "YOLO label provenance missing");
+        detectorLabel.utf8.find("DETR") != std::string::npos,
+        "DETR label provenance missing");
 
     auto propagatedMetadata = makeMetadata();
     propagatedMetadata.targets[0].flags = 0x0002U;
