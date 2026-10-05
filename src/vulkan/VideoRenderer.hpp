@@ -37,12 +37,25 @@ public:
     VideoRenderer(const VideoRenderer&) = delete;
     VideoRenderer& operator=(const VideoRenderer&) = delete;
 
-    // Non-blocking raw-display render. Returns false when the GPU/swapchain is
-    // temporarily not ready; the caller should simply try again with the newest frame.
+    // Raw path. With NetImgui enabled this overload claims the first video
+    // output as the Raw presentation endpoint and composites remote ImGui over
+    // the decoded frame. Other callers can use the explicit-overlay overload.
+    bool render(
+        const video::VideoFramePtr& frame,
+        Swapchain& swapchain) {
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+        return render(frame, swapchain, ensureNetImguiOverlay(swapchain));
+#else
+        return render(frame, swapchain, nullptr);
+#endif
+    }
+
+    // Non-blocking video render with an explicit caller-owned overlay. Returns
+    // false when the GPU/swapchain is temporarily not ready.
     bool render(
         const video::VideoFramePtr& frame,
         Swapchain& swapchain,
-        render::VideoOverlayRecorder* overlay = nullptr);
+        render::VideoOverlayRecorder* overlay);
 
     // Presents a black frame, optionally with an ImGui overlay. Used for
     // explicit NO SIGNAL presentation without stopping/restarting the decoder.
@@ -172,7 +185,6 @@ private:
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
     render::RemoteImGuiRenderer* ensureNetImguiOverlay(Swapchain& swapchain);
-    void releaseNetImguiRole() noexcept;
 #endif
 
     const VulkanContext& vulkan_;
@@ -182,7 +194,7 @@ private:
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
     std::unique_ptr<render::RemoteImGuiRenderer> remoteOverlay_;
-    bool ownsNetImguiRole_{false};
+    std::shared_ptr<const int> netImguiRoleToken_;
     bool netImguiStartupFailed_{false};
 #endif
 
