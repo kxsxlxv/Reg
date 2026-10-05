@@ -16,6 +16,17 @@ function(reg_netimgui_third_party_warnings target)
     endif()
 endfunction()
 
+function(reg_attach_netimgui_runtime_to_reg_probe)
+    if(NOT TARGET reg_probe)
+        message(FATAL_ERROR
+            "REG_ENABLE_NETIMGUI_REMOTE=ON expected the reg_probe target to exist"
+        )
+    endif()
+
+    target_link_libraries(reg_probe PRIVATE reg_remote_imgui)
+    target_compile_definitions(reg_probe PRIVATE REG_ENABLE_NETIMGUI_REMOTE=1)
+endfunction()
+
 function(reg_add_netimgui_client_compat_target)
     set(_netimgui_root "${CMAKE_CURRENT_SOURCE_DIR}/netimgui")
     set(_netimgui_client "${_netimgui_root}/Code/Client")
@@ -71,6 +82,10 @@ function(reg_add_netimgui_client_compat_target)
 
     reg_add_netimgui_server_core_target()
     reg_add_netimgui_remote_renderer_target()
+
+    # reg_probe is declared later in the top-level CMakeLists.txt. Attach the
+    # runtime at the end of this directory after all targets have been created.
+    cmake_language(DEFER CALL reg_attach_netimgui_runtime_to_reg_probe)
 endfunction()
 
 function(reg_add_netimgui_server_core_target)
