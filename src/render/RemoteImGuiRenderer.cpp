@@ -10,11 +10,46 @@
 #include <imgui_impl_vulkan.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
 
 namespace reg::render {
+namespace {
+
+struct PublishedRuntimeStatus {
+    std::atomic_bool active{false};
+    std::atomic_uint16_t port{8888};
+    std::atomic_bool listening{false};
+    std::atomic_bool connected{false};
+    std::atomic_uint32_t connectedClients{0};
+    std::atomic_uint64_t bytesReceived{0};
+    std::atomic_uint64_t bytesSent{0};
+};
+
+PublishedRuntimeStatus gRuntimeStatus;
+
+void publishRuntimeStatus(
+    bool active,
+    std::uint16_t port,
+    const remote::NetImguiHostStatus& status) noexcept {
+    gRuntimeStatus.port.store(port, std::memory_order_relaxed);
+    gRuntimeStatus.listening.store(status.listening, std::memory_order_relaxed);
+    gRuntimeStatus.connected.store(status.connected, std::memory_order_relaxed);
+    gRuntimeStatus.connectedClients.store(
+        status.connectedClients,
+        std::memory_order_relaxed);
+    gRuntimeStatus.bytesReceived.store(
+        status.bytesReceived,
+        std::memory_order_relaxed);
+    gRuntimeStatus.bytesSent.store(
+        status.bytesSent,
+        std::memory_order_relaxed);
+    gRuntimeStatus.active.store(active, std::memory_order_release);
+}
+
+} // namespace
 
 struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
     Impl(
@@ -155,6 +190,12 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
         // frame rather than silently rendering with an incompatible pipeline.
         if (swapchain.format() != pipelineFormat) {
             drawData = nullptr;
+            publishRuntimeStatus(
+                true,
+                hostConfig_.port,
+                host != nullptr
+                    ? host->status()
+                    : remote::NetImguiHostStatus{});
             return;
         }
 
@@ -168,6 +209,8 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
         if (updateRemoteTextures()) {
             host->update(extent.width, extent.height, active);
         }
+
+        publishRuntimeStatus(true, hostConfig_.port, host->status());
 
         drawData = host->drawData();
         if (drawData == nullptr) {
@@ -225,6 +268,23 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
     }
 };
 
+NetImguiRuntimeStatus netImguiRuntimeStatus() noexcept {
+    NetImguiRuntimeStatus result{};
+    result.active = gRuntimeStatus.active.load(std::memory_order_acquire);
+    result.port = gRuntimeStatus.port.load(std::memory_order_relaxed);
+    result.host.listening =
+        gRuntimeStatus.listening.load(std::memory_order_relaxed);
+    result.host.connected =
+        gRuntimeStatus.connected.load(std::memory_order_relaxed);
+    result.host.connectedClients =
+        gRuntimeStatus.connectedClients.load(std::memory_order_relaxed);
+    result.host.bytesReceived =
+        gRuntimeStatus.bytesReceived.load(std::memory_order_relaxed);
+    result.host.bytesSent =
+        gRuntimeStatus.bytesSent.load(std::memory_order_relaxed);
+    return result;
+}
+
 RemoteImGuiRenderer::RemoteImGuiRenderer(
     const vulkan::VulkanContext& vulkan,
     const vulkan::Swapchain& initialSwapchain,
@@ -245,7 +305,9 @@ RemoteImGuiRenderer::RemoteImGuiRenderer(
     try {
         impl_->initializeBackend(initialSwapchain);
         impl_->host = std::make_unique<remote::NetImguiHost>(hostConfig);
+        publishRuntimeStatus(true, hostConfig.port, impl_->host->status());
     } catch (...) {
+        publishRuntimeStatus(false, hostConfig.port, {});
         if (impl_->vulkan.device() != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(impl_->vulkan.device());
         }
@@ -292,6 +354,7 @@ RemoteImGuiRenderer::~RemoteImGuiRenderer() {
 
     ImGui::DestroyContext(impl_->context);
     impl_->context = nullptr;
+    publishRuntimeStatus(false, impl_->hostConfig_.port, {});
 }
 
 void RemoteImGuiRenderer::prepare(
