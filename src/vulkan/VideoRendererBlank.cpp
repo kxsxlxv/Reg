@@ -17,7 +17,7 @@ bool VideoRenderer::renderBlank(
     }
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-    render::RemoteImGuiRenderer* remoteOverlay =
+    render::VideoOverlayRecorder* remoteOverlay =
         ensureNetImguiOverlay(swapchain);
 
     if (remoteOverlay != nullptr) {
