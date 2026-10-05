@@ -32,7 +32,7 @@ VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
 
     try {
         if (!remoteOverlay_) {
-            remoteOverlay_ =
+            auto remote =
                 std::make_unique<render::RemoteImGuiRenderer>(
                     vulkan_,
                     swapchain,
@@ -46,9 +46,13 @@ VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
 
             std::cout
                 << "[netimgui] Raw overlay listening tcp=8888\n";
+            remoteOverlay_ = std::move(remote);
         }
 
-        remoteOverlay_->prepare(swapchain, true);
+        auto* remote =
+            static_cast<render::RemoteImGuiRenderer*>(
+                remoteOverlay_.get());
+        remote->prepare(swapchain, true);
         return remoteOverlay_.get();
     } catch (const DeviceLostError&) {
         throw;
