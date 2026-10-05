@@ -23,6 +23,9 @@ function(reg_attach_netimgui_runtime_to_reg_probe)
         )
     endif()
 
+    target_sources(reg_probe PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan/VideoRendererNetImgui.cpp"
+    )
     target_link_libraries(reg_probe PRIVATE reg_remote_imgui)
     target_compile_definitions(reg_probe PRIVATE REG_ENABLE_NETIMGUI_REMOTE=1)
 endfunction()
