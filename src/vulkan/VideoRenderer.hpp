@@ -19,6 +19,9 @@ struct AVBufferRef;
 
 namespace reg::render {
 class VideoOverlayRecorder;
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+class RemoteImGuiRenderer;
+#endif
 }
 
 namespace reg::vulkan {
@@ -167,10 +170,21 @@ private:
 
     VkViewport videoViewport(const video::VideoFrame& frame, VkExtent2D extent) const;
 
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    render::RemoteImGuiRenderer* ensureNetImguiOverlay(Swapchain& swapchain);
+    void releaseNetImguiRole() noexcept;
+#endif
+
     const VulkanContext& vulkan_;
     VulkanVideoFrameAccess frameAccess_;
     std::unique_ptr<BlankRenderer> blankRenderer_;
     TrackedSwapchainPtr lastSwapchain_{};
+
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    std::unique_ptr<render::RemoteImGuiRenderer> remoteOverlay_;
+    bool ownsNetImguiRole_{false};
+    bool netImguiStartupFailed_{false};
+#endif
 
     VkCommandPool commandPool_{VK_NULL_HANDLE};
     std::array<FrameSlot, kFramesInFlight> frameSlots_{};
