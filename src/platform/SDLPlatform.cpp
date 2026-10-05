@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef _WIN32
@@ -16,6 +17,30 @@
 
 namespace reg::platform {
 namespace {
+
+const char* localizedWindowTitle(const char* title) noexcept {
+    if (title == nullptr) {
+        return "";
+    }
+
+    const std::string_view value{title};
+    if (value == "Reg - Raw") {
+        return "Reg — Raw";
+    }
+    if (value == "Reg - Exact CV Overlay") {
+        return "Reg — CV Overlay (точный)";
+    }
+    if (value == "Reg - Telemetry") {
+        return "Reg — Телеметрия";
+    }
+    if (value == "Reg Replay - Raw") {
+        return "Reg Replay — Raw";
+    }
+    if (value == "Reg Replay - Exact Overlay") {
+        return "Reg Replay — Overlay (точный)";
+    }
+    return title;
+}
 
 bool placeBorderlessWindow(
     SDL_Window* window,
@@ -273,7 +298,7 @@ SDL_Window* SDLPlatform::createVulkanWindow(
     }
 
     SDL_Window* window = SDL_CreateWindow(
-        title,
+        localizedWindowTitle(title),
         width,
         height,
         flags);
