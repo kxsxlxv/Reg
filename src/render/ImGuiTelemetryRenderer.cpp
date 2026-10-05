@@ -1,5 +1,6 @@
 #include "render/ImGuiTelemetryRenderer.hpp"
 
+#include "app/RuntimeUiState.hpp"
 #include "render/ImGuiTheme.hpp"
 #include "render/VideoOverlayRecorder.hpp"
 #include "vulkan/BlankRenderer.hpp"
@@ -655,6 +656,7 @@ void drawNetImguiDiagnostics(const NetImguiDiagnostics& diagnostics) {
     ImGui::SeparatorText("NETIMGUI / RAW OVERLAY");
     ImGui::TextDisabled(
         "Удалённый Dear ImGui рендерится поверх декодированного Raw-видео.");
+    ImGui::TextDisabled("F10 — переключить вкладку Telemetry.");
     ImGui::Spacing();
 
     if (!ImGui::BeginTable(
@@ -884,11 +886,28 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         if (!netImgui.enabled) {
             drawOverview(snapshot, now);
         } else if (ImGui::BeginTabBar("telemetry_tabs")) {
-            if (ImGui::BeginTabItem("Обзор")) {
+            const app::TelemetryPage selectedPage =
+                app::telemetryPage();
+            const ImGuiTabItemFlags overviewFlags =
+                selectedPage == app::TelemetryPage::Overview
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
+            const ImGuiTabItemFlags netImguiFlags =
+                selectedPage == app::TelemetryPage::NetImgui
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
+
+            if (ImGui::BeginTabItem(
+                    "Обзор",
+                    nullptr,
+                    overviewFlags)) {
                 drawOverview(snapshot, now);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("NetImgui")) {
+            if (ImGui::BeginTabItem(
+                    "NetImgui",
+                    nullptr,
+                    netImguiFlags)) {
                 drawNetImguiDiagnostics(netImgui);
                 ImGui::EndTabItem();
             }
