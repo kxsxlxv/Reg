@@ -15,7 +15,7 @@ std::weak_ptr<const int> gRawNetImguiOwner;
 
 } // namespace
 
-render::RemoteImGuiRenderer*
+render::VideoOverlayRecorder*
 VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
     if (!netImguiRoleToken_) {
         if (!gRawNetImguiOwner.expired()) {
