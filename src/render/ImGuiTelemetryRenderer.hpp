@@ -2,6 +2,7 @@
 
 #include "telemetry/TelemetryModel.hpp"
 
+#include <cstdint>
 #include <memory>
 
 namespace reg::vulkan {
@@ -10,6 +11,16 @@ class VulkanContext;
 }
 
 namespace reg::render {
+
+struct NetImguiDiagnostics {
+    bool enabled{};
+    bool listening{};
+    bool connected{};
+    std::uint16_t port{8888};
+    std::uint32_t connectedClients{};
+    std::uint64_t bytesReceived{};
+    std::uint64_t bytesSent{};
+};
 
 class ImGuiTelemetryRenderer final {
 public:
@@ -27,7 +38,8 @@ public:
     // unavailable. Telemetry frames may be skipped without affecting video.
     bool render(
         const telemetry::Snapshot& snapshot,
-        vulkan::Swapchain& swapchain);
+        vulkan::Swapchain& swapchain,
+        const NetImguiDiagnostics& netImgui = {});
 
 private:
     struct Impl;
