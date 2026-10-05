@@ -19,9 +19,6 @@ struct AVBufferRef;
 
 namespace reg::render {
 class VideoOverlayRecorder;
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-class RemoteImGuiRenderer;
-#endif
 }
 
 namespace reg::vulkan {
@@ -193,7 +190,7 @@ private:
     TrackedSwapchainPtr lastSwapchain_{};
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
-    std::unique_ptr<render::RemoteImGuiRenderer> remoteOverlay_;
+    std::unique_ptr<render::VideoOverlayRecorder> remoteOverlay_;
     std::shared_ptr<const int> netImguiRoleToken_;
     bool netImguiStartupFailed_{false};
 #endif
