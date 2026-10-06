@@ -6,8 +6,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <vector>
 
 namespace reg::render {
 namespace {
@@ -89,11 +87,16 @@ OverlayScene TargetOverlayBuilder::build(
     const metadata::FrameMetadata& metadata,
     const metadata::TrackHistory& history,
     const video::VideoTransform& transform) const {
+    // TrackHistory remains part of the builder API because the metadata/render
+    // pipeline still owns it, but target trajectories are intentionally not
+    // rendered. DETR detections and OFA propagated targets use the same compact
+    // bbox/crosshair/label presentation.
+    static_cast<void>(history);
+
     OverlayScene scene;
 
-    // Typical load is <= 10 targets. Reserve enough for fill + bbox +
-    // crosshair + trail + label without reallocating every frame.
-    scene.primitives.reserve(metadata.targets.size() * 5U);
+    // Typical load is <= 10 targets. Reserve fill + bbox + crosshair + label.
+    scene.primitives.reserve(metadata.targets.size() * 4U);
 
     const video::RectF viewport = transform.viewport();
 
@@ -150,30 +153,6 @@ OverlayScene TargetOverlayBuilder::build(
                 .pattern = LinePattern::Solid,
             },
         });
-
-        const auto trackPoints = history.points(target.id);
-        if (trackPoints.size() >= 2) {
-            PolylinePrimitive trail;
-            trail.style = LineStyle{
-                .color = applyMasterAlpha(
-                    propagated
-                        ? style_.propagatedStrokeColor
-                        : style_.trailColor),
-                .thickness = style_.trailThicknessPx,
-                .pattern = propagated
-                    ? LinePattern::Dashed
-                    : style_.trailPattern,
-            };
-            trail.points.reserve(trackPoints.size());
-
-            for (const metadata::TrackPoint& point : trackPoints) {
-                trail.points.push_back(
-                    transform.normalizedToScreen(
-                        point.normalizedPosition));
-            }
-
-            scene.primitives.emplace_back(std::move(trail));
-        }
 
         const char* source = propagated
             ? "OFA"
