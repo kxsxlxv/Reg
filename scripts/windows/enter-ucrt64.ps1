@@ -38,12 +38,16 @@ Run once from the repository root:
 "@
 }
 
-# Keep all toolchain/runtime DLL locations in the current PowerShell process.
-# Prepending rather than replacing PATH preserves Git and other user tools.
-$prepend = @($ffmpegBin, $buildPath, $ucrtBin) | Where-Object { $_ -and (Test-Path $_) }
+# Keep all compiler, build-output and runtime DLL locations in this PowerShell
+# process. A not-yet-created build directory is safe to keep on PATH and becomes
+# usable as soon as CMake creates it.
+$prepend = @($ffmpegBin, $buildPath, $ucrtBin)
 $currentPath = @($env:PATH -split ';' | Where-Object { $_ })
 $newPath = [System.Collections.Generic.List[string]]::new()
 foreach ($entry in @($prepend + $currentPath)) {
+    if ([string]::IsNullOrWhiteSpace($entry)) {
+        continue
+    }
     if (-not ($newPath | Where-Object { $_ -ieq $entry })) {
         $newPath.Add($entry)
     }
@@ -69,6 +73,3 @@ Write-Host "  gcc:     $(& (Join-Path $ucrtBin 'gcc.exe') --version | Select-Obj
 Write-Host "  cmake:   $(& (Join-Path $ucrtBin 'cmake.exe') --version | Select-Object -First 1)"
 Write-Host "  ninja:   $(& (Join-Path $ucrtBin 'ninja.exe') --version)"
 Write-Host "  glslc:   $(& (Join-Path $ucrtBin 'glslc.exe') --version | Select-Object -First 1)"
-Write-Host ""
-Write-Host "This script changes the current shell only when dot-sourced:"
-Write-Host "  . .\scripts\windows\enter-ucrt64.ps1"
