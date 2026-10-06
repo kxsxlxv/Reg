@@ -245,14 +245,11 @@ void statusRowColored(
     ImGui::PopStyleColor();
 }
 
-void drawHealthCell(
-    const char* label,
+void drawPipelineStatus(
     bool healthy,
     const char* healthyValue,
     const char* unhealthyValue,
     const ImVec4& unhealthyColor) {
-    ImGui::TextDisabled("%s", label);
-    ImGui::SameLine();
     const ImVec4 color = healthy ? kSignalGreen : unhealthyColor;
     ImGui::PushStyleColor(ImGuiCol_Text, color);
     ImGui::Text(
@@ -262,60 +259,51 @@ void drawHealthCell(
     ImGui::PopStyleColor();
 }
 
-void drawCompactMetric(const char* label, const char* value) {
+void drawMetricRow(const char* label, const char* value) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
     ImGui::TextDisabled("%s", label);
-    ImGui::SameLine(0.0F, 5.0F);
+    ImGui::TableNextColumn();
+    const float width = ImGui::CalcTextSize(value).x;
+    const float available = ImGui::GetContentRegionAvail().x;
+    if (available > width) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - width);
+    }
     ImGui::TextUnformatted(value);
 }
 
-void drawStatus(const telemetry::Counters& counters) {
-    ImGui::SeparatorText("СТАТУС");
-
-    if (ImGui::BeginTable(
-            "health_strip",
-            3,
-            ImGuiTableFlags_BordersInnerV |
-                ImGuiTableFlags_RowBg |
-                ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextRow();
-
-        ImGui::TableNextColumn();
-        drawHealthCell(
-            "RTSP",
-            counters.rtspConnected,
-            "ПОДКЛЮЧЕН",
-            "ОТКЛЮЧЕН",
-            kErrorRed);
-
-        ImGui::TableNextColumn();
-        drawHealthCell(
-            "ВИДЕО",
-            counters.videoSignalPresent,
-            "СИГНАЛ",
-            "НЕТ СИГНАЛА",
-            kWarningAmber);
-
-        ImGui::TableNextColumn();
-        drawHealthCell(
-            "CV / JETSON",
-            counters.cvSignalPresent,
-            "СИГНАЛ",
-            "НЕТ СИГНАЛА",
-            kWarningAmber);
-
-        ImGui::EndTable();
+void drawPipelineMetrics(
+    std::initializer_list<std::pair<const char*, const char*>> rows) {
+    if (!ImGui::BeginTable(
+            "metrics",
+            2,
+            ImGuiTableFlags_SizingStretchProp)) {
+        return;
     }
+    ImGui::TableSetupColumn(
+        "label",
+        ImGuiTableColumnFlags_WidthStretch,
+        0.65F);
+    ImGui::TableSetupColumn(
+        "value",
+        ImGuiTableColumnFlags_WidthStretch,
+        0.35F);
+    for (const auto& [label, value] : rows) {
+        drawMetricRow(label, value);
+    }
+    ImGui::EndTable();
+}
 
+void drawPipelineHealth(const telemetry::Counters& counters) {
     char frameAge[48]{};
     char cvAge[48]{};
     char sessions[48]{};
     char reconnects[48]{};
-    char exactUdp[64]{};
     char decoded[48]{};
     char rendered[48]{};
     char cvFrames[48]{};
     char buffers[64]{};
-    char recorder[64]{};
+    char exactUdp[64]{};
 
     if (counters.decodedFrames == 0U) {
         std::snprintf(frameAge, sizeof(frameAge), "—");
@@ -348,12 +336,6 @@ void drawStatus(const telemetry::Counters& counters) {
         "%llu",
         static_cast<unsigned long long>(counters.reconnects));
     std::snprintf(
-        exactUdp,
-        sizeof(exactUdp),
-        "%llu / %llu",
-        static_cast<unsigned long long>(counters.overlayMissingMetadataDrops),
-        static_cast<unsigned long long>(counters.metadataSequenceGaps));
-    std::snprintf(
         decoded,
         sizeof(decoded),
         "%llu",
@@ -375,50 +357,63 @@ void drawStatus(const telemetry::Counters& counters) {
         counters.overlayBufferDepth,
         counters.metadataStoreDepth);
     std::snprintf(
-        recorder,
-        sizeof(recorder),
-        "%zu / %llu / %llu",
-        counters.recorderQueueDepth,
-        static_cast<unsigned long long>(counters.recorderQueueDrops),
-        static_cast<unsigned long long>(counters.recorderFailures));
+        exactUdp,
+        sizeof(exactUdp),
+        "%llu / %llu",
+        static_cast<unsigned long long>(counters.overlayMissingMetadataDrops),
+        static_cast<unsigned long long>(counters.metadataSequenceGaps));
 
-    if (ImGui::BeginTable(
-            "status_metrics",
-            5,
-            ImGuiTableFlags_BordersInnerV |
-                ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        drawCompactMetric("Кадр", frameAge);
-        ImGui::TableNextColumn();
-        drawCompactMetric("CV", cvAge);
-        ImGui::TableNextColumn();
-        drawCompactMetric("Сессии", sessions);
-        ImGui::TableNextColumn();
-        drawCompactMetric("Реконнекты", reconnects);
-        ImGui::TableNextColumn();
-        drawCompactMetric("Exact / UDP", exactUdp);
+    ImGui::SeparatorText("RTSP");
+    drawPipelineStatus(
+        counters.rtspConnected,
+        "ПОДКЛЮЧЕН",
+        "ОТКЛЮЧЕН",
+        kErrorRed);
+    drawPipelineMetrics({
+        {"Сессии", sessions},
+        {"Реконнекты", reconnects},
+    });
 
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        drawCompactMetric("Декод", decoded);
-        ImGui::TableNextColumn();
-        drawCompactMetric("Рендер", rendered);
-        ImGui::TableNextColumn();
-        drawCompactMetric("CV кадры", cvFrames);
-        ImGui::TableNextColumn();
-        drawCompactMetric("Буфер CV", buffers);
-        ImGui::TableNextColumn();
-        drawCompactMetric("Запись q/d/f", recorder);
-        ImGui::EndTable();
+    ImGui::SeparatorText("ВИДЕО");
+    drawPipelineStatus(
+        counters.videoSignalPresent,
+        "СИГНАЛ",
+        "НЕТ СИГНАЛА",
+        kWarningAmber);
+    drawPipelineMetrics({
+        {"Кадр", frameAge},
+        {"Декод", decoded},
+        {"Рендер", rendered},
+    });
+
+    ImGui::SeparatorText("CV / JETSON");
+    drawPipelineStatus(
+        counters.cvSignalPresent,
+        "СИГНАЛ",
+        "НЕТ СИГНАЛА",
+        kWarningAmber);
+    drawPipelineMetrics({
+        {"Пакет", cvAge},
+        {"Кадры", cvFrames},
+        {"Буфер", buffers},
+        {"Exact / UDP", exactUdp},
+    });
+
+    if (counters.recorderQueueDrops > 0U || counters.recorderFailures > 0U) {
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Text, kWarningAmber);
+        ImGui::Text(
+            "%s  RECORDER: drop %llu / fail %llu",
+            kIconWarning,
+            static_cast<unsigned long long>(counters.recorderQueueDrops),
+            static_cast<unsigned long long>(counters.recorderFailures));
+        ImGui::PopStyleColor();
     }
 }
 
-void drawPerformance(const RateHistory& history) {
-    ImGui::SeparatorText("ПРОИЗВОДИТЕЛЬНОСТЬ");
-    drawRateStatsTable(history);
-    ImGui::Spacing();
-
+void drawPerformanceGraph(
+    const RateHistory& history,
+    float height) {
     if (history.secondsAgo.empty()) {
         ImGui::TextDisabled("Сбор данных производительности...");
         return;
@@ -426,7 +421,7 @@ void drawPerformance(const RateHistory& history) {
 
     if (!ImPlot::BeginPlot(
             "##fps",
-            ImVec2(-1.0F, 260.0F),
+            ImVec2(-1.0F, std::max(height, 150.0F)),
             ImPlotFlags_NoTitle)) {
         return;
     }
@@ -513,6 +508,58 @@ void drawPerformance(const RateHistory& history) {
     }
 
     ImPlot::EndPlot();
+}
+
+void drawPerformanceAndHealth(
+    const telemetry::Counters& counters,
+    const RateHistory& history) {
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+    const float healthWidth = std::clamp(
+        availableWidth * 0.34F,
+        320.0F,
+        380.0F);
+    const float panelHeight = 390.0F;
+
+    if (!ImGui::BeginTable(
+            "performance_health",
+            2,
+            ImGuiTableFlags_BordersInnerV |
+                ImGuiTableFlags_SizingStretchProp)) {
+        return;
+    }
+
+    ImGui::TableSetupColumn(
+        "Производительность",
+        ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn(
+        "Состояние",
+        ImGuiTableColumnFlags_WidthFixed,
+        healthWidth);
+    ImGui::TableNextRow();
+
+    ImGui::TableNextColumn();
+    if (ImGui::BeginChild(
+            "performance_panel",
+            ImVec2(0.0F, panelHeight),
+            ImGuiChildFlags_None)) {
+        ImGui::SeparatorText("ПРОИЗВОДИТЕЛЬНОСТЬ");
+        drawRateStatsTable(history);
+        ImGui::Spacing();
+        const float graphHeight = ImGui::GetContentRegionAvail().y;
+        drawPerformanceGraph(history, graphHeight);
+    }
+    ImGui::EndChild();
+
+    ImGui::TableNextColumn();
+    if (ImGui::BeginChild(
+            "pipeline_health",
+            ImVec2(0.0F, panelHeight),
+            ImGuiChildFlags_None)) {
+        drawPipelineHealth(counters);
+    }
+    ImGui::EndChild();
+
+    ImGui::EndTable();
 }
 
 void drawTargets(const std::vector<telemetry::Target>& targets) {
@@ -1077,8 +1124,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     void drawOverview(
         const telemetry::Snapshot& snapshot,
         std::chrono::steady_clock::time_point now) {
-        drawStatus(snapshot.counters);
-        drawPerformance(rateHistory);
+        drawPerformanceAndHealth(snapshot.counters, rateHistory);
         ImGui::SeparatorText("ТЕКУЩИЕ ЦЕЛИ");
         drawTargets(snapshot.targets);
         ImGui::SeparatorText("СОБЫТИЯ / ПОСЛЕДНИЕ 5 МИНУТ");
