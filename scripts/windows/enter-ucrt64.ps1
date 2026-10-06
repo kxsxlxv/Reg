@@ -38,10 +38,30 @@ Run once from the repository root:
 "@
 }
 
+# SDL3 is fetched and built inside the selected CMake build tree, so its DLL is
+# not part of the MSYS2 UCRT64 PATH. Prefer a deployed copy next to reg_probe.exe,
+# otherwise fall back to the FetchContent output directory if the build already
+# exists but has not been packaged yet.
+$sdlRuntime = Join-Path $buildPath "SDL3.dll"
+$sdlRuntimeDir = $null
+if (Test-Path $sdlRuntime) {
+    $sdlRuntimeDir = $buildPath
+} elseif (Test-Path $buildPath) {
+    $sdlCandidate = Get-ChildItem `
+        -Path $buildPath `
+        -Filter "SDL3.dll" `
+        -Recurse `
+        -File `
+        -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $sdlCandidate) {
+        $sdlRuntimeDir = $sdlCandidate.DirectoryName
+    }
+}
+
 # Keep all compiler, build-output and runtime DLL locations in this PowerShell
 # process. A not-yet-created build directory is safe to keep on PATH and becomes
 # usable as soon as CMake creates it.
-$prepend = @($ffmpegBin, $buildPath, $ucrtBin)
+$prepend = @($buildPath, $sdlRuntimeDir, $ffmpegBin, $ucrtBin)
 $currentPath = @($env:PATH -split ';' | Where-Object { $_ })
 $newPath = [System.Collections.Generic.List[string]]::new()
 foreach ($entry in @($prepend + $currentPath)) {
@@ -69,6 +89,7 @@ Write-Host "  repo:    $repoRoot"
 Write-Host "  MSYS2:   $ucrtRoot"
 Write-Host "  FFmpeg:  $ffmpegRoot"
 Write-Host "  build:   $buildPath"
+Write-Host "  SDL3:    $(if ($sdlRuntimeDir) { $sdlRuntimeDir } else { 'not built yet' })"
 Write-Host "  gcc:     $(& (Join-Path $ucrtBin 'gcc.exe') --version | Select-Object -First 1)"
 Write-Host "  cmake:   $(& (Join-Path $ucrtBin 'cmake.exe') --version | Select-Object -First 1)"
 Write-Host "  ninja:   $(& (Join-Path $ucrtBin 'ninja.exe') --version)"
