@@ -31,6 +31,7 @@ void queueFrameRequest(
     std::uint32_t width,
     std::uint32_t height,
     float desiredFps,
+    float dpiScale,
     bool compression) {
     auto* input = client.TakePendingInput();
     if (input == nullptr) {
@@ -41,9 +42,9 @@ void queueFrameRequest(
     input->mScreenSize[0] = clampDimension(width);
     input->mScreenSize[1] = clampDimension(height);
 
-    // Input forwarding is added in the next integration slice. Until then keep
-    // the pointer well outside the drawable area and explicitly clear any state
-    // if this packet was reclaimed before the network thread consumed it.
+    // Full pointer/keyboard forwarding is added separately. Until then keep
+    // the pointer well outside the drawable area and explicitly clear any
+    // state if this packet was reclaimed before the network thread consumed it.
     input->mMousePos[0] = -30000;
     input->mMousePos[1] = -30000;
     input->mMouseWheelVert = 0.0F;
@@ -56,7 +57,7 @@ void queueFrameRequest(
 
     input->mCompressionUse = compression;
     input->mCompressionSkip = client.mbCompressionSkipOncePending;
-    input->mFontDPIScaling = 1.0F;
+    input->mFontDPIScaling = std::clamp(dpiScale, 0.5F, 4.0F);
     input->mDesiredFps = std::max(desiredFps, 1.0F);
 
     client.mbCompressionSkipOncePending = false;
@@ -116,7 +117,8 @@ struct NetImguiHost::Impl {
     void update(
         std::uint32_t width,
         std::uint32_t height,
-        bool active) {
+        bool active,
+        float dpiScale) {
         currentDrawData = nullptr;
         connectedCount = 0U;
 
@@ -155,6 +157,7 @@ struct NetImguiHost::Impl {
                     width,
                     height,
                     desiredFps,
+                    dpiScale,
                     config.compression);
             }
 
@@ -191,8 +194,9 @@ NetImguiHost::~NetImguiHost() = default;
 void NetImguiHost::update(
     std::uint32_t width,
     std::uint32_t height,
-    bool active) {
-    impl_->update(width, height, active);
+    bool active,
+    float dpiScale) {
+    impl_->update(width, height, active, dpiScale);
 }
 
 ImDrawData* NetImguiHost::drawData() const noexcept {
