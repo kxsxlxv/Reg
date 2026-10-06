@@ -17,13 +17,16 @@ inline TelemetryPage telemetryPage() noexcept {
     return gTelemetryPage.load(std::memory_order_relaxed);
 }
 
+inline void setTelemetryPage(TelemetryPage page) noexcept {
+    gTelemetryPage.store(page, std::memory_order_relaxed);
+}
+
 inline void toggleTelemetryPage() noexcept {
     const TelemetryPage current = telemetryPage();
-    gTelemetryPage.store(
+    setTelemetryPage(
         current == TelemetryPage::Overview
             ? TelemetryPage::NetImgui
-            : TelemetryPage::Overview,
-        std::memory_order_relaxed);
+            : TelemetryPage::Overview);
 }
 
 } // namespace reg::app
