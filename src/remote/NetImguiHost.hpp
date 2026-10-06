@@ -38,7 +38,13 @@ public:
 
     // Process received texture/draw data and request a new remote UI frame.
     // The caller must make the remote renderer's ImGuiContext current first.
-    void update(std::uint32_t width, std::uint32_t height, bool active = true);
+    // width/height and dpiScale are sent to the client in CmdInput so its
+    // ImGuiIO is built for the actual Reg Raw presentation surface.
+    void update(
+        std::uint32_t width,
+        std::uint32_t height,
+        bool active = true,
+        float dpiScale = 1.0F);
 
     // Pointer remains owned by NetImgui and is valid until a later update() for
     // this client or host shutdown. Currently Reg exposes the first connected
