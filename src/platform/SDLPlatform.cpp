@@ -112,8 +112,8 @@ bool placeBorderlessWindow(
 
     // Deliberately use a normal borderless window rather than SDL fullscreen.
     // On Windows a real fullscreen state can cause WSI/swapchain transitions.
-    // Focus ownership is handled independently: the CV output stays
-    // non-focusable, while Telemetry is intentionally interactive.
+    // Focus ownership is independent from pointer interaction: secondary
+    // output windows can stay non-focusable while still receiving mouse events.
     if (!SDL_SetWindowBordered(window, false)) {
         return false;
     }
@@ -344,18 +344,11 @@ SDL_Window* SDLPlatform::createVulkanWindow(
     int width,
     int height,
     bool focusable) {
-    // Telemetry is an operator-facing interactive surface. Keep the legacy
-    // call sites source-compatible, but never mark this role non-focusable.
-    const bool effectiveFocusable =
-        focusable ||
-        (title != nullptr &&
-         std::string_view(title) == "Reg - Telemetry");
-
     SDL_WindowFlags flags =
         SDL_WINDOW_VULKAN |
         SDL_WINDOW_RESIZABLE;
 
-    if (!effectiveFocusable) {
+    if (!focusable) {
         flags |= SDL_WINDOW_NOT_FOCUSABLE;
     }
 
@@ -371,7 +364,7 @@ SDL_Window* SDLPlatform::createVulkanWindow(
             SDL_GetError());
     }
 
-    if (!effectiveFocusable &&
+    if (!focusable &&
         !SDL_SetWindowFocusable(window, false)) {
         const std::string error = SDL_GetError();
         SDL_DestroyWindow(window);
