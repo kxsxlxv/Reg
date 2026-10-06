@@ -130,13 +130,25 @@ void expectedRtspStartupWaitsAreInformational() {
             reg::telemetry::Severity::Info,
         "initial no-signal state should be informational");
     require(
+        snapshot.events[0].message ==
+            "Ожидание видеосигнала",
+        "initial no-signal label mismatch");
+    require(
         snapshot.events[1].severity ==
             reg::telemetry::Severity::Info,
         "RTSP 404 while waiting should be informational");
     require(
+        snapshot.events[1].message.starts_with(
+            "Ожидание RTSP: "),
+        "RTSP 404 waiting label mismatch");
+    require(
         snapshot.events[2].severity ==
             reg::telemetry::Severity::Info,
         "RTSP EOF while waiting should be informational");
+    require(
+        snapshot.events[2].message.starts_with(
+            "Ожидание RTSP: "),
+        "RTSP EOF waiting label mismatch");
 
     reg::telemetry::Counters counters{};
     counters.decodedFrames = 1;
@@ -151,6 +163,10 @@ void expectedRtspStartupWaitsAreInformational() {
         snapshot.events.back().severity ==
             reg::telemetry::Severity::Warning,
         "signal loss after decoded video must remain a warning");
+    require(
+        snapshot.events.back().message ==
+            "NO SIGNAL: decoded video is not arriving",
+        "operational signal-loss message must be preserved");
 
     model.log(
         reg::telemetry::Severity::Warning,
