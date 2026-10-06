@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 
@@ -66,6 +67,9 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
     ImGuiContext* context{nullptr};
     ImDrawData* drawData{nullptr};
     bool backendInitialized{false};
+    bool listenerAnnounced{false};
+    bool connectionStateKnown{false};
+    bool previousConnected{false};
     VkDescriptorPool descriptorPool{VK_NULL_HANDLE};
     VkFormat pipelineFormat{VK_FORMAT_UNDEFINED};
     VkPipelineRenderingCreateInfoKHR pipelineRenderingInfo{
@@ -178,6 +182,34 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
         }
     }
 
+    void publishAndTraceStatus() {
+        const remote::NetImguiHostStatus status = host != nullptr
+            ? host->status()
+            : remote::NetImguiHostStatus{};
+        publishRuntimeStatus(true, hostConfig_.port, status);
+
+        if (status.listening && !listenerAnnounced) {
+            std::cout
+                << "[netimgui] listening tcp="
+                << hostConfig_.port
+                << '\n';
+            listenerAnnounced = true;
+        }
+
+        if (!connectionStateKnown || status.connected != previousConnected) {
+            if (connectionStateKnown) {
+                std::cout
+                    << "[netimgui] client "
+                    << (status.connected ? "connected" : "disconnected")
+                    << " count="
+                    << status.connectedClients
+                    << '\n';
+            }
+            previousConnected = status.connected;
+            connectionStateKnown = true;
+        }
+    }
+
     void prepare(const vulkan::Swapchain& swapchain, bool active) {
         setCurrentContext();
 
@@ -190,27 +222,23 @@ struct RemoteImGuiRenderer::Impl final : VideoOverlayRecorder {
         // frame rather than silently rendering with an incompatible pipeline.
         if (swapchain.format() != pipelineFormat) {
             drawData = nullptr;
-            publishRuntimeStatus(
-                true,
-                hostConfig_.port,
-                host != nullptr
-                    ? host->status()
-                    : remote::NetImguiHostStatus{});
+            publishAndTraceStatus();
             return;
         }
 
         const VkExtent2D extent = swapchain.extent();
-        host->update(extent.width, extent.height, active);
+        const float dpiScale = swapchain.contentScale();
+        host->update(extent.width, extent.height, active, dpiScale);
 
         // Reconstructed NetImgui draw data does not originate from this local
         // context's ImGui::Render(), so drive remote texture uploads explicitly.
         // A second host update lets a frame deferred on WantCreate become visible
         // immediately after its texture reaches ImTextureStatus_OK.
         if (updateRemoteTextures()) {
-            host->update(extent.width, extent.height, active);
+            host->update(extent.width, extent.height, active, dpiScale);
         }
 
-        publishRuntimeStatus(true, hostConfig_.port, host->status());
+        publishAndTraceStatus();
 
         drawData = host->drawData();
         if (drawData == nullptr) {
