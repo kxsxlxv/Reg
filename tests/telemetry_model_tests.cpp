@@ -102,6 +102,67 @@ void eventLogIsBoundedAndTimePruned() {
         "expired events were not pruned");
 }
 
+void expectedRtspStartupWaitsAreInformational() {
+    reg::telemetry::TelemetryModel model;
+
+    const auto t0 =
+        std::chrono::steady_clock::time_point{30s};
+
+    model.log(
+        reg::telemetry::Severity::Warning,
+        "NO SIGNAL: decoded video is not arriving",
+        t0);
+    model.log(
+        reg::telemetry::Severity::Warning,
+        "RTSP session failed: avformat_open_input failed: Server returned 404 Not Found (-875574520)",
+        t0 + 1ms);
+    model.log(
+        reg::telemetry::Severity::Warning,
+        "RTSP session failed: av_read_frame failed: End of file (-541478725)",
+        t0 + 2ms);
+
+    auto snapshot = model.snapshot();
+    require(
+        snapshot.events.size() == 3,
+        "startup wait events were not retained");
+    require(
+        snapshot.events[0].severity ==
+            reg::telemetry::Severity::Info,
+        "initial no-signal state should be informational");
+    require(
+        snapshot.events[1].severity ==
+            reg::telemetry::Severity::Info,
+        "RTSP 404 while waiting should be informational");
+    require(
+        snapshot.events[2].severity ==
+            reg::telemetry::Severity::Info,
+        "RTSP EOF while waiting should be informational");
+
+    reg::telemetry::Counters counters{};
+    counters.decodedFrames = 1;
+    model.updateCounters(counters, t0 + 3ms);
+    model.log(
+        reg::telemetry::Severity::Warning,
+        "NO SIGNAL: decoded video is not arriving",
+        t0 + 4ms);
+
+    snapshot = model.snapshot();
+    require(
+        snapshot.events.back().severity ==
+            reg::telemetry::Severity::Warning,
+        "signal loss after decoded video must remain a warning");
+
+    model.log(
+        reg::telemetry::Severity::Warning,
+        "RTSP session failed: authentication failed",
+        t0 + 5ms);
+    snapshot = model.snapshot();
+    require(
+        snapshot.events.back().severity ==
+            reg::telemetry::Severity::Warning,
+        "non-transient RTSP failures must remain warnings");
+}
+
 void targetSnapshotCopiesCurrentMetadata() {
     reg::telemetry::TelemetryModel model;
 
@@ -146,6 +207,7 @@ int main() {
     try {
         samplesAreRateLimitedAndPruned();
         eventLogIsBoundedAndTimePruned();
+        expectedRtspStartupWaitsAreInformational();
         targetSnapshotCopiesCurrentMetadata();
 
         std::cout
