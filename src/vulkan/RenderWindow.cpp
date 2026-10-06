@@ -196,10 +196,14 @@ RenderWindow::RenderWindow(
 
     enforceWin32NoActivate(window_);
 
-    if (!createSurfaceAndSwapchain()) {
+    try {
+        if (!createSurfaceAndSwapchain()) {
+            throw std::runtime_error(
+                "Cannot create initial Vulkan surface/swapchain for window");
+        }
+    } catch (...) {
         restoreWin32WndProc(window_);
-        throw std::runtime_error(
-            "Cannot create initial Vulkan surface/swapchain for window");
+        throw;
     }
 }
 
