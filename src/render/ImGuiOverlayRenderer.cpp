@@ -387,8 +387,9 @@ struct ImGuiOverlayRenderer::Impl {
     void drawNoSignal(
         const vulkan::Swapchain& swapchain,
         const char* subtitle) {
-        const char* safeSubtitle =
-            subtitle != nullptr ? subtitle : "СИГНАЛ НЕДОСТУПЕН";
+        const bool hasSubtitle =
+            subtitle != nullptr && subtitle[0] != '\0';
+        const char* safeSubtitle = hasSubtitle ? subtitle : "";
 
         ImDrawList* drawList = beginFrame(swapchain);
         const VkExtent2D extent = swapchain.extent();
@@ -406,17 +407,20 @@ struct ImGuiOverlayRenderer::Impl {
             iconSize, FLT_MAX, 0.0F, kIconVideoOff);
         const ImVec2 titleExtent = font->CalcTextSizeA(
             titleSize, FLT_MAX, 0.0F, "НЕТ СИГНАЛА");
-        const ImVec2 subtitleExtent = font->CalcTextSizeA(
-            subtitleSize,
-            FLT_MAX,
-            0.0F,
-            safeSubtitle);
+        const ImVec2 subtitleExtent = hasSubtitle
+            ? font->CalcTextSizeA(
+                  subtitleSize,
+                  FLT_MAX,
+                  0.0F,
+                  safeSubtitle)
+            : ImVec2(0.0F, 0.0F);
 
-        const float contentWidth = std::max(
-            {iconExtent.x, titleExtent.x, subtitleExtent.x});
+        const float contentWidth = hasSubtitle
+            ? std::max({iconExtent.x, titleExtent.x, subtitleExtent.x})
+            : std::max(iconExtent.x, titleExtent.x);
         const float contentHeight =
             iconExtent.y + gap + titleExtent.y +
-            gap * 0.55F + subtitleExtent.y;
+            (hasSubtitle ? gap * 0.55F + subtitleExtent.y : 0.0F);
         const float panelWidth = contentWidth + paddingX * 2.0F;
         const float panelHeight = contentHeight + paddingY * 2.0F;
 
@@ -460,16 +464,18 @@ struct ImGuiOverlayRenderer::Impl {
                 y),
             textColor,
             "НЕТ СИГНАЛА");
-        y += titleExtent.y + gap * 0.55F;
 
-        drawList->AddText(
-            font,
-            subtitleSize,
-            ImVec2(
-                panelMin.x + (panelWidth - subtitleExtent.x) * 0.5F,
-                y),
-            mutedColor,
-            safeSubtitle);
+        if (hasSubtitle) {
+            y += titleExtent.y + gap * 0.55F;
+            drawList->AddText(
+                font,
+                subtitleSize,
+                ImVec2(
+                    panelMin.x + (panelWidth - subtitleExtent.x) * 0.5F,
+                    y),
+                mutedColor,
+                safeSubtitle);
+        }
 
         endFrame();
     }
