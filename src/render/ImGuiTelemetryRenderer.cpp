@@ -146,77 +146,79 @@ RateStats rateStats(const std::vector<double>& values) {
     return stats;
 }
 
-void drawRateStatsRow(
-    const char* label,
+void drawRateValue(
+    const RateStats& stats,
+    double value,
     const ImVec4& color,
-    const RateStats& stats) {
-    ImGui::TableNextRow();
-    ImGui::PushStyleColor(ImGuiCol_Text, color);
-
+    bool prominent) {
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(label);
+    if (!stats.valid) {
+        ImGui::TextDisabled("—");
+        return;
+    }
 
-    const auto drawValue = [&](double value) {
-        ImGui::TableNextColumn();
-        if (stats.valid) {
-            ImGui::Text("%.2f", value);
-        } else {
-            ImGui::TextDisabled("—");
-        }
-    };
-
-    drawValue(stats.current);
-    drawValue(stats.minimum);
-    drawValue(stats.average);
-    drawValue(stats.maximum);
-
-    ImGui::PopStyleColor();
+    if (prominent) {
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        ImGui::Text("%.2f", value);
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::TextDisabled("%.2f", value);
+    }
 }
 
 void drawRateStatsTable(const RateHistory& history) {
+    const RateStats decoded = rateStats(history.decodedFps);
+    const RateStats rendered = rateStats(history.rawFps);
+    const RateStats cv = rateStats(history.overlayFps);
+
     if (!ImGui::BeginTable(
             "fps_stats",
-            5,
+            4,
             ImGuiTableFlags_BordersInnerH |
                 ImGuiTableFlags_BordersInnerV |
                 ImGuiTableFlags_RowBg |
-                ImGuiTableFlags_SizingFixedFit)) {
+                ImGuiTableFlags_SizingFixedFit,
+            ImVec2(430.0F, 0.0F))) {
         return;
     }
 
     ImGui::TableSetupColumn(
-        "Канал",
-        ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn(
-        "FPS",
+        "Метрика",
         ImGuiTableColumnFlags_WidthFixed,
-        64.0F);
+        72.0F);
     ImGui::TableSetupColumn(
-        "MIN",
+        "Декодер",
         ImGuiTableColumnFlags_WidthFixed,
-        64.0F);
+        104.0F);
     ImGui::TableSetupColumn(
-        "AVG",
+        "Рендер",
         ImGuiTableColumnFlags_WidthFixed,
-        64.0F);
+        104.0F);
     ImGui::TableSetupColumn(
-        "MAX",
+        "CV",
         ImGuiTableColumnFlags_WidthFixed,
-        64.0F);
+        88.0F);
     ImGui::TableHeadersRow();
 
-    drawRateStatsRow(
-        "Декодер",
-        kSignalGreen,
-        rateStats(history.decodedFps));
-    drawRateStatsRow(
-        "Рендер",
-        kAccentBlue,
-        rateStats(history.rawFps));
-    drawRateStatsRow(
-        "CV",
-        kWarningAmber,
-        rateStats(history.overlayFps));
+    const auto drawRow = [&](const char* label,
+                             double RateStats::*member,
+                             bool prominent) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        if (prominent) {
+            ImGui::TextUnformatted(label);
+        } else {
+            ImGui::TextDisabled("%s", label);
+        }
+        drawRateValue(decoded, decoded.*member, kSignalGreen, prominent);
+        drawRateValue(rendered, rendered.*member, kAccentBlue, prominent);
+        drawRateValue(cv, cv.*member, kWarningAmber, prominent);
+    };
+
+    drawRow("FPS", &RateStats::current, true);
+    drawRow("MIN", &RateStats::minimum, false);
+    drawRow("AVG", &RateStats::average, false);
+    drawRow("MAX", &RateStats::maximum, false);
 
     ImGui::EndTable();
 }
@@ -243,120 +245,179 @@ void statusRowColored(
     ImGui::PopStyleColor();
 }
 
+void drawHealthCell(
+    const char* label,
+    bool healthy,
+    const char* healthyValue,
+    const char* unhealthyValue,
+    const ImVec4& unhealthyColor) {
+    ImGui::TextDisabled("%s", label);
+    ImGui::SameLine();
+    const ImVec4 color = healthy ? kSignalGreen : unhealthyColor;
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::Text(
+        "%s  %s",
+        healthy ? kIconCheckCircle : kIconWarning,
+        healthy ? healthyValue : unhealthyValue);
+    ImGui::PopStyleColor();
+}
+
+void drawCompactMetric(const char* label, const char* value) {
+    ImGui::TextDisabled("%s", label);
+    ImGui::SameLine(0.0F, 5.0F);
+    ImGui::TextUnformatted(value);
+}
+
 void drawStatus(const telemetry::Counters& counters) {
-    if (!ImGui::BeginTable(
-            "status",
-            2,
-            ImGuiTableFlags_BordersInnerH |
+    ImGui::SeparatorText("СТАТУС");
+
+    if (ImGui::BeginTable(
+            "health_strip",
+            3,
+            ImGuiTableFlags_BordersInnerV |
                 ImGuiTableFlags_RowBg |
-                ImGuiTableFlags_SizingFixedFit)) {
-        return;
+                ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableNextColumn();
+        drawHealthCell(
+            "RTSP",
+            counters.rtspConnected,
+            "ПОДКЛЮЧЕН",
+            "ОТКЛЮЧЕН",
+            kErrorRed);
+
+        ImGui::TableNextColumn();
+        drawHealthCell(
+            "ВИДЕО",
+            counters.videoSignalPresent,
+            "СИГНАЛ",
+            "НЕТ СИГНАЛА",
+            kWarningAmber);
+
+        ImGui::TableNextColumn();
+        drawHealthCell(
+            "CV / JETSON",
+            counters.cvSignalPresent,
+            "СИГНАЛ",
+            "НЕТ СИГНАЛА",
+            kWarningAmber);
+
+        ImGui::EndTable();
     }
 
-    ImGui::TableSetupColumn(
-        "Метрика",
-        ImGuiTableColumnFlags_WidthFixed,
-        176.0F);
-    ImGui::TableSetupColumn(
-        "Значение",
-        ImGuiTableColumnFlags_WidthStretch);
+    char frameAge[48]{};
+    char cvAge[48]{};
+    char sessions[48]{};
+    char reconnects[48]{};
+    char exactUdp[64]{};
+    char decoded[48]{};
+    char rendered[48]{};
+    char cvFrames[48]{};
+    char buffers[64]{};
+    char recorder[64]{};
 
-    statusRowColored(
-        "RTSP",
-        counters.rtspConnected ? kSignalGreen : kErrorRed,
-        counters.rtspConnected ? kIconCheckCircle : kIconWarning,
-        counters.rtspConnected ? "ПОДКЛЮЧЕН" : "ОТКЛЮЧЕН");
-    statusRowColored(
-        "Видео",
-        counters.videoSignalPresent ? kSignalGreen : kWarningAmber,
-        counters.videoSignalPresent ? kIconCheckCircle : kIconVideoOff,
-        counters.videoSignalPresent ? "СИГНАЛ" : "НЕТ СИГНАЛА");
-    statusRowColored(
-        "CVM1 / Jetson",
-        counters.cvSignalPresent ? kSignalGreen : kWarningAmber,
-        counters.cvSignalPresent ? kIconCheckCircle : kIconVideoOff,
-        counters.cvSignalPresent ? "СИГНАЛ" : "НЕТ СИГНАЛА");
-
-    char buffer[128]{};
     if (counters.decodedFrames == 0U) {
-        statusRow("Возраст кадра", "нет данных");
+        std::snprintf(frameAge, sizeof(frameAge), "—");
     } else {
         std::snprintf(
-            buffer,
-            sizeof(buffer),
+            frameAge,
+            sizeof(frameAge),
             "%llu мс",
             static_cast<unsigned long long>(counters.videoFrameAgeMs));
-        statusRow("Возраст кадра", buffer);
     }
 
     if (counters.metadataPackets == 0U) {
-        statusRow("Возраст CVM1", "нет данных");
+        std::snprintf(cvAge, sizeof(cvAge), "—");
     } else {
         std::snprintf(
-            buffer,
-            sizeof(buffer),
+            cvAge,
+            sizeof(cvAge),
             "%llu мс",
             static_cast<unsigned long long>(counters.cvPacketAgeMs));
-        statusRow("Возраст CVM1", buffer);
     }
 
-    const auto addU64 = [&](const char* label, std::uint64_t value) {
-        std::snprintf(
-            buffer,
-            sizeof(buffer),
-            "%llu",
-            static_cast<unsigned long long>(value));
-        statusRow(label, buffer);
-    };
-
     std::snprintf(
-        buffer,
-        sizeof(buffer),
-        "%llu / %llu",
-        static_cast<unsigned long long>(counters.decoderSessions),
+        sessions,
+        sizeof(sessions),
+        "%llu",
+        static_cast<unsigned long long>(counters.decoderSessions));
+    std::snprintf(
+        reconnects,
+        sizeof(reconnects),
+        "%llu",
         static_cast<unsigned long long>(counters.reconnects));
-    statusRow("Сессии / реконнекты", buffer);
-
-    addU64("Декодировано", counters.decodedFrames);
-
     std::snprintf(
-        buffer,
-        sizeof(buffer),
-        "%llu / %llu",
-        static_cast<unsigned long long>(counters.rawPresentedFrames),
-        static_cast<unsigned long long>(counters.overlayPresentedFrames));
-    statusRow("Рендер / CV", buffer);
-
-    std::snprintf(
-        buffer,
-        sizeof(buffer),
+        exactUdp,
+        sizeof(exactUdp),
         "%llu / %llu",
         static_cast<unsigned long long>(counters.overlayMissingMetadataDrops),
         static_cast<unsigned long long>(counters.metadataSequenceGaps));
-    statusRow("Exact / потери UDP", buffer);
-
     std::snprintf(
-        buffer,
-        sizeof(buffer),
+        decoded,
+        sizeof(decoded),
+        "%llu",
+        static_cast<unsigned long long>(counters.decodedFrames));
+    std::snprintf(
+        rendered,
+        sizeof(rendered),
+        "%llu",
+        static_cast<unsigned long long>(counters.rawPresentedFrames));
+    std::snprintf(
+        cvFrames,
+        sizeof(cvFrames),
+        "%llu",
+        static_cast<unsigned long long>(counters.overlayPresentedFrames));
+    std::snprintf(
+        buffers,
+        sizeof(buffers),
         "%zu / %zu",
         counters.overlayBufferDepth,
         counters.metadataStoreDepth);
-    statusRow("CV / буфер CV", buffer);
-
     std::snprintf(
-        buffer,
-        sizeof(buffer),
+        recorder,
+        sizeof(recorder),
         "%zu / %llu / %llu",
         counters.recorderQueueDepth,
         static_cast<unsigned long long>(counters.recorderQueueDrops),
         static_cast<unsigned long long>(counters.recorderFailures));
-    statusRow("Запись q/drop/fail", buffer);
 
-    ImGui::EndTable();
+    if (ImGui::BeginTable(
+            "status_metrics",
+            5,
+            ImGuiTableFlags_BordersInnerV |
+                ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        drawCompactMetric("Кадр", frameAge);
+        ImGui::TableNextColumn();
+        drawCompactMetric("CV", cvAge);
+        ImGui::TableNextColumn();
+        drawCompactMetric("Сессии", sessions);
+        ImGui::TableNextColumn();
+        drawCompactMetric("Реконнекты", reconnects);
+        ImGui::TableNextColumn();
+        drawCompactMetric("Exact / UDP", exactUdp);
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        drawCompactMetric("Декод", decoded);
+        ImGui::TableNextColumn();
+        drawCompactMetric("Рендер", rendered);
+        ImGui::TableNextColumn();
+        drawCompactMetric("CV кадры", cvFrames);
+        ImGui::TableNextColumn();
+        drawCompactMetric("Буфер CV", buffers);
+        ImGui::TableNextColumn();
+        drawCompactMetric("Запись q/d/f", recorder);
+        ImGui::EndTable();
+    }
 }
 
 void drawPerformance(const RateHistory& history) {
+    ImGui::SeparatorText("ПРОИЗВОДИТЕЛЬНОСТЬ");
     drawRateStatsTable(history);
+    ImGui::Spacing();
 
     if (history.secondsAgo.empty()) {
         ImGui::TextDisabled("Сбор данных производительности...");
@@ -365,7 +426,7 @@ void drawPerformance(const RateHistory& history) {
 
     if (!ImPlot::BeginPlot(
             "##fps",
-            ImVec2(-1.0F, 250.0F),
+            ImVec2(-1.0F, 260.0F),
             ImPlotFlags_NoTitle)) {
         return;
     }
@@ -452,43 +513,6 @@ void drawPerformance(const RateHistory& history) {
     }
 
     ImPlot::EndPlot();
-}
-
-void drawStatusAndPerformance(
-    const telemetry::Counters& counters,
-    const RateHistory& history) {
-    const float availableWidth = ImGui::GetContentRegionAvail().x;
-    const float statusWidth = std::clamp(
-        availableWidth * 0.34F,
-        330.0F,
-        420.0F);
-
-    if (!ImGui::BeginTable(
-            "status_performance",
-            2,
-            ImGuiTableFlags_BordersInnerV |
-                ImGuiTableFlags_SizingStretchProp)) {
-        return;
-    }
-
-    ImGui::TableSetupColumn(
-        "Статус",
-        ImGuiTableColumnFlags_WidthFixed,
-        statusWidth);
-    ImGui::TableSetupColumn(
-        "Производительность",
-        ImGuiTableColumnFlags_WidthStretch);
-
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn();
-    ImGui::SeparatorText("СТАТУС");
-    drawStatus(counters);
-
-    ImGui::TableNextColumn();
-    ImGui::SeparatorText("ПРОИЗВОДИТЕЛЬНОСТЬ");
-    drawPerformance(history);
-
-    ImGui::EndTable();
 }
 
 void drawTargets(const std::vector<telemetry::Target>& targets) {
@@ -1053,7 +1077,8 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     void drawOverview(
         const telemetry::Snapshot& snapshot,
         std::chrono::steady_clock::time_point now) {
-        drawStatusAndPerformance(snapshot.counters, rateHistory);
+        drawStatus(snapshot.counters);
+        drawPerformance(rateHistory);
         ImGui::SeparatorText("ТЕКУЩИЕ ЦЕЛИ");
         drawTargets(snapshot.targets);
         ImGui::SeparatorText("СОБЫТИЯ / ПОСЛЕДНИЕ 5 МИНУТ");
@@ -1083,11 +1108,6 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             ImGui::End();
             return;
         }
-
-        ImGui::PushStyleColor(ImGuiCol_Text, kAccentBlue);
-        ImGui::TextUnformatted("REG / ТЕЛЕМЕТРИЯ / BLACKBOX");
-        ImGui::PopStyleColor();
-        ImGui::Separator();
 
         if (!netImgui.enabled) {
             drawOverview(snapshot, now);
