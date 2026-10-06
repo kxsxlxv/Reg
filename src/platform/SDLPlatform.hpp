@@ -1,5 +1,7 @@
 #pragma once
 
+#include "remote/RemoteInputState.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -77,6 +79,8 @@ public:
 
 private:
     std::vector<SDL_Window*> windows_;
+    std::uint32_t rawWindowId_{};
+    remote::RemoteUiInputState remoteUiInput_{};
     bool displayTopologyChanged_{false};
     bool rawScreenshotRequested_{false};
     bool overlayScreenshotRequested_{false};
