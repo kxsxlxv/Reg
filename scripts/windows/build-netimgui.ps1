@@ -54,6 +54,32 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE."
 }
 
+# SDL3 is built by FetchContent and normally lands below _deps/sdl3-build.
+# Windows does not search that directory when reg_probe.exe is started from the
+# build root, so deploy the fetched runtime next to the executable.
+$deployedSdl = Join-Path $buildPath "SDL3.dll"
+$sdlCandidate = Get-ChildItem `
+    -Path $buildPath `
+    -Filter "SDL3.dll" `
+    -Recurse `
+    -File `
+    -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -ine $deployedSdl } |
+    Select-Object -First 1
+
+if ($null -eq $sdlCandidate) {
+    if (-not (Test-Path $deployedSdl)) {
+        throw "SDL3.dll was not produced by the SDL3 FetchContent build."
+    }
+} else {
+    Copy-Item $sdlCandidate.FullName $deployedSdl -Force
+    Write-Host "Deployed SDL3 runtime: $($sdlCandidate.FullName) -> $deployedSdl" -ForegroundColor DarkGray
+}
+
+# Refresh PATH after deployment so this PowerShell also sees the selected build
+# directory and any FetchContent runtime directory discovered by enter-ucrt64.
+& $envScript -Msys2Root $Msys2Root -BuildDir $BuildDir
+
 if (-not $SkipTests) {
     Write-Host ""
     Write-Host "Running tests" -ForegroundColor Cyan
@@ -69,6 +95,7 @@ Write-Host ""
 Write-Host "Reg NetImgui Windows build is ready" -ForegroundColor Green
 Write-Host "  build: $buildPath"
 Write-Host "  exe:   $(Join-Path $buildPath 'reg_probe.exe')"
+Write-Host "  SDL3:  $deployedSdl"
 Write-Host ""
-Write-Host "For the current PowerShell session, refresh Reg paths with:"
-Write-Host "  & .\scripts\windows\enter-ucrt64.ps1 -BuildDir $BuildDir"
+Write-Host "Run this build (not build-win) with:"
+Write-Host "  .\$BuildDir\reg_probe.exe <arguments>"
