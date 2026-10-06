@@ -172,6 +172,53 @@ void sceneBuilderCreatesExpectedTargetPrimitives() {
         "label does not include class ID");
 }
 
+void adaptiveLabelsStayOutsideBBox() {
+    reg::metadata::TrackHistory history(5s, 32);
+    reg::video::VideoTransform transform(
+        1920,
+        1080,
+        1920,
+        1080);
+    reg::render::TargetOverlayBuilder builder;
+
+    auto centered = makeMetadata();
+    const auto centeredScene = builder.build(centered, history, transform);
+    require(centeredScene.primitives.size() == 4,
+        "centered target must keep its label");
+
+    const auto centeredRect = transform.normalizedToScreen(
+        reg::video::RectF{
+            centered.targets[0].bbox.x,
+            centered.targets[0].bbox.y,
+            centered.targets[0].bbox.width,
+            centered.targets[0].bbox.height});
+    const auto& centeredLabel =
+        std::get<reg::render::TextPrimitive>(centeredScene.primitives[3]);
+    constexpr float defaultLabelHeight = 18.0F + 4.0F * 2.0F;
+    require(
+        centeredLabel.position.y + defaultLabelHeight <= centeredRect.y,
+        "normal label placement must stay above and outside bbox");
+
+    auto topEdge = makeMetadata();
+    topEdge.targets[0].bbox.y = 0.0F;
+    topEdge.targets[0].bbox.height = 0.20F;
+    const auto topScene = builder.build(topEdge, history, transform);
+    require(topScene.primitives.size() == 4,
+        "top-edge target must keep its label");
+
+    const auto topRect = transform.normalizedToScreen(
+        reg::video::RectF{
+            topEdge.targets[0].bbox.x,
+            topEdge.targets[0].bbox.y,
+            topEdge.targets[0].bbox.width,
+            topEdge.targets[0].bbox.height});
+    const auto& topLabel =
+        std::get<reg::render::TextPrimitive>(topScene.primitives[3]);
+    require(
+        topLabel.position.y >= topRect.y + topRect.height,
+        "top-edge label must flip below bbox instead of overlapping it");
+}
+
 void provenanceFlagsDriveOverlayStyle() {
     reg::metadata::TrackHistory history(5s, 32);
     reg::video::VideoTransform transform(
@@ -226,6 +273,7 @@ int main() {
         zoomAndPanUseOneCanonicalTransform();
         trackHistoryMaintainsBoundedRecentPoints();
         sceneBuilderCreatesExpectedTargetPrimitives();
+        adaptiveLabelsStayOutsideBBox();
         provenanceFlagsDriveOverlayStyle();
 
         std::cout << "overlay_model_tests: PASS\n";
