@@ -1,9 +1,27 @@
 #include "telemetry/TelemetryModel.hpp"
 
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace reg::telemetry {
+namespace {
+
+bool isExpectedRtspWaitFailure(std::string_view message) noexcept {
+    constexpr std::string_view prefix =
+        "RTSP session failed: ";
+
+    if (!message.starts_with(prefix)) {
+        return false;
+    }
+
+    return message.find("Server returned 404 Not Found") !=
+               std::string_view::npos ||
+           message.find("End of file") !=
+               std::string_view::npos;
+}
+
+} // namespace
 
 TelemetryModel::TelemetryModel(
     std::chrono::milliseconds retention,
@@ -81,6 +99,23 @@ void TelemetryModel::log(
     std::string message,
     std::chrono::steady_clock::time_point now) {
     std::scoped_lock lock(mutex_);
+
+    // During startup/reconnect, MediaMTX can legitimately return 404 until
+    // the publisher creates the RTSP path, and a just-created path can end
+    // immediately before the first frame arrives. These are retry states,
+    // not application faults. Keep the operational signal-loss warning as
+    // the single WARN once video had actually been established.
+    if (severity == Severity::Warning &&
+        isExpectedRtspWaitFailure(message)) {
+        severity = Severity::Info;
+    }
+
+    if (severity == Severity::Warning &&
+        counters_.decodedFrames == 0U &&
+        message ==
+            "NO SIGNAL: decoded video is not arriving") {
+        severity = Severity::Info;
+    }
 
     events_.push_back(
         Event{
