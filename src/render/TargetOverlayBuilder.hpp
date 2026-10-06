@@ -21,6 +21,7 @@ struct TargetOverlayStyle {
     float crosshairArmPx{7.0F};
     float fontSizePx{18.0F};
     float labelPaddingPx{4.0F};
+    float labelGapPx{4.0F};
 
     LinePattern detectorPattern{LinePattern::Solid};
     LinePattern propagatedPattern{LinePattern::Dashed};
