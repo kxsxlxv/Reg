@@ -19,12 +19,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace reg::render {
@@ -38,6 +40,7 @@ const ImVec4 kAccentBlue{0.290F, 0.565F, 0.851F, 1.000F};
 const ImVec4 kSignalGreen{0.25F, 1.0F, 0.25F, 1.0F};
 const ImVec4 kWarningAmber{1.0F, 0.72F, 0.12F, 1.0F};
 const ImVec4 kErrorRed{1.0F, 0.35F, 0.32F, 1.0F};
+const ImVec4 kRtspAccent{0.66F, 0.57F, 0.95F, 1.0F};
 
 struct RateHistory {
     std::vector<double> secondsAgo;
@@ -259,6 +262,29 @@ void drawPipelineStatus(
     ImGui::PopStyleColor();
 }
 
+void drawPipelineSectionHeader(
+    const char* label,
+    const ImVec4& accent) {
+    const ImVec4 separatorColor{
+        accent.x,
+        accent.y,
+        accent.z,
+        0.42F};
+    ImGui::PushStyleColor(ImGuiCol_Text, accent);
+    ImGui::PushStyleColor(ImGuiCol_Separator, separatorColor);
+    ImGui::SeparatorText(label);
+    ImGui::PopStyleColor(2);
+
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    if (maximum.y > minimum.y + 4.0F) {
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            ImVec2(minimum.x, minimum.y + 2.0F),
+            ImVec2(minimum.x + 3.0F, maximum.y - 2.0F),
+            ImGui::GetColorU32(accent));
+    }
+}
+
 void drawMetricRow(const char* label, const char* value) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
@@ -273,9 +299,10 @@ void drawMetricRow(const char* label, const char* value) {
 }
 
 void drawPipelineMetrics(
+    const char* tableId,
     std::initializer_list<std::pair<const char*, const char*>> rows) {
     if (!ImGui::BeginTable(
-            "metrics",
+            tableId,
             2,
             ImGuiTableFlags_SizingStretchProp)) {
         return;
@@ -363,36 +390,36 @@ void drawPipelineHealth(const telemetry::Counters& counters) {
         static_cast<unsigned long long>(counters.overlayMissingMetadataDrops),
         static_cast<unsigned long long>(counters.metadataSequenceGaps));
 
-    ImGui::SeparatorText("RTSP");
+    drawPipelineSectionHeader("RTSP", kRtspAccent);
     drawPipelineStatus(
         counters.rtspConnected,
         "ПОДКЛЮЧЕН",
         "ОТКЛЮЧЕН",
         kErrorRed);
-    drawPipelineMetrics({
+    drawPipelineMetrics("rtsp_metrics", {
         {"Сессии", sessions},
         {"Реконнекты", reconnects},
     });
 
-    ImGui::SeparatorText("ВИДЕО");
+    drawPipelineSectionHeader("ВИДЕО", kAccentBlue);
     drawPipelineStatus(
         counters.videoSignalPresent,
         "СИГНАЛ",
         "НЕТ СИГНАЛА",
         kWarningAmber);
-    drawPipelineMetrics({
+    drawPipelineMetrics("video_metrics", {
         {"Кадр", frameAge},
         {"Декод", decoded},
         {"Рендер", rendered},
     });
 
-    ImGui::SeparatorText("CV / JETSON");
+    drawPipelineSectionHeader("CV / JETSON", kWarningAmber);
     drawPipelineStatus(
         counters.cvSignalPresent,
         "СИГНАЛ",
         "НЕТ СИГНАЛА",
         kWarningAmber);
-    drawPipelineMetrics({
+    drawPipelineMetrics("cv_metrics", {
         {"Пакет", cvAge},
         {"Кадры", cvFrames},
         {"Буфер", buffers},
