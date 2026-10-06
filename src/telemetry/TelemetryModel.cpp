@@ -7,11 +7,11 @@
 namespace reg::telemetry {
 namespace {
 
-bool isExpectedRtspWaitFailure(std::string_view message) noexcept {
-    constexpr std::string_view prefix =
-        "RTSP session failed: ";
+constexpr std::string_view kRtspFailurePrefix =
+    "RTSP session failed: ";
 
-    if (!message.starts_with(prefix)) {
+bool isExpectedRtspWaitFailure(std::string_view message) noexcept {
+    if (!message.starts_with(kRtspFailurePrefix)) {
         return false;
     }
 
@@ -108,6 +108,9 @@ void TelemetryModel::log(
     if (severity == Severity::Warning &&
         isExpectedRtspWaitFailure(message)) {
         severity = Severity::Info;
+        message =
+            std::string("Ожидание RTSP: ") +
+            message.substr(kRtspFailurePrefix.size());
     }
 
     if (severity == Severity::Warning &&
@@ -115,6 +118,7 @@ void TelemetryModel::log(
         message ==
             "NO SIGNAL: decoded video is not arriving") {
         severity = Severity::Info;
+        message = "Ожидание видеосигнала";
     }
 
     events_.push_back(
