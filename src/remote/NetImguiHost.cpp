@@ -1,6 +1,7 @@
 #include "remote/NetImguiHost.hpp"
 
 #include "remote/NetImguiEmbeddedBridge.hpp"
+#include "remote/RemoteInputState.hpp"
 
 #include "NetImguiServer_Config.h"
 #include "NetImguiServer_Network.h"
@@ -26,13 +27,22 @@ std::uint16_t clampDimension(std::uint32_t value) noexcept {
         std::numeric_limits<std::uint16_t>::max()));
 }
 
+std::int16_t clampMouseCoordinate(std::int32_t value) noexcept {
+    return static_cast<std::int16_t>(
+        std::clamp<std::int32_t>(
+            value,
+            std::numeric_limits<std::int16_t>::min(),
+            std::numeric_limits<std::int16_t>::max()));
+}
+
 void queueFrameRequest(
     NetImguiServer::RemoteClient::Client& client,
     std::uint32_t width,
     std::uint32_t height,
     float desiredFps,
     float dpiScale,
-    bool compression) {
+    bool compression,
+    const RemoteUiInputState& inputState) {
     auto* input = client.TakePendingInput();
     if (input == nullptr) {
         input = NetImgui::Internal::netImguiNew<
@@ -41,18 +51,37 @@ void queueFrameRequest(
 
     input->mScreenSize[0] = clampDimension(width);
     input->mScreenSize[1] = clampDimension(height);
+    input->mMousePos[0] = clampMouseCoordinate(inputState.mouseX);
+    input->mMousePos[1] = clampMouseCoordinate(inputState.mouseY);
+    input->mMouseWheelVert = inputState.wheelY;
+    input->mMouseWheelHoriz = inputState.wheelX;
+    input->mMouseDownMask = inputState.mouseDownMask;
 
-    // Full pointer/keyboard forwarding is added separately. Until then keep
-    // the pointer well outside the drawable area and explicitly clear any
-    // state if this packet was reclaimed before the network thread consumed it.
-    input->mMousePos[0] = -30000;
-    input->mMousePos[1] = -30000;
-    input->mMouseWheelVert = 0.0F;
-    input->mMouseWheelHoriz = 0.0F;
-    input->mMouseDownMask = 0;
-    input->mKeyCharCount = 0;
+    constexpr std::size_t commandKeyMaskBytes =
+        sizeof(NetImgui::Internal::CmdInput{}.mInputDownMask);
+    static_assert(
+        commandKeyMaskBytes == sizeof(RemoteUiInputState{}.keyDownMask),
+        "Reg remote key mask must match NetImgui CmdInput");
+    std::memcpy(
+        input->mInputDownMask,
+        inputState.keyDownMask.data(),
+        commandKeyMaskBytes);
+
     std::memset(input->mKeyChars, 0, sizeof(input->mKeyChars));
-    std::memset(input->mInputDownMask, 0, sizeof(input->mInputDownMask));
+    const std::size_t commandTextCapacity =
+        sizeof(input->mKeyChars) / sizeof(input->mKeyChars[0]);
+    const std::size_t textCount = std::min<std::size_t>(
+        inputState.textCount,
+        commandTextCapacity);
+    if (textCount > 0U) {
+        std::memcpy(
+            input->mKeyChars,
+            inputState.text.data(),
+            textCount * sizeof(input->mKeyChars[0]));
+    }
+    input->mKeyCharCount = static_cast<std::uint16_t>(textCount);
+
+    // Gamepad forwarding is intentionally left zero for this input slice.
     std::memset(input->mInputAnalog, 0, sizeof(input->mInputAnalog));
 
     input->mCompressionUse = compression;
@@ -122,6 +151,10 @@ struct NetImguiHost::Impl {
         currentDrawData = nullptr;
         connectedCount = 0U;
 
+        mergeRemoteUiInput(
+            pendingInput,
+            consumeRemoteUiInput());
+
         const auto now = std::chrono::steady_clock::now();
         const float desiredFps = active
             ? std::max(config.activeFps, 1.0F)
@@ -158,7 +191,8 @@ struct NetImguiHost::Impl {
                     height,
                     desiredFps,
                     dpiScale,
-                    config.compression);
+                    config.compression,
+                    pendingInput);
             }
 
             if (currentDrawData == nullptr) {
@@ -171,12 +205,17 @@ struct NetImguiHost::Impl {
             lastRequest = now;
             lastRequestValid = true;
             previousActive = active;
+            clearRemoteUiTransient(pendingInput);
+        } else if (connectedCount == 0U) {
+            // Do not replay wheel/text entered before a remote UI is connected.
+            clearRemoteUiTransient(pendingInput);
         }
 
         processNetImguiServerTextures();
     }
 
     NetImguiHostConfig config;
+    RemoteUiInputState pendingInput{};
     bool clientsStarted{};
     bool networkStarted{};
     bool lastRequestValid{};
