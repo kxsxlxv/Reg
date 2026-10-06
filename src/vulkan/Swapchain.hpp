@@ -50,6 +50,7 @@ public:
     VkImageView imageView(std::uint32_t index) const noexcept { return imageViews_[index]; }
     std::size_t imageCount() const noexcept { return images_.size(); }
     VkSurfaceKHR surface() const noexcept { return surface_; }
+    SDL_Window* window() const noexcept { return window_; }
     float contentScale() const noexcept;
     bool transferSourceSupported() const noexcept {
         return transferSourceSupported_;
