@@ -941,7 +941,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 io.AddMouseButtonEvent(event.button, event.value);
                 break;
             case PendingInputKind::MouseLeave:
-                io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+                io.AddMousePosEvent(
+                    -std::numeric_limits<float>::max(),
+                    -std::numeric_limits<float>::max());
                 break;
             case PendingInputKind::Focus:
                 io.AddFocusEvent(event.value);
