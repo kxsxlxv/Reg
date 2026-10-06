@@ -133,7 +133,7 @@ void sceneBuilderCreatesExpectedTargetPrimitives() {
     const auto scene =
         builder.build(metadata, history, transform);
 
-    require(scene.primitives.size() == 5, "unexpected primitive count");
+    require(scene.primitives.size() == 4, "unexpected primitive count");
 
     require(
         std::holds_alternative<reg::render::FilledRectPrimitive>(
@@ -148,13 +148,15 @@ void sceneBuilderCreatesExpectedTargetPrimitives() {
             scene.primitives[2]),
         "primitive 2 must be crosshair");
     require(
-        std::holds_alternative<reg::render::PolylinePrimitive>(
-            scene.primitives[3]),
-        "primitive 3 must be trajectory");
-    require(
         std::holds_alternative<reg::render::TextPrimitive>(
-            scene.primitives[4]),
-        "primitive 4 must be label");
+            scene.primitives[3]),
+        "primitive 3 must be label");
+
+    for (const auto& primitive : scene.primitives) {
+        require(
+            !std::holds_alternative<reg::render::PolylinePrimitive>(primitive),
+            "target trajectories must stay disabled");
+    }
 
     const auto& fill =
         std::get<reg::render::FilledRectPrimitive>(
@@ -163,7 +165,7 @@ void sceneBuilderCreatesExpectedTargetPrimitives() {
 
     const auto& label =
         std::get<reg::render::TextPrimitive>(
-            scene.primitives[4]);
+            scene.primitives[3]);
     require(
         label.utf8.find("ID 7") != std::string::npos,
         "label does not include target ID");
