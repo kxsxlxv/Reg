@@ -98,6 +98,245 @@ void traceWindowEvent(const SDL_Event& event) {
         << '\n';
 }
 
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+bool isRegLocalHotkey(SDL_Keycode key) noexcept {
+    return key == SDLK_F10 || key == SDLK_F11 || key == SDLK_F12;
+}
+
+ImGuiKey sdlKeyToImGuiKey(
+    SDL_Keycode keycode,
+    SDL_Scancode scancode) noexcept {
+    // Keep this mapping aligned with the pinned Dear ImGui SDL3 backend.
+    switch (scancode) {
+    case SDL_SCANCODE_KP_0: return ImGuiKey_Keypad0;
+    case SDL_SCANCODE_KP_1: return ImGuiKey_Keypad1;
+    case SDL_SCANCODE_KP_2: return ImGuiKey_Keypad2;
+    case SDL_SCANCODE_KP_3: return ImGuiKey_Keypad3;
+    case SDL_SCANCODE_KP_4: return ImGuiKey_Keypad4;
+    case SDL_SCANCODE_KP_5: return ImGuiKey_Keypad5;
+    case SDL_SCANCODE_KP_6: return ImGuiKey_Keypad6;
+    case SDL_SCANCODE_KP_7: return ImGuiKey_Keypad7;
+    case SDL_SCANCODE_KP_8: return ImGuiKey_Keypad8;
+    case SDL_SCANCODE_KP_9: return ImGuiKey_Keypad9;
+    case SDL_SCANCODE_KP_PERIOD: return ImGuiKey_KeypadDecimal;
+    case SDL_SCANCODE_KP_DIVIDE: return ImGuiKey_KeypadDivide;
+    case SDL_SCANCODE_KP_MULTIPLY: return ImGuiKey_KeypadMultiply;
+    case SDL_SCANCODE_KP_MINUS: return ImGuiKey_KeypadSubtract;
+    case SDL_SCANCODE_KP_PLUS: return ImGuiKey_KeypadAdd;
+    case SDL_SCANCODE_KP_ENTER: return ImGuiKey_KeypadEnter;
+    case SDL_SCANCODE_KP_EQUALS: return ImGuiKey_KeypadEqual;
+    default: break;
+    }
+
+    switch (keycode) {
+    case SDLK_TAB: return ImGuiKey_Tab;
+    case SDLK_LEFT: return ImGuiKey_LeftArrow;
+    case SDLK_RIGHT: return ImGuiKey_RightArrow;
+    case SDLK_UP: return ImGuiKey_UpArrow;
+    case SDLK_DOWN: return ImGuiKey_DownArrow;
+    case SDLK_PAGEUP: return ImGuiKey_PageUp;
+    case SDLK_PAGEDOWN: return ImGuiKey_PageDown;
+    case SDLK_HOME: return ImGuiKey_Home;
+    case SDLK_END: return ImGuiKey_End;
+    case SDLK_INSERT: return ImGuiKey_Insert;
+    case SDLK_DELETE: return ImGuiKey_Delete;
+    case SDLK_BACKSPACE: return ImGuiKey_Backspace;
+    case SDLK_SPACE: return ImGuiKey_Space;
+    case SDLK_RETURN: return ImGuiKey_Enter;
+    case SDLK_ESCAPE: return ImGuiKey_Escape;
+    case SDLK_COMMA: return ImGuiKey_Comma;
+    case SDLK_PERIOD: return ImGuiKey_Period;
+    case SDLK_SEMICOLON: return ImGuiKey_Semicolon;
+    case SDLK_CAPSLOCK: return ImGuiKey_CapsLock;
+    case SDLK_SCROLLLOCK: return ImGuiKey_ScrollLock;
+    case SDLK_NUMLOCKCLEAR: return ImGuiKey_NumLock;
+    case SDLK_PRINTSCREEN: return ImGuiKey_PrintScreen;
+    case SDLK_PAUSE: return ImGuiKey_Pause;
+    case SDLK_LCTRL: return ImGuiKey_LeftCtrl;
+    case SDLK_LSHIFT: return ImGuiKey_LeftShift;
+    case SDLK_LALT: return ImGuiKey_LeftAlt;
+    case SDLK_LGUI: return ImGuiKey_LeftSuper;
+    case SDLK_RCTRL: return ImGuiKey_RightCtrl;
+    case SDLK_RSHIFT: return ImGuiKey_RightShift;
+    case SDLK_RALT: return ImGuiKey_RightAlt;
+    case SDLK_RGUI: return ImGuiKey_RightSuper;
+    case SDLK_APPLICATION: return ImGuiKey_Menu;
+    case SDLK_0: return ImGuiKey_0;
+    case SDLK_1: return ImGuiKey_1;
+    case SDLK_2: return ImGuiKey_2;
+    case SDLK_3: return ImGuiKey_3;
+    case SDLK_4: return ImGuiKey_4;
+    case SDLK_5: return ImGuiKey_5;
+    case SDLK_6: return ImGuiKey_6;
+    case SDLK_7: return ImGuiKey_7;
+    case SDLK_8: return ImGuiKey_8;
+    case SDLK_9: return ImGuiKey_9;
+    case SDLK_A: return ImGuiKey_A;
+    case SDLK_B: return ImGuiKey_B;
+    case SDLK_C: return ImGuiKey_C;
+    case SDLK_D: return ImGuiKey_D;
+    case SDLK_E: return ImGuiKey_E;
+    case SDLK_F: return ImGuiKey_F;
+    case SDLK_G: return ImGuiKey_G;
+    case SDLK_H: return ImGuiKey_H;
+    case SDLK_I: return ImGuiKey_I;
+    case SDLK_J: return ImGuiKey_J;
+    case SDLK_K: return ImGuiKey_K;
+    case SDLK_L: return ImGuiKey_L;
+    case SDLK_M: return ImGuiKey_M;
+    case SDLK_N: return ImGuiKey_N;
+    case SDLK_O: return ImGuiKey_O;
+    case SDLK_P: return ImGuiKey_P;
+    case SDLK_Q: return ImGuiKey_Q;
+    case SDLK_R: return ImGuiKey_R;
+    case SDLK_S: return ImGuiKey_S;
+    case SDLK_T: return ImGuiKey_T;
+    case SDLK_U: return ImGuiKey_U;
+    case SDLK_V: return ImGuiKey_V;
+    case SDLK_W: return ImGuiKey_W;
+    case SDLK_X: return ImGuiKey_X;
+    case SDLK_Y: return ImGuiKey_Y;
+    case SDLK_Z: return ImGuiKey_Z;
+    case SDLK_F1: return ImGuiKey_F1;
+    case SDLK_F2: return ImGuiKey_F2;
+    case SDLK_F3: return ImGuiKey_F3;
+    case SDLK_F4: return ImGuiKey_F4;
+    case SDLK_F5: return ImGuiKey_F5;
+    case SDLK_F6: return ImGuiKey_F6;
+    case SDLK_F7: return ImGuiKey_F7;
+    case SDLK_F8: return ImGuiKey_F8;
+    case SDLK_F9: return ImGuiKey_F9;
+    case SDLK_F10: return ImGuiKey_F10;
+    case SDLK_F11: return ImGuiKey_F11;
+    case SDLK_F12: return ImGuiKey_F12;
+    case SDLK_F13: return ImGuiKey_F13;
+    case SDLK_F14: return ImGuiKey_F14;
+    case SDLK_F15: return ImGuiKey_F15;
+    case SDLK_F16: return ImGuiKey_F16;
+    case SDLK_F17: return ImGuiKey_F17;
+    case SDLK_F18: return ImGuiKey_F18;
+    case SDLK_F19: return ImGuiKey_F19;
+    case SDLK_F20: return ImGuiKey_F20;
+    case SDLK_F21: return ImGuiKey_F21;
+    case SDLK_F22: return ImGuiKey_F22;
+    case SDLK_F23: return ImGuiKey_F23;
+    case SDLK_F24: return ImGuiKey_F24;
+    case SDLK_AC_BACK: return ImGuiKey_AppBack;
+    case SDLK_AC_FORWARD: return ImGuiKey_AppForward;
+    default: break;
+    }
+
+    switch (scancode) {
+    case SDL_SCANCODE_GRAVE: return ImGuiKey_GraveAccent;
+    case SDL_SCANCODE_MINUS: return ImGuiKey_Minus;
+    case SDL_SCANCODE_EQUALS: return ImGuiKey_Equal;
+    case SDL_SCANCODE_LEFTBRACKET: return ImGuiKey_LeftBracket;
+    case SDL_SCANCODE_RIGHTBRACKET: return ImGuiKey_RightBracket;
+    case SDL_SCANCODE_NONUSBACKSLASH: return ImGuiKey_Oem102;
+    case SDL_SCANCODE_BACKSLASH: return ImGuiKey_Backslash;
+    case SDL_SCANCODE_SEMICOLON: return ImGuiKey_Semicolon;
+    case SDL_SCANCODE_APOSTROPHE: return ImGuiKey_Apostrophe;
+    case SDL_SCANCODE_COMMA: return ImGuiKey_Comma;
+    case SDL_SCANCODE_PERIOD: return ImGuiKey_Period;
+    case SDL_SCANCODE_SLASH: return ImGuiKey_Slash;
+    default: break;
+    }
+    return ImGuiKey_None;
+}
+
+void updateRemoteModifierKeys(
+    remote::RemoteUiInputState& state,
+    SDL_Keymod mods) noexcept {
+    remote::setRemoteUiKey(
+        state,
+        ImGuiKey_ReservedForModCtrl,
+        (mods & SDL_KMOD_CTRL) != 0);
+    remote::setRemoteUiKey(
+        state,
+        ImGuiKey_ReservedForModShift,
+        (mods & SDL_KMOD_SHIFT) != 0);
+    remote::setRemoteUiKey(
+        state,
+        ImGuiKey_ReservedForModAlt,
+        (mods & SDL_KMOD_ALT) != 0);
+    remote::setRemoteUiKey(
+        state,
+        ImGuiKey_ReservedForModSuper,
+        (mods & SDL_KMOD_GUI) != 0);
+}
+
+int remoteMouseButtonIndex(std::uint8_t button) noexcept {
+    switch (button) {
+    case SDL_BUTTON_LEFT: return 0;
+    case SDL_BUTTON_RIGHT: return 1;
+    case SDL_BUTTON_MIDDLE: return 2;
+    case SDL_BUTTON_X1: return 3;
+    case SDL_BUTTON_X2: return 4;
+    default: return -1;
+    }
+}
+
+void appendRemoteTextUtf8(
+    remote::RemoteUiInputState& state,
+    const char* text) noexcept {
+    if (text == nullptr) {
+        return;
+    }
+
+    const auto* cursor =
+        reinterpret_cast<const unsigned char*>(text);
+    while (*cursor != 0U &&
+           state.textCount < remote::kRemoteUiTextCapacity) {
+        std::uint32_t codepoint = 0xFFFDU;
+        std::size_t length = 1U;
+        const unsigned char lead = cursor[0];
+
+        if (lead < 0x80U) {
+            codepoint = lead;
+        } else if ((lead & 0xE0U) == 0xC0U &&
+                   cursor[1] != 0U &&
+                   (cursor[1] & 0xC0U) == 0x80U) {
+            codepoint =
+                (static_cast<std::uint32_t>(lead & 0x1FU) << 6U) |
+                static_cast<std::uint32_t>(cursor[1] & 0x3FU);
+            length = 2U;
+            if (codepoint < 0x80U) {
+                codepoint = 0xFFFDU;
+                length = 1U;
+            }
+        } else if ((lead & 0xF0U) == 0xE0U &&
+                   cursor[1] != 0U && cursor[2] != 0U &&
+                   (cursor[1] & 0xC0U) == 0x80U &&
+                   (cursor[2] & 0xC0U) == 0x80U) {
+            codepoint =
+                (static_cast<std::uint32_t>(lead & 0x0FU) << 12U) |
+                (static_cast<std::uint32_t>(cursor[1] & 0x3FU) << 6U) |
+                static_cast<std::uint32_t>(cursor[2] & 0x3FU);
+            length = 3U;
+            if (codepoint < 0x800U ||
+                (codepoint >= 0xD800U && codepoint <= 0xDFFFU)) {
+                codepoint = 0xFFFDU;
+                length = 1U;
+            }
+        } else if ((lead & 0xF8U) == 0xF0U &&
+                   cursor[1] != 0U && cursor[2] != 0U &&
+                   cursor[3] != 0U &&
+                   (cursor[1] & 0xC0U) == 0x80U &&
+                   (cursor[2] & 0xC0U) == 0x80U &&
+                   (cursor[3] & 0xC0U) == 0x80U) {
+            // NetImgui CmdInput carries 16-bit characters. Keep BMP text exact
+            // and use the replacement glyph for codepoints outside that range.
+            length = 4U;
+            codepoint = 0xFFFDU;
+        }
+
+        state.text[state.textCount++] =
+            static_cast<std::uint16_t>(codepoint);
+        cursor += length;
+    }
+}
+#endif
+
 bool placeBorderlessWindow(
     SDL_Window* window,
     int x,
@@ -373,6 +612,19 @@ SDL_Window* SDLPlatform::createVulkanWindow(
             error);
     }
 
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    if (windows_.empty()) {
+        rawWindowId_ = static_cast<std::uint32_t>(
+            SDL_GetWindowID(window));
+        if (!SDL_StartTextInput(window)) {
+            std::cerr
+                << "[netimgui] SDL_StartTextInput(raw) failed: "
+                << SDL_GetError()
+                << '\n';
+        }
+    }
+#endif
+
     windows_.push_back(window);
     return window;
 }
@@ -502,6 +754,74 @@ bool SDLPlatform::pollQuitRequested() {
             return true;
         }
 
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+        if (rawWindowId_ != 0U) {
+            if (event.type == SDL_EVENT_MOUSE_MOTION &&
+                event.motion.windowID == rawWindowId_) {
+                remoteUiInput_.mouseX =
+                    static_cast<std::int32_t>(event.motion.x);
+                remoteUiInput_.mouseY =
+                    static_cast<std::int32_t>(event.motion.y);
+            } else if ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                        event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
+                       event.button.windowID == rawWindowId_) {
+                remoteUiInput_.mouseX =
+                    static_cast<std::int32_t>(event.button.x);
+                remoteUiInput_.mouseY =
+                    static_cast<std::int32_t>(event.button.y);
+                const int button =
+                    remoteMouseButtonIndex(event.button.button);
+                if (button >= 0) {
+                    const std::uint64_t mask =
+                        std::uint64_t{1} <<
+                        static_cast<unsigned>(button);
+                    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                        remoteUiInput_.mouseDownMask |= mask;
+                    } else {
+                        remoteUiInput_.mouseDownMask &= ~mask;
+                    }
+                }
+            } else if (event.type == SDL_EVENT_MOUSE_WHEEL &&
+                       event.wheel.windowID == rawWindowId_) {
+                // Match Dear ImGui's SDL3 backend horizontal-wheel convention.
+                remoteUiInput_.wheelX += -event.wheel.x;
+                remoteUiInput_.wheelY += event.wheel.y;
+            } else if ((event.type == SDL_EVENT_KEY_DOWN ||
+                        event.type == SDL_EVENT_KEY_UP) &&
+                       event.key.windowID == rawWindowId_) {
+                updateRemoteModifierKeys(
+                    remoteUiInput_,
+                    event.key.mod);
+                if (!isRegLocalHotkey(event.key.key)) {
+                    remote::setRemoteUiKey(
+                        remoteUiInput_,
+                        sdlKeyToImGuiKey(
+                            event.key.key,
+                            event.key.scancode),
+                        event.type == SDL_EVENT_KEY_DOWN);
+                }
+            } else if (event.type == SDL_EVENT_TEXT_INPUT &&
+                       event.text.windowID == rawWindowId_) {
+                appendRemoteTextUtf8(
+                    remoteUiInput_,
+                    event.text.text);
+            } else if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE &&
+                       event.window.windowID == rawWindowId_) {
+                remoteUiInput_.mouseX =
+                    remote::kRemoteUiMouseUnavailable;
+                remoteUiInput_.mouseY =
+                    remote::kRemoteUiMouseUnavailable;
+            } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+                       event.window.windowID == rawWindowId_) {
+                remoteUiInput_.mouseX =
+                    remote::kRemoteUiMouseUnavailable;
+                remoteUiInput_.mouseY =
+                    remote::kRemoteUiMouseUnavailable;
+                remote::clearRemoteUiPressedState(remoteUiInput_);
+            }
+        }
+#endif
+
         if (event.type ==
                 SDL_EVENT_KEY_DOWN &&
             !event.key.repeat) {
@@ -534,6 +854,11 @@ bool SDLPlatform::pollQuitRequested() {
             displayTopologyChanged_ = true;
         }
     }
+
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    remote::publishRemoteUiInput(remoteUiInput_);
+    remote::clearRemoteUiTransient(remoteUiInput_);
+#endif
 
     return false;
 }
