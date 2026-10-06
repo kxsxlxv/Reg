@@ -8,6 +8,7 @@
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/VulkanError.hpp"
 
+#include <SDL3/SDL.h>
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
 #include <implot.h>
@@ -20,6 +21,7 @@
 #include <cstdio>
 #include <iterator>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -144,23 +146,79 @@ RateStats rateStats(const std::vector<double>& values) {
     return stats;
 }
 
-void drawRateStatsLine(
+void drawRateStatsRow(
     const char* label,
     const ImVec4& color,
     const RateStats& stats) {
+    ImGui::TableNextRow();
     ImGui::PushStyleColor(ImGuiCol_Text, color);
-    if (!stats.valid) {
-        ImGui::Text("%-8s  --.- FPS", label);
-    } else {
-        ImGui::Text(
-            "%-8s  %6.2f FPS    MIN %6.2f | AVG %6.2f | MAX %6.2f",
-            label,
-            stats.current,
-            stats.minimum,
-            stats.average,
-            stats.maximum);
-    }
+
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(label);
+
+    const auto drawValue = [&](double value) {
+        ImGui::TableNextColumn();
+        if (stats.valid) {
+            ImGui::Text("%.2f", value);
+        } else {
+            ImGui::TextDisabled("—");
+        }
+    };
+
+    drawValue(stats.current);
+    drawValue(stats.minimum);
+    drawValue(stats.average);
+    drawValue(stats.maximum);
+
     ImGui::PopStyleColor();
+}
+
+void drawRateStatsTable(const RateHistory& history) {
+    if (!ImGui::BeginTable(
+            "fps_stats",
+            5,
+            ImGuiTableFlags_BordersInnerH |
+                ImGuiTableFlags_BordersInnerV |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingFixedFit)) {
+        return;
+    }
+
+    ImGui::TableSetupColumn(
+        "Канал",
+        ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn(
+        "FPS",
+        ImGuiTableColumnFlags_WidthFixed,
+        64.0F);
+    ImGui::TableSetupColumn(
+        "MIN",
+        ImGuiTableColumnFlags_WidthFixed,
+        64.0F);
+    ImGui::TableSetupColumn(
+        "AVG",
+        ImGuiTableColumnFlags_WidthFixed,
+        64.0F);
+    ImGui::TableSetupColumn(
+        "MAX",
+        ImGuiTableColumnFlags_WidthFixed,
+        64.0F);
+    ImGui::TableHeadersRow();
+
+    drawRateStatsRow(
+        "Декодер",
+        kSignalGreen,
+        rateStats(history.decodedFps));
+    drawRateStatsRow(
+        "Рендер",
+        kAccentBlue,
+        rateStats(history.rawFps));
+    drawRateStatsRow(
+        "CV",
+        kWarningAmber,
+        rateStats(history.overlayFps));
+
+    ImGui::EndTable();
 }
 
 void statusRow(const char* label, const char* value) {
@@ -267,7 +325,7 @@ void drawStatus(const telemetry::Counters& counters) {
         "%llu / %llu",
         static_cast<unsigned long long>(counters.rawPresentedFrames),
         static_cast<unsigned long long>(counters.overlayPresentedFrames));
-    statusRow("Raw / Overlay", buffer);
+    statusRow("Рендер / CV", buffer);
 
     std::snprintf(
         buffer,
@@ -283,7 +341,7 @@ void drawStatus(const telemetry::Counters& counters) {
         "%zu / %zu",
         counters.overlayBufferDepth,
         counters.metadataStoreDepth);
-    statusRow("Overlay / буфер CV", buffer);
+    statusRow("CV / буфер CV", buffer);
 
     std::snprintf(
         buffer,
@@ -298,21 +356,7 @@ void drawStatus(const telemetry::Counters& counters) {
 }
 
 void drawPerformance(const RateHistory& history) {
-    ImGui::TextDisabled(
-        "Окно 60 с, исходные измерения (без сглаживания / интерполяции)");
-
-    drawRateStatsLine(
-        "Декодер",
-        kSignalGreen,
-        rateStats(history.decodedFps));
-    drawRateStatsLine(
-        "Raw",
-        kAccentBlue,
-        rateStats(history.rawFps));
-    drawRateStatsLine(
-        "Overlay",
-        kWarningAmber,
-        rateStats(history.overlayFps));
+    drawRateStatsTable(history);
 
     if (history.secondsAgo.empty()) {
         ImGui::TextDisabled("Сбор данных производительности...");
@@ -328,7 +372,7 @@ void drawPerformance(const RateHistory& history) {
 
     ImPlot::SetupAxis(
         ImAxis_X1,
-        "секунд назад",
+        "секунд",
         ImPlotAxisFlags_NoMenus);
     ImPlot::SetupAxisLimits(
         ImAxis_X1,
@@ -359,7 +403,7 @@ void drawPerformance(const RateHistory& history) {
     rawSpec.LineColor = kAccentBlue;
     rawSpec.LineWeight = 2.0F;
     ImPlot::PlotLine(
-        "Raw",
+        "Рендер",
         history.secondsAgo.data(),
         history.rawFps.data(),
         count,
@@ -369,7 +413,7 @@ void drawPerformance(const RateHistory& history) {
     overlaySpec.LineColor = kWarningAmber;
     overlaySpec.LineWeight = 2.0F;
     ImPlot::PlotLine(
-        "Overlay",
+        "CV",
         history.secondsAgo.data(),
         history.overlayFps.data(),
         count,
@@ -397,11 +441,11 @@ void drawPerformance(const RateHistory& history) {
                 history.decodedFps[index]);
             ImGui::TextColored(
                 kAccentBlue,
-                "Raw      %.2f FPS",
+                "Рендер   %.2f FPS",
                 history.rawFps[index]);
             ImGui::TextColored(
                 kWarningAmber,
-                "Overlay  %.2f FPS",
+                "CV       %.2f FPS",
                 history.overlayFps[index]);
             ImGui::EndTooltip();
         }
@@ -547,34 +591,34 @@ std::string localizeEventMessage(std::string_view message) {
     }
     if (message.starts_with("Raw screenshot requested: ")) {
         constexpr std::string_view prefix = "Raw screenshot requested: ";
-        return std::string("Запрошен снимок Raw: ") +
+        return std::string("Запрошен снимок Рендер: ") +
             std::string(message.substr(prefix.size()));
     }
     if (message ==
         "Raw screenshot request ignored because one is already pending") {
-        return "Запрос снимка Raw пропущен: предыдущий ещё обрабатывается";
+        return "Запрос снимка Рендер пропущен: предыдущий ещё обрабатывается";
     }
     if (message.starts_with("Overlay screenshot requested: ")) {
         constexpr std::string_view prefix = "Overlay screenshot requested: ";
-        return std::string("Запрошен снимок Overlay: ") +
+        return std::string("Запрошен снимок CV: ") +
             std::string(message.substr(prefix.size()));
     }
     if (message ==
         "Overlay screenshot request ignored because one is already pending") {
-        return "Запрос снимка Overlay пропущен: предыдущий ещё обрабатывается";
+        return "Запрос снимка CV пропущен: предыдущий ещё обрабатывается";
     }
     if (message ==
         "Overlay screenshot requested while Overlay output is disabled") {
-        return "Запрошен снимок Overlay при отключённом выводе Overlay";
+        return "Запрошен снимок CV при отключённом выводе CV";
     }
     if (message == "Display topology changed") {
         return "Топология дисплеев изменилась";
     }
     if (message == "Raw Vulkan surface recovered") {
-        return "Поверхность Vulkan Raw восстановлена";
+        return "Поверхность Vulkan Рендер восстановлена";
     }
     if (message == "Overlay Vulkan surface recovered") {
-        return "Поверхность Vulkan Overlay восстановлена";
+        return "Поверхность Vulkan CV восстановлена";
     }
     if (message == "Telemetry Vulkan surface recovered") {
         return "Поверхность Vulkan телеметрии восстановлена";
@@ -596,12 +640,12 @@ std::string localizeEventMessage(std::string_view message) {
     }
     if (message.starts_with("Raw surface lost: ")) {
         constexpr std::string_view prefix = "Raw surface lost: ";
-        return std::string("Потеряна поверхность Raw: ") +
+        return std::string("Потеряна поверхность Рендер: ") +
             std::string(message.substr(prefix.size()));
     }
     if (message.starts_with("Overlay surface lost: ")) {
         constexpr std::string_view prefix = "Overlay surface lost: ";
-        return std::string("Потеряна поверхность Overlay: ") +
+        return std::string("Потеряна поверхность CV: ") +
             std::string(message.substr(prefix.size()));
     }
     if (message.starts_with("Telemetry surface lost: ")) {
@@ -653,9 +697,9 @@ void drawEvents(
 }
 
 void drawNetImguiDiagnostics(const NetImguiDiagnostics& diagnostics) {
-    ImGui::SeparatorText("NETIMGUI / RAW OVERLAY");
+    ImGui::SeparatorText("NETIMGUI / РЕНДЕР");
     ImGui::TextDisabled(
-        "Удалённый Dear ImGui рендерится поверх декодированного Raw-видео.");
+        "Удалённый Dear ImGui рендерится поверх декодированного видео.");
     ImGui::TextDisabled("F10 — переключить вкладку Telemetry.");
     ImGui::Spacing();
 
@@ -726,15 +770,41 @@ void drawNetImguiDiagnostics(const NetImguiDiagnostics& diagnostics) {
 } // namespace
 
 struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
-    explicit Impl(const vulkan::VulkanContext& context)
-        : vulkan(context), canvas(context) {}
+    enum class PendingInputKind : std::uint8_t {
+        MousePosition,
+        MouseWheel,
+        MouseButton,
+        MouseLeave,
+        Focus,
+    };
+
+    struct PendingInputEvent {
+        PendingInputKind kind{};
+        float x{};
+        float y{};
+        int button{-1};
+        bool value{};
+    };
+
+    explicit Impl(
+        const vulkan::VulkanContext& context,
+        SDL_Window* telemetryWindow)
+        : vulkan(context),
+          canvas(context),
+          window(telemetryWindow),
+          windowId(telemetryWindow != nullptr
+                       ? SDL_GetWindowID(telemetryWindow)
+                       : 0U) {}
 
     const vulkan::VulkanContext& vulkan;
     vulkan::BlankRenderer canvas;
+    SDL_Window* window{nullptr};
+    Uint32 windowId{};
     ImGuiContext* context{nullptr};
     ImPlotContext* plotContext{nullptr};
     ImDrawData* drawData{nullptr};
     bool backendInitialized{false};
+    bool eventWatchInstalled{false};
     VkDescriptorPool descriptorPool{VK_NULL_HANDLE};
     VkSwapchainKHR observedSwapchain{VK_NULL_HANDLE};
     VkFormat observedFormat{VK_FORMAT_UNDEFINED};
@@ -745,6 +815,140 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     std::chrono::steady_clock::time_point lastFrameTime{
         std::chrono::steady_clock::now()};
     RateHistory rateHistory;
+    std::mutex inputMutex;
+    std::vector<PendingInputEvent> pendingInput;
+
+    static int mouseButtonIndex(Uint8 button) noexcept {
+        switch (button) {
+        case SDL_BUTTON_LEFT:
+            return 0;
+        case SDL_BUTTON_RIGHT:
+            return 1;
+        case SDL_BUTTON_MIDDLE:
+            return 2;
+        case SDL_BUTTON_X1:
+            return 3;
+        case SDL_BUTTON_X2:
+            return 4;
+        default:
+            return -1;
+        }
+    }
+
+    static bool SDLCALL eventWatch(
+        void* userData,
+        SDL_Event* event) {
+        auto* self = static_cast<Impl*>(userData);
+        if (self == nullptr || event == nullptr || self->windowId == 0U) {
+            return true;
+        }
+
+        PendingInputEvent input{};
+        bool relevant = false;
+
+        switch (event->type) {
+        case SDL_EVENT_MOUSE_MOTION:
+            if (event->motion.windowID == self->windowId) {
+                input.kind = PendingInputKind::MousePosition;
+                input.x = event->motion.x;
+                input.y = event->motion.y;
+                relevant = true;
+            }
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            if (event->wheel.windowID == self->windowId) {
+                input.kind = PendingInputKind::MouseWheel;
+                input.x = -event->wheel.x;
+                input.y = event->wheel.y;
+                relevant = true;
+            }
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            if (event->button.windowID == self->windowId) {
+                const int button = mouseButtonIndex(event->button.button);
+                if (button >= 0) {
+                    input.kind = PendingInputKind::MouseButton;
+                    input.button = button;
+                    input.value = event->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+                    relevant = true;
+                }
+            }
+            break;
+        case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+            if (event->window.windowID == self->windowId) {
+                input.kind = PendingInputKind::MouseLeave;
+                relevant = true;
+            }
+            break;
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            if (event->window.windowID == self->windowId) {
+                input.kind = PendingInputKind::Focus;
+                input.value = event->type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+                relevant = true;
+            }
+            break;
+        default:
+            break;
+        }
+
+        if (relevant) {
+            std::scoped_lock lock(self->inputMutex);
+            self->pendingInput.push_back(input);
+        }
+
+        return true;
+    }
+
+    void installEventWatch() {
+        if (eventWatchInstalled || window == nullptr) {
+            return;
+        }
+        if (!SDL_AddEventWatch(&Impl::eventWatch, this)) {
+            throw std::runtime_error(
+                std::string("SDL_AddEventWatch(telemetry) failed: ") +
+                SDL_GetError());
+        }
+        eventWatchInstalled = true;
+    }
+
+    void uninstallEventWatch() noexcept {
+        if (!eventWatchInstalled) {
+            return;
+        }
+        SDL_RemoveEventWatch(&Impl::eventWatch, this);
+        eventWatchInstalled = false;
+    }
+
+    void processPendingInput() {
+        std::vector<PendingInputEvent> events;
+        {
+            std::scoped_lock lock(inputMutex);
+            events.swap(pendingInput);
+        }
+
+        ImGuiIO& io = ImGui::GetIO();
+        for (const PendingInputEvent& event : events) {
+            switch (event.kind) {
+            case PendingInputKind::MousePosition:
+                io.AddMousePosEvent(event.x, event.y);
+                break;
+            case PendingInputKind::MouseWheel:
+                io.AddMouseWheelEvent(event.x, event.y);
+                break;
+            case PendingInputKind::MouseButton:
+                io.AddMouseButtonEvent(event.button, event.value);
+                break;
+            case PendingInputKind::MouseLeave:
+                io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+                break;
+            case PendingInputKind::Focus:
+                io.AddFocusEvent(event.value);
+                break;
+            }
+        }
+    }
 
     void setCurrentContext() const {
         ImGui::SetCurrentContext(context);
@@ -897,17 +1101,26 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     ? ImGuiTabItemFlags_SetSelected
                     : ImGuiTabItemFlags_None;
 
-            if (ImGui::BeginTabItem(
-                    "Обзор",
-                    nullptr,
-                    overviewFlags)) {
+            const bool overviewOpen = ImGui::BeginTabItem(
+                "Обзор",
+                nullptr,
+                overviewFlags);
+            if (ImGui::IsItemClicked()) {
+                app::setTelemetryPage(app::TelemetryPage::Overview);
+            }
+            if (overviewOpen) {
                 drawOverview(snapshot, now);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem(
-                    "NetImgui",
-                    nullptr,
-                    netImguiFlags)) {
+
+            const bool netImguiOpen = ImGui::BeginTabItem(
+                "NetImgui",
+                nullptr,
+                netImguiFlags);
+            if (ImGui::IsItemClicked()) {
+                app::setTelemetryPage(app::TelemetryPage::NetImgui);
+            }
+            if (netImguiOpen) {
                 drawNetImguiDiagnostics(netImgui);
                 ImGui::EndTabItem();
             }
@@ -923,6 +1136,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         const vulkan::Swapchain& swapchain) {
         setCurrentContext();
         ensureBackend(swapchain);
+        processPendingInput();
         const VkExtent2D extent = swapchain.extent();
         ImGuiIO& io = ImGui::GetIO();
         io.DisplaySize = ImVec2(
@@ -974,7 +1188,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
 ImGuiTelemetryRenderer::ImGuiTelemetryRenderer(
     const vulkan::VulkanContext& vulkan,
     const vulkan::Swapchain& initialSwapchain)
-    : impl_(std::make_unique<Impl>(vulkan)) {
+    : impl_(std::make_unique<Impl>(
+          vulkan,
+          initialSwapchain.window())) {
     IMGUI_CHECKVERSION();
     impl_->context = ImGui::CreateContext();
     if (impl_->context == nullptr) {
@@ -1000,7 +1216,9 @@ ImGuiTelemetryRenderer::ImGuiTelemetryRenderer(
 
     try {
         impl_->initializeBackend(initialSwapchain);
+        impl_->installEventWatch();
     } catch (...) {
+        impl_->uninstallEventWatch();
         impl_->setCurrentContext();
         ImPlot::DestroyContext(impl_->plotContext);
         impl_->plotContext = nullptr;
@@ -1014,6 +1232,7 @@ ImGuiTelemetryRenderer::~ImGuiTelemetryRenderer() {
     if (!impl_) {
         return;
     }
+    impl_->uninstallEventWatch();
     if (impl_->vulkan.device() != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(impl_->vulkan.device());
     }
