@@ -28,10 +28,10 @@ public:
 
     // Prepares a centered Material Symbols + Roboto no-signal indication. The
     // caller records it over a black BlankRenderer pass; this does not stop or
-    // restart either the RTSP decoder or the CVM1 receiver.
+    // restart either the RTSP decoder or the CVM1 receiver. Subtitle is optional.
     void prepareNoSignal(
         const vulkan::Swapchain& swapchain,
-        const char* subtitle = "СИГНАЛ НЕДОСТУПЕН");
+        const char* subtitle = nullptr);
 
     void record(
         VkCommandBuffer commandBuffer,
