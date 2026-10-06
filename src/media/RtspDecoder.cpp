@@ -220,10 +220,20 @@ VideoStreamDescriptorPtr RtspDecoder::openInput() {
             nullptr,
             &options);
 
-    if (options != nullptr) {
+    // avformat_open_input() may leave the complete option dictionary untouched
+    // when opening the input itself fails (for example, when the RTSP server is
+    // not running yet). Those entries are not "unsupported options"; the
+    // demuxer simply never had a chance to consume them. Only diagnose
+    // leftovers after a successful open.
+    if (openResult >= 0 && options != nullptr) {
         const AVDictionaryEntry* entry = nullptr;
         while ((entry = av_dict_iterate(options, entry)) != nullptr) {
-            std::cerr << "[input] unused FFmpeg option: " << entry->key << '=' << entry->value << '\n';
+            std::cerr
+                << "[input] unused FFmpeg option: "
+                << entry->key
+                << '='
+                << entry->value
+                << '\n';
         }
     }
     av_dict_free(&options);
