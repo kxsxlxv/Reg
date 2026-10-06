@@ -45,7 +45,7 @@ VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
                     });
 
             std::cout
-                << "[netimgui] Raw overlay listening tcp=8888\n";
+                << "[netimgui] Raw overlay server starting tcp=8888\n";
             remoteOverlay_ = std::move(remote);
         }
 
