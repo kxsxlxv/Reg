@@ -102,10 +102,13 @@ int runApplication(
             rawSdlWindow,
             options.validation);
 
+        // A/B diagnostic for the visible horizontal tear during fast camera
+        // motion. Keep CV/Telemetry presentation unchanged and synchronize only
+        // Raw to display scanout.
         reg::vulkan::RenderWindow rawWindow(
             vulkan,
             rawSdlWindow,
-            reg::vulkan::PresentPolicy::LowLatencyTearingAllowed);
+            reg::vulkan::PresentPolicy::VSync);
 
         std::unique_ptr<reg::vulkan::RenderWindow> overlayWindow;
         std::unique_ptr<reg::vulkan::RenderWindow> telemetryWindow;
