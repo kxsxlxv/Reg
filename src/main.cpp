@@ -1,4 +1,5 @@
 #include "app/CommandLine.hpp"
+#include "diagnostics/FrameTimingLogger.hpp"
 #include "media/RtspDecoder.hpp"
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
@@ -85,6 +86,7 @@ std::filesystem::path makeScreenshotPath(
 int runApplication(
     const reg::app::CommandLineOptions& options) {
         reg::platform::SDLPlatform platform;
+        reg::diagnostics::FrameTimingLogger frameTimingLog;
 
         SDL_Window* rawSdlWindow = platform.createVulkanWindow(
             "Reg - Raw",
@@ -343,6 +345,12 @@ int runApplication(
                                         0,
                                         std::memory_order_release);
 
+                                    const AVRational timingTimeBase =
+                                        descriptor->timeBase();
+                                    frameTimingLog.beginSession(
+                                        timingTimeBase.num,
+                                        timingTimeBase.den);
+
                                     if (blackboxRecorder) {
                                         blackboxRecorder->configure(
                                             std::move(descriptor));
@@ -369,6 +377,8 @@ int runApplication(
                                 },
                             .onCompressedPacket =
                                 [&](reg::media::CompressedVideoPacketPtr packet) {
+                                    frameTimingLog.logPacket(*packet);
+
                                     if (blackboxRecorder) {
                                         static_cast<void>(
                                             blackboxRecorder->submit(
@@ -447,6 +457,10 @@ int runApplication(
                                             1,
                                             std::memory_order_relaxed) +
                                         1;
+
+                                    frameTimingLog.logDecodedFrame(
+                                        *frame,
+                                        count);
 
                                     if (count == 1 ||
                                         count % 120 == 0) {
@@ -708,6 +722,8 @@ int runApplication(
         };
 
         reg::video::VideoFramePtr lastRawPresented;
+        std::uint64_t rawRenderNotReadyAttempts{0};
+        double rawRenderAttemptTotalMs{0.0};
         std::optional<reg::video::SynchronizedFrame>
             pendingOverlayFrame;
         std::uint64_t observedSessionGeneration{0};
@@ -1049,9 +1065,22 @@ int runApplication(
                         latest != lastRawPresented &&
                         rawWindow.available()) {
                         try {
-                            if (rawRenderer.render(
+                            const auto renderBegin =
+                                std::chrono::steady_clock::now();
+                            const bool renderSucceeded =
+                                rawRenderer.render(
                                     latest,
-                                    rawWindow.swapchain())) {
+                                    rawWindow.swapchain());
+                            const auto renderEnd =
+                                std::chrono::steady_clock::now();
+                            const double renderAttemptMs =
+                                std::chrono::duration<double, std::milli>(
+                                    renderEnd - renderBegin)
+                                    .count();
+                            rawRenderAttemptTotalMs +=
+                                renderAttemptMs;
+
+                            if (renderSucceeded) {
                                 lastRawPresented = latest;
                                 didWork = true;
 
@@ -1060,6 +1089,19 @@ int runApplication(
                                         1,
                                         std::memory_order_relaxed) +
                                     1;
+
+                                frameTimingLog.logPresent(
+                                    *latest,
+                                    decodedFrames.load(
+                                        std::memory_order_relaxed),
+                                    count,
+                                    renderBegin,
+                                    renderEnd,
+                                    rawRenderNotReadyAttempts,
+                                    rawRenderAttemptTotalMs);
+
+                                rawRenderNotReadyAttempts = 0;
+                                rawRenderAttemptTotalMs = 0.0;
 
                                 if (count == 1 ||
                                     count % 120 == 0) {
@@ -1076,6 +1118,8 @@ int runApplication(
                                         << rawWindow.swapchain().extent().height
                                         << '\n';
                                 }
+                            } else {
+                                ++rawRenderNotReadyAttempts;
                             }
                         } catch (const reg::vulkan::SurfaceLostError& error) {
                             rawSurfaceRecoveryPending = true;
