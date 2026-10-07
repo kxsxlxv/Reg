@@ -30,6 +30,19 @@ const char* presentModeName(VkPresentModeKHR mode) noexcept {
     }
 }
 
+const char* presentPolicyName(PresentPolicy policy) noexcept {
+    switch (policy) {
+    case PresentPolicy::LowLatencyTearingAllowed:
+        return "LOW_LATENCY_TEARING_ALLOWED";
+    case PresentPolicy::Stable:
+        return "STABLE";
+    case PresentPolicy::VSync:
+        return "VSYNC";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 } // namespace
 
 Swapchain::Swapchain(
@@ -207,12 +220,14 @@ bool Swapchain::recreate() {
     std::cout
         << "[swapchain] present_mode="
         << presentModeName(presentMode_)
+        << " policy="
+        << presentPolicyName(presentPolicy_)
         << " extent=" << extent_.width << 'x' << extent_.height
         << " refresh_independent="
         << (presentMode_ == VK_PRESENT_MODE_IMMEDIATE_KHR ||
                     presentMode_ == VK_PRESENT_MODE_MAILBOX_KHR
                 ? "yes"
-                : "no(FIFO-only-surface)")
+                : "no")
         << '\n';
 
     std::uint32_t actualImageCount = 0;
@@ -360,14 +375,16 @@ VkSurfaceFormatKHR Swapchain::chooseSurfaceFormat(const std::vector<VkSurfaceFor
 }
 
 VkPresentModeKHR Swapchain::choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const {
-    // Reg's processing cadence must never be intentionally synchronized to the
-    // desktop refresh rate. Prefer IMMEDIATE for every output role; MAILBOX is
-    // the next best non-blocking option. FIFO is used only when the platform
-    // exposes no refresh-independent present mode (Vulkan requires FIFO).
-    // Decoder/metadata processing already lives off the presentation thread, so
-    // even a FIFO-only surface cannot throttle source ingest.
-    (void)presentPolicy_;
+    // Explicit VSync is used as a tear-free diagnostic path for presentation.
+    // FIFO is mandatory for every Vulkan surface, so this does not require a
+    // capability fallback and synchronizes scanout to the display refresh.
+    if (presentPolicy_ == PresentPolicy::VSync) {
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
 
+    // Preserve the existing low-latency behavior for every other output role:
+    // prefer IMMEDIATE, then MAILBOX, and use mandatory FIFO only when neither
+    // refresh-independent mode is exposed by the surface.
     if (std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
         return VK_PRESENT_MODE_IMMEDIATE_KHR;
     }
