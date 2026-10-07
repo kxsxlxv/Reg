@@ -83,6 +83,37 @@ std::filesystem::path makeScreenshotPath(
          ".bmp");
 }
 
+reg::render::OverlayScene makeFrameIdentityDiagnosticScene(
+    const reg::video::VideoFrame& frame,
+    const VkExtent2D extent) {
+    reg::render::OverlayScene scene;
+
+    reg::render::TextPrimitive text;
+    text.position = {
+        16.0F,
+        std::max(
+            16.0F,
+            static_cast<float>(extent.height) - 82.0F)};
+
+    if (const auto identity = frame.identity()) {
+        text.utf8 =
+            "REG SEI frame_id (Engine): " +
+            std::to_string(identity->key.frameId) +
+            "\nREG SEI pts_ns: " +
+            std::to_string(identity->sourceTimeNs);
+    } else {
+        text.utf8 = "REG SEI frame identity: ABSENT";
+    }
+
+    text.textColor = {1.0F, 1.0F, 1.0F, 1.0F};
+    text.backgroundColor = {0.0F, 0.0F, 0.0F, 0.78F};
+    text.fontSizePx = 18.0F;
+    text.paddingPx = 6.0F;
+    scene.primitives.emplace_back(std::move(text));
+
+    return scene;
+}
+
 int runApplication(
     const reg::app::CommandLineOptions& options) {
         reg::platform::SDLPlatform platform;
@@ -1067,10 +1098,19 @@ int runApplication(
                         try {
                             const auto renderBegin =
                                 std::chrono::steady_clock::now();
+                            const auto identityScene =
+                                makeFrameIdentityDiagnosticScene(
+                                    *latest,
+                                    rawWindow.swapchain().extent());
+                            rawSignalRenderer->prepare(
+                                identityScene,
+                                rawWindow.swapchain());
+
                             const bool renderSucceeded =
                                 rawRenderer.render(
                                     latest,
-                                    rawWindow.swapchain());
+                                    rawWindow.swapchain(),
+                                    rawSignalRenderer.get());
                             const auto renderEnd =
                                 std::chrono::steady_clock::now();
                             const double renderAttemptMs =
