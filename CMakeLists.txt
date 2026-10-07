@@ -171,6 +171,7 @@ add_custom_target(reg_shaders DEPENDS ${REG_SHADER_OUTPUTS})
 
 add_executable(reg_probe
     src/main.cpp
+    src/diagnostics/FrameTimingLogger.cpp
     src/capture/BmpWriter.cpp
     src/app/CommandLine.cpp
     src/platform/SDLPlatform.cpp
