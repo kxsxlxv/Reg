@@ -23,6 +23,9 @@ enum class AcquireStatus {
 enum class PresentPolicy {
     LowLatencyTearingAllowed,
     Stable,
+    // Diagnostic/tear-free policy: synchronize presentation to the display
+    // refresh using Vulkan's mandatory FIFO present mode.
+    VSync,
 };
 
 class Swapchain final {
