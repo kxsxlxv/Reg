@@ -93,7 +93,7 @@ reg::render::OverlayScene makeFrameIdentityDiagnosticScene(
         16.0F,
         std::max(
             16.0F,
-            static_cast<float>(extent.height) - 82.0F)};
+            static_cast<float>(extent.height) - 180.0F)};
 
     if (const auto identity = frame.identity()) {
         text.utf8 =
