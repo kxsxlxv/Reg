@@ -422,6 +422,22 @@ if(REG_BUILD_TESTS)
 
     add_test(NAME blackbox_recorder COMMAND reg_blackbox_recorder_tests)
 
+    add_executable(reg_reconnect_render_contract_tests
+        tests/reconnect_render_contract_tests.cpp
+    )
+    target_include_directories(reg_reconnect_render_contract_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_reconnect_render_contract_tests
+        PRIVATE Vulkan::Vulkan)
+    if(MSVC)
+        target_compile_options(reg_reconnect_render_contract_tests
+            PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_reconnect_render_contract_tests
+            PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME reconnect_render_contract COMMAND reg_reconnect_render_contract_tests)
+
     add_executable(reg_exact_sync_diagnostics_tests
         tests/exact_sync_diagnostics_tests.cpp
     )
