@@ -194,3 +194,22 @@ close the application, rename the downloaded file to Launcher.exe, and
 replace it in the portable directory). Then reopen and check for updates;
 the new updater can fetch remaining changed files incrementally. No
 reinstallation of settings or complete portable ZIP is required.
+
+## Responsive portrait layout (1200 x 1920)
+
+The previous 750-pixel dashboard width cap has been removed. The launcher
+uses the full available content width with responsive ImGui tables:
+
+- available width >= 1080: three equal columns for Screens, Blackbox and
+  Delay/Recovery; Network and Updates share a two-column row
+- 760 <= available width < 1080: the original two-column grouping
+- available width < 760: one vertical column, avoiding clipped input labels
+
+All coloured cards keep automatic content-based height and have no internal
+scrollbar. The source RTSP URL spans the viewport width. The launcher monitor
+selector is right-aligned in the profile toolbar on wide windows. The
+advanced section and session log viewer retain the full width, with the
+expanded log viewer filling the remaining height above the pinned Stop/Start
+footer, so a 1920-tall screen is useful for inspecting streaming output.
+
+Responsive breakpoints have a dedicated standalone C++ regression test.

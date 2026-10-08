@@ -1,5 +1,6 @@
 #include "launcher/LauncherConfig.hpp"
 #include "launcher/LauncherDisplay.hpp"
+#include "launcher/LauncherLayout.hpp"
 #include "launcher/ProcessManager.hpp"
 #ifdef _WIN32
 #include "launcher/UpdateManager.hpp"
@@ -452,12 +453,15 @@ struct Ui {
         ImGui::EndDisabled();
 
         // Keep launcher location independent of the video output mapping.
-        if (ImGui::GetContentRegionAvail().x > 215.0f) {
-            ImGui::SameLine();
-            launcherDisplaySelector();
-        } else {
-            launcherDisplaySelector();
+        // Use the opposite edge of a wide toolbar for the launcher monitor.
+        // On smaller windows the selector flows naturally to the next line.
+        const float toolbarRight = ImGui::GetWindowContentRegionMax().x;
+        const float monitorStart = toolbarRight - 220.0f;
+        if (ImGui::GetContentRegionAvail().x > 230.0f &&
+            monitorStart > ImGui::GetCursorPosX()) {
+            ImGui::SameLine(monitorStart);
         }
+        launcherDisplaySelector();
         if (showCreateProfile) {
             ImGui::SetNextItemWidth(210);
             ImGui::InputTextWithHint("##new-name", "Новое имя профиля",
@@ -603,7 +607,12 @@ struct Ui {
 #endif
         ImGui::SameLine();
         if (ImGui::SmallButton("Копировать логи")) SDL_SetClipboardText(output.c_str());
-        ImGui::BeginChild("##log-text", ImVec2(0, 180), ImGuiChildFlags_Borders);
+        // An expanded log viewer uses the unused vertical space on a
+        // 1200x1920 screen instead of leaving a thousand empty pixels.
+        const float logHeight = std::max(
+            180.0f, ImGui::GetContentRegionAvail().y - 8.0f);
+        ImGui::BeginChild("##log-text", ImVec2(0, logHeight),
+                          ImGuiChildFlags_Borders);
         ImGui::TextUnformatted(output.c_str());
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 30.0f) {
             ImGui::SetScrollHereY(1.0f);
@@ -619,14 +628,7 @@ struct Ui {
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse;
         ImGui::Begin("##control-center", nullptr, flags);
-        // A fixed maximum content width is intentional: narrower controls
-        // cannot save horizontal space while the cards still span the entire
-        // window. Center a compact dashboard on 1080px portrait screens.
-        const float availableWidth = ImGui::GetContentRegionAvail().x;
-        const float layoutWidth = std::min(availableWidth, 750.0f);
-        const float layoutX = ImGui::GetCursorPosX() +
-            std::max(0.0f, (availableWidth - layoutWidth) * 0.5f);
-        ImGui::SetCursorPosX(layoutX);
+
         ImGui::TextColored(ImVec4(.91f,.95f,1,1), "ПАНЕЛЬ УПРАВЛЕНИЯ");
         ImGui::SameLine();
         const auto statusColor = process.running()
@@ -634,57 +636,113 @@ struct Ui {
         ImGui::TextColored(statusColor, "  %s  %s",
             process.running() ? Symbols::check : Symbols::info,
             process.running() ? "Работает" : "Ожидание запуска");
-        // Reserve a non-scrolling footer and keep the whole settings area
-        // width-bounded. This is the *only* scroll container: individual
-        // cards auto-grow and never show their own scrollbar.
-        ImGui::SetCursorPosX(layoutX);
-        ImGui::BeginChild("##scroll-content", ImVec2(layoutWidth, -68),
-                          ImGuiChildFlags_None, ImGuiWindowFlags_None);
+        ImGui::Separator();
+
+        // Use the available viewport width. Columns adapt to the content
+        // instead of masking an overly wide two-column layout with a 750px cap.
+        // The footer is the only fixed-height region.
+        ImGui::BeginChild("##scroll-content", ImVec2(0, -68),
+                          ImGuiChildFlags_None);
         drawProfileBar();
+        ImGui::Spacing();
         ImGui::BeginDisabled(process.running());
-        ImGui::Spacing();
         drawSource();
+        ImGui::EndDisabled();
         ImGui::Spacing();
-        if (ImGui::GetContentRegionAvail().x >= 705.0f) {
-            if (ImGui::BeginTable("##main-cards", 2,
-                                 ImGuiTableFlags_SizingStretchSame)) {
+
+        const float available = ImGui::GetContentRegionAvail().x;
+        const auto columns = reg::launcher::dashboardColumns(available);
+        const bool stopped = !process.running();
+
+        if (columns == reg::launcher::DashboardColumns::three) {
+            // Portrait 1200x1920: three compact cards across rather than two
+            // wide cards with vast empty form rows. No card is scrollable.
+            if (ImGui::BeginTable("##dashboard-three", 3,
+                    ImGuiTableFlags_SizingStretchSame)) {
                 ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
                 drawDisplays();
+                ImGui::EndDisabled();
                 ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
                 drawRecorder();
-                ImGui::TableNextRow();
+                ImGui::EndDisabled();
                 ImGui::TableNextColumn();
-                drawNetwork();
-                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
                 drawLatency();
+                ImGui::EndDisabled();
                 ImGui::EndTable();
             }
-        } else {
-            drawDisplays();
-            drawRecorder();
+            ImGui::Spacing();
+#ifdef _WIN32
+            // Network and updater naturally occupy the width of the second row.
+            if (ImGui::BeginTable("##dashboard-secondary", 2,
+                    ImGuiTableFlags_SizingStretchSame)) {
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
+                drawNetwork();
+                ImGui::EndDisabled();
+                ImGui::TableNextColumn();
+                drawUpdates();
+                ImGui::EndTable();
+            }
+#else
+            ImGui::BeginDisabled(!stopped);
             drawNetwork();
+            ImGui::EndDisabled();
+#endif
+        } else if (columns == reg::launcher::DashboardColumns::two) {
+            if (ImGui::BeginTable("##dashboard-two", 2,
+                    ImGuiTableFlags_SizingStretchSame)) {
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
+                drawDisplays();
+                ImGui::EndDisabled();
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
+                drawRecorder();
+                ImGui::EndDisabled();
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
+                drawNetwork();
+                ImGui::EndDisabled();
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stopped);
+                drawLatency();
+                ImGui::EndDisabled();
+                ImGui::EndTable();
+            }
+#ifdef _WIN32
+            ImGui::Spacing();
+            drawUpdates();
+#endif
+        } else {
+            // Narrow windows never squeeze settings into unreadable columns.
+            ImGui::BeginDisabled(!stopped);
+            drawDisplays();
+            ImGui::Spacing();
+            drawRecorder();
+            ImGui::Spacing();
+            drawNetwork();
+            ImGui::Spacing();
             drawLatency();
+            ImGui::EndDisabled();
+#ifdef _WIN32
+            ImGui::Spacing();
+            drawUpdates();
+#endif
         }
         ImGui::Spacing();
+        ImGui::BeginDisabled(!stopped);
         drawAdvanced();
         ImGui::EndDisabled();
 
-#ifdef _WIN32
-        ImGui::Spacing();
-        drawUpdates();
-#endif
         ImGui::Spacing();
         drawLogs();
         ImGui::EndChild();
 
-        ImGui::SetCursorPosX(layoutX);
-        ImGui::Dummy(ImVec2(layoutWidth, 1.0f));
-        const ImVec2 separatorStart = ImGui::GetItemRectMin();
-        ImGui::GetWindowDrawList()->AddLine(
-            separatorStart,
-            ImVec2(separatorStart.x + layoutWidth, separatorStart.y),
-            ImGui::GetColorU32(ImGuiCol_Separator));
-        ImGui::SetCursorPosX(layoutX);
+        ImGui::Separator();
         const ImVec4 action = process.running()
             ? ImVec4(.75f,.36f,.35f,1) : ImVec4(.19f,.69f,.48f,1);
         ImGui::PushStyleColor(ImGuiCol_Button, action);
