@@ -2,6 +2,7 @@
 
 #include "capture/BmpWriter.hpp"
 #include "render/VideoOverlayRecorder.hpp"
+#include "render/OverlayChainRecorder.hpp"
 #include "vulkan/BlankRenderer.hpp"
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanError.hpp"
@@ -81,11 +82,30 @@ std::pair<VkChromaLocation, VkChromaLocation> chromaOffsetsFor(AVChromaLocation 
 
 } // namespace
 
-VideoRenderer::VideoRenderer(const VulkanContext& vulkan)
+VideoRenderer::VideoRenderer(const VulkanContext& vulkan, bool allowNetImgui)
     : vulkan_(vulkan),
       frameAccess_(vulkan),
       blankRenderer_(std::make_unique<BlankRenderer>(vulkan)) {
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    allowNetImgui_ = allowNetImgui;
+#else
+    static_cast<void>(allowNetImgui);
+#endif
     createCommandResources();
+}
+
+bool VideoRenderer::renderRaw(
+    const video::VideoFramePtr& frame,
+    Swapchain& swapchain,
+    render::VideoOverlayRecorder* overlay) {
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    render::VideoOverlayRecorder* remote = ensureNetImguiOverlay(swapchain);
+    if (remote != nullptr) {
+        render::OverlayChainRecorder chain(overlay, remote);
+        return render(frame, swapchain, &chain);
+    }
+#endif
+    return render(frame, swapchain, overlay);
 }
 
 VideoRenderer::~VideoRenderer() {
