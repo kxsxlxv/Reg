@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - mvp/**
+      - feat/**
   pull_request:
 
 concurrency:
@@ -107,3 +108,15 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ runner.temp }}/ffmpeg-install/lib
         run: ctest --test-dir build --output-on-failure
+
+
+      - name: Upload Linux launcher build
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-launcher-unbundled
+          path: |
+            build/reg_launcher
+            build/reg_probe
+            build/reg_replay
+            build/fonts/
+            build/shaders/

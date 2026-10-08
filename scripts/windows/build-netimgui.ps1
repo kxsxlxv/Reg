@@ -91,11 +91,22 @@ if (-not $SkipTests) {
     }
 }
 
+# Deploy non-system runtime DLLs beside the executables for double-click launch.
+& $cmake `
+    "-DREG_BUILD_DIR=$buildPath" `
+    "-DREG_FFMPEG_BIN=$(Join-Path $ffmpegRoot 'bin')" `
+    "-DREG_UCRT_BIN=$ucrtBin" `
+    -P (Join-Path $repoRoot "cmake\DeployWindowsRuntime.cmake")
+if ($LASTEXITCODE -ne 0) {
+    throw "Runtime deployment failed with exit code $LASTEXITCODE."
+}
+
 Write-Host ""
 Write-Host "Reg NetImgui Windows build is ready" -ForegroundColor Green
 Write-Host "  build: $buildPath"
 Write-Host "  exe:   $(Join-Path $buildPath 'reg_probe.exe')"
 Write-Host "  SDL3:  $deployedSdl"
+Write-Host "  launcher: $(Join-Path $buildPath 'reg_launcher.exe')"
 Write-Host ""
 Write-Host "Run this build (not build-win) with:"
 Write-Host "  .\$BuildDir\reg_probe.exe <arguments>"

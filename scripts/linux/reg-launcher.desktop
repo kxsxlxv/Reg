@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Панель управления видеопотоком
+Comment=Запуск и диагностика видеопотока
+Exec=reg_launcher
+Terminal=false
+Categories=AudioVideo;Video;Development;

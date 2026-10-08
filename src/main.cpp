@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
@@ -36,6 +37,9 @@
 #include <utility>
 
 namespace {
+
+volatile std::sig_atomic_t gStopSignal = 0;
+void onStopSignal(int) noexcept { gStopSignal = 1; }
 
 constexpr auto kVideoSignalStaleAfter =
     std::chrono::milliseconds{1500};
@@ -782,7 +786,7 @@ int runApplication(
         try {
             while (!decoderFinished.load(
                 std::memory_order_acquire)) {
-                if (platform.pollQuitRequested()) {
+                if (gStopSignal != 0 || platform.pollQuitRequested()) {
                     break;
                 }
 
@@ -1611,6 +1615,12 @@ int runApplication(
 } // namespace
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
+    std::signal(SIGTERM, onStopSignal);
+    std::signal(SIGINT, onStopSignal);
+#endif
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
     reg::app::CommandLineOptions options;
 
     try {

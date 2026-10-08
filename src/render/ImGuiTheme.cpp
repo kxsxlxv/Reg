@@ -1,6 +1,7 @@
 #include "render/ImGuiTheme.hpp"
 
 #include <imgui.h>
+#include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -15,6 +16,12 @@ namespace reg::render {
 namespace {
 
 std::filesystem::path fontPath(const char* filename) {
+    if (const char* base = SDL_GetBasePath()) {
+        const auto portable = std::filesystem::path(base) / "fonts" / filename;
+        if (std::filesystem::is_regular_file(portable)) {
+            return portable;
+        }
+    }
     return std::filesystem::path(REG_FONT_DIR) / filename;
 }
 

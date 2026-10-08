@@ -481,3 +481,63 @@ if(REG_BUILD_TESTS)
 
     add_test(NAME bmp_writer COMMAND reg_bmp_writer_tests)
 endif()
+
+
+# The launcher is deliberately isolated from the NVIDIA Vulkan Video runtime.
+# It can display errors and edit profiles even when video decoding cannot start.
+include(FetchContent)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.12.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
+add_library(reg_launcher_core STATIC
+    src/launcher/LauncherConfig.cpp
+    src/launcher/ProcessManager.cpp
+)
+target_include_directories(reg_launcher_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(reg_launcher_core PUBLIC nlohmann_json::nlohmann_json)
+if(WIN32)
+    target_link_libraries(reg_launcher_core PUBLIC user32)
+endif()
+
+add_library(reg_launcher_imgui STATIC
+    imgui/imgui.cpp
+    imgui/imgui_draw.cpp
+    imgui/imgui_tables.cpp
+    imgui/imgui_widgets.cpp
+    imgui/backends/imgui_impl_sdl3.cpp
+    imgui/backends/imgui_impl_sdlrenderer3.cpp
+)
+target_include_directories(reg_launcher_imgui PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+    "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends"
+)
+target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
+
+add_executable(reg_launcher WIN32 src/launcher/main.cpp)
+target_link_libraries(reg_launcher PRIVATE reg_launcher_core reg_launcher_imgui)
+target_compile_definitions(reg_launcher PRIVATE
+    REG_FONT_DIR=\"${REG_FONT_OUTPUT_DIR}\"
+)
+
+# Installed layout is relocatable: binaries find adjacent assets and private libs.
+set_target_properties(reg_probe reg_replay reg_launcher PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../lib"
+)
+install(TARGETS reg_launcher reg_probe reg_replay RUNTIME DESTINATION bin)
+install(DIRECTORY "${REG_FONT_OUTPUT_DIR}/" DESTINATION bin/fonts)
+install(DIRECTORY "${REG_SHADER_OUTPUT_DIR}/" DESTINATION bin/shaders)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/scripts/linux/reg-launcher.desktop"
+    DESTINATION share/applications OPTIONAL)
+
+if(REG_BUILD_TESTS)
+    add_executable(reg_launcher_config_tests
+        tests/launcher_config_tests.cpp
+    )
+    target_link_libraries(reg_launcher_config_tests PRIVATE reg_launcher_core)
+    add_test(NAME launcher_config COMMAND reg_launcher_config_tests)
+endif()

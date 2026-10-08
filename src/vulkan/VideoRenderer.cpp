@@ -14,11 +14,14 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 }
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -632,7 +635,15 @@ VideoRenderer::SurfaceEntry& VideoRenderer::surfaceFor(const video::VideoFrame& 
 }
 
 VkShaderModule VideoRenderer::loadShaderModule(const char* filename) const {
-    const std::string path = std::string(REG_SHADER_DIR) + "/" + filename;
+    std::filesystem::path shaderPath =
+        std::filesystem::path(REG_SHADER_DIR) / filename;
+    if (const char* base = SDL_GetBasePath()) {
+        const auto portable = std::filesystem::path(base) / "shaders" / filename;
+        if (std::filesystem::is_regular_file(portable)) {
+            shaderPath = portable;
+        }
+    }
+    const std::string path = shaderPath.string();
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
     if (!stream) {
         throw std::runtime_error("Cannot open SPIR-V shader: " + path);

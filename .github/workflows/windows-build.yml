@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - mvp/**
+      - feat/**
   pull_request:
 
 concurrency:
@@ -67,3 +68,25 @@ jobs:
         run: |
           export PATH="$PWD/.ci/ffmpeg-install/bin:$PATH"
           ctest --test-dir build-win --output-on-failure
+
+
+      - name: Deploy double-click runtime
+        shell: msys2 {0}
+        run: |
+          cmake \
+            "-DREG_BUILD_DIR=$(cygpath -m "$PWD/build-win")" \
+            "-DREG_FFMPEG_BIN=$(cygpath -m "$PWD/.ci/ffmpeg-install/bin")" \
+            "-DREG_UCRT_BIN=$(cygpath -m /ucrt64/bin)" \
+            -P cmake/DeployWindowsRuntime.cmake
+
+      - name: Upload Windows launcher bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-launcher
+          path: |
+            build-win/reg_launcher.exe
+            build-win/reg_probe.exe
+            build-win/reg_replay.exe
+            build-win/*.dll
+            build-win/fonts/
+            build-win/shaders/
