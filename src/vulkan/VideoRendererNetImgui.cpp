@@ -64,7 +64,9 @@ void configureNetImguiServer(std::uint16_t port, bool enabled) {
 
 render::VideoOverlayRecorder*
 VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
-    if (!gNetImguiEnabled) return nullptr;
+    // Only the Raw presenter owns the remote UI. The CV window must never
+    // opportunistically claim the global TCP listener during a reconnect.
+    if (!allowNetImgui_ || !gNetImguiEnabled) return nullptr;
     if (!netImguiRoleToken_) {
         if (!gRawNetImguiOwner.expired()) {
             return nullptr;
