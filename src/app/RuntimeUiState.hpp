@@ -7,6 +7,7 @@ namespace reg::app {
 
 enum class TelemetryPage : std::uint8_t {
     Overview,
+    ExactSync,
     NetImgui,
 };
 
@@ -25,8 +26,10 @@ inline void toggleTelemetryPage() noexcept {
     const TelemetryPage current = telemetryPage();
     setTelemetryPage(
         current == TelemetryPage::Overview
-            ? TelemetryPage::NetImgui
-            : TelemetryPage::Overview);
+            ? TelemetryPage::ExactSync
+            : (current == TelemetryPage::ExactSync
+                ? TelemetryPage::NetImgui
+                : TelemetryPage::Overview));
 }
 
 } // namespace reg::app
