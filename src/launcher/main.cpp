@@ -1,6 +1,7 @@
 #include "launcher/LauncherConfig.hpp"
 #include "launcher/LauncherDisplay.hpp"
 #include "launcher/LauncherLayout.hpp"
+#include "launcher/MissionPlannerTile.hpp"
 #include "launcher/ProcessManager.hpp"
 #ifdef _WIN32
 #include "launcher/UpdateManager.hpp"
@@ -103,6 +104,26 @@ void writeLauncherDisplay(int number) {
     if (!output) throw std::runtime_error("Не удалось сохранить выбор монитора");
 }
 
+bool readMissionPlannerAutoLayout() {
+#ifdef _WIN32
+    std::ifstream file(reg::launcher::dataDirectory() /
+                       "mission-planner-layout.txt");
+    int enabled = 0;
+    return (file >> enabled) && enabled == 1;
+#else
+    return false;
+#endif
+}
+
+void writeMissionPlannerAutoLayout(bool enabled) {
+    const auto path = reg::launcher::dataDirectory() /
+                      "mission-planner-layout.txt";
+    fs::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::trunc);
+    out << (enabled ? 1 : 0) << '\n';
+    if (!out) throw std::runtime_error("Не удалось сохранить компоновку окон");
+}
+
 struct Ui {
     SDL_Window* window{nullptr};
     int launcherDisplay{0};
@@ -123,6 +144,11 @@ struct Ui {
     bool showAdvanced{false};
     bool showLogs{false};
     bool showCreateProfile{false};
+#ifdef _WIN32
+    bool missionPlannerAutoLayout{readMissionPlannerAutoLayout()};
+    bool missionPlannerTiledThisSession{false};
+    std::chrono::steady_clock::time_point lastMissionPlannerAttempt{};
+#endif
 #ifdef _WIN32
     reg::launcher::UpdateManager updater{reg::launcher::executableDirectory()};
     std::string updateChannel{"dev"};
@@ -240,6 +266,21 @@ struct Ui {
         }
 #endif
         const auto now = std::chrono::steady_clock::now();
+#ifdef _WIN32
+        // Wait for Mission Planner if auto-layout is enabled, then tile once.
+        // Do not override the user's later manual window positioning.
+        if (missionPlannerAutoLayout && !missionPlannerTiledThisSession &&
+            (lastMissionPlannerAttempt == std::chrono::steady_clock::time_point{} ||
+             now - lastMissionPlannerAttempt >= std::chrono::seconds(3))) {
+            lastMissionPlannerAttempt = now;
+            const auto result = reg::launcher::tileWithMissionPlanner(
+                window, launcherDisplay);
+            if (result == reg::launcher::MissionPlannerTileResult::success) {
+                missionPlannerTiledThisSession = true;
+                message = "Launcher сверху, Mission Planner снизу";
+            }
+        }
+#endif
         if (lastDisplayScan == std::chrono::steady_clock::time_point{} ||
             now - lastDisplayScan > std::chrono::seconds(3)) {
             availableDisplays = reg::launcher::launcherDisplays();
@@ -416,6 +457,9 @@ struct Ui {
                     launcherDisplay = display.number;
                     writeLauncherDisplay(launcherDisplay);
                     reg::launcher::moveLauncherToDisplay(window, launcherDisplay);
+#ifdef _WIN32
+                    missionPlannerTiledThisSession = !missionPlannerAutoLayout;
+#endif
                 }
             }
             ImGui::EndCombo();
@@ -475,6 +519,47 @@ struct Ui {
             ImGui::EndDisabled();
         }
     }
+
+#ifdef _WIN32
+    void drawMissionPlannerLayout() {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s  Окна:", Symbols::displays);
+        ImGui::SameLine();
+        if (ImGui::Button("Разместить 50/50 с Mission Planner")) {
+            switch (reg::launcher::tileWithMissionPlanner(
+                        window, launcherDisplay)) {
+                case reg::launcher::MissionPlannerTileResult::success:
+                    missionPlannerTiledThisSession = true;
+                    message = "Launcher сверху, Mission Planner снизу";
+                    break;
+                case reg::launcher::MissionPlannerTileResult::notFound:
+                    message = "Mission Planner не найден. Запустите его и повторите.";
+                    break;
+                case reg::launcher::MissionPlannerTileResult::noMonitor:
+                    message = "Монитор недоступен или слишком мал для двух окон";
+                    break;
+                default:
+                    message = "Не удалось переместить окна. Проверьте права приложений.";
+                    break;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("При запуске##auto-tiling", &missionPlannerAutoLayout)) {
+            try {
+                writeMissionPlannerAutoLayout(missionPlannerAutoLayout);
+                missionPlannerTiledThisSession = !missionPlannerAutoLayout;
+                lastMissionPlannerAttempt = {};
+            } catch (const std::exception& e) {
+                message = e.what();
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Дождаться Mission Planner и один раз разместить "
+                "оба окна по половинам выбранного экрана. "
+                "Ручные перемещения после этого не переопределяются.");
+        }
+    }
+#endif
 
     void drawSource() {
         if (card("##source-card", ImVec4(0.105f, 0.151f, 0.195f, 1),
@@ -644,6 +729,9 @@ struct Ui {
         ImGui::BeginChild("##scroll-content", ImVec2(0, -68),
                           ImGuiChildFlags_None);
         drawProfileBar();
+#ifdef _WIN32
+        drawMissionPlannerLayout();
+#endif
         ImGui::Spacing();
         ImGui::BeginDisabled(process.running());
         drawSource();

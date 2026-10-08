@@ -213,3 +213,38 @@ expanded log viewer filling the remaining height above the pinned Stop/Start
 footer, so a 1920-tall screen is useful for inspecting streaming output.
 
 Responsive breakpoints have a dedicated standalone C++ regression test.
+
+## Windows 10 portrait workspace with Mission Planner
+
+Windows 10 does not provide a native horizontal 50/50 Snap layout occupying
+both full-width halves of a portrait monitor. The launcher can directly
+arrange two *existing, top-level* Windows windows using Win32:
+
+- Select the Windows monitor in the launcher toolbar (for example, monitor 4).
+- Start Mission Planner; its main window title must include "Mission Planner".
+- Click **Разместить 50/50 с Mission Planner**. Launcher occupies the upper
+  half, Mission Planner occupies the lower half of the monitor's **work area**.
+  Windows taskbar space is excluded and either app may be maximized before
+  arranging (both are restored).
+- Optionally enable **При запуске**. This persists in
+  `%LOCALAPPDATA%/Reg/mission-planner-layout.txt`. The launcher waits for
+  Mission Planner if it is not running (retry every 3 seconds) and tiles
+  windows once; it will not fight later manual window adjustments.
+- This is independent of profile monitor mappings and the RTSP/Blackbox
+  process. The launcher never launches, kills or injects into Mission Planner.
+- If Mission Planner is elevated and Launcher is not, Windows UIPI may deny
+  repositioning. Run both apps at the same integrity level.
+- No extra snapping utility, Windows 11, PowerToys or separate scripts are
+  required. The feature compiles to a stub on Linux.
+
+The two-window arrangement uses monitor coordinates from QueryDisplayConfig
+and the selected monitor's Win32 rcWork. A disconnected monitor, a missing
+Mission Planner window or an undersized work area produces a readable status
+and no attempted two-window layout.
+
+### CI repair
+
+The first full-width dashboard commit was blocked by a missing namespace
+closing brace in LauncherLayout.hpp, breaking the layout test on Windows and
+Linux. This release repairs the header; both CI suites must be green prior
+to publishing an update.

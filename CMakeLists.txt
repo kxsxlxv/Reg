@@ -568,6 +568,7 @@ target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
 add_executable(reg_launcher WIN32
     src/launcher/main.cpp
     src/launcher/LauncherDisplay.cpp
+    src/launcher/MissionPlannerTile.cpp
 )
 target_link_libraries(reg_launcher PRIVATE reg_launcher_core reg_launcher_imgui)
 if(WIN32)

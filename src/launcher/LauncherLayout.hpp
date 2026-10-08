@@ -18,3 +18,5 @@ constexpr float dashboardColumnWidth(float width,
     const auto count = static_cast<int>(mode);
     return (width - (count - 1) * gap) / count;
 }
+
+} // namespace reg::launcher
