@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "metadata/FrameMetadata.hpp"
 
 #include <chrono>
@@ -37,11 +38,18 @@ struct Counters {
     std::uint64_t rawPresentedFrames{};
     std::uint64_t overlayPresentedFrames{};
     std::uint64_t overlayMissingMetadataDrops{};
+    std::uint64_t overlayBufferEvictions{};
+    std::uint64_t overlayMissingIdentity{};
 
     std::uint64_t metadataPackets{};
     std::uint64_t metadataInvalid{};
     std::uint64_t metadataDuplicates{};
     std::uint64_t metadataSequenceGaps{};
+    std::uint64_t metadataOutOfOrder{};
+    std::uint64_t metadataStoreEvictions{};
+
+    diagnostics::ExactSyncSnapshot exactSync{};
+    std::uint32_t configuredOverlayDelayMs{};
 
     std::uint64_t recorderPacketsWritten{};
     std::uint64_t recorderQueueDrops{};
