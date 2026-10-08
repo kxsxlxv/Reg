@@ -422,6 +422,20 @@ if(REG_BUILD_TESTS)
 
     add_test(NAME blackbox_recorder COMMAND reg_blackbox_recorder_tests)
 
+    add_executable(reg_exact_sync_diagnostics_tests
+        tests/exact_sync_diagnostics_tests.cpp
+    )
+    target_include_directories(reg_exact_sync_diagnostics_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        target_compile_options(reg_exact_sync_diagnostics_tests
+            PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_exact_sync_diagnostics_tests
+            PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME exact_sync_diagnostics COMMAND reg_exact_sync_diagnostics_tests)
+
     add_executable(reg_telemetry_model_tests
         tests/telemetry_model_tests.cpp
         src/telemetry/TelemetryModel.cpp
