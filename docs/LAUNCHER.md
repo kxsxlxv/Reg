@@ -248,3 +248,37 @@ The first full-width dashboard commit was blocked by a missing namespace
 closing brace in LauncherLayout.hpp, breaking the layout test on Windows and
 Linux. This release repairs the header; both CI suites must be green prior
 to publishing an update.
+
+## General two-window layout on Windows 10/11
+
+The 50/50 split is no longer tied to Mission Planner. The **Окна** toolbar
+lists currently visible, unowned top-level windows, showing the executable
+name and window title. Select any running desktop program and click
+**Разместить 50/50**. Launcher moves to the upper half, the chosen window
+to the lower half of the selected Windows monitor's taskbar-adjusted work
+area. This requires no external window-management utilities.
+
+**Обновить список** refreshes the available windows; Launcher and shell
+windows are not listed. A window hidden on another Windows virtual desktop
+may not appear. Elevated applications may reject resizing by a standard
+user process. This feature does not inject into, launch, or terminate other
+applications.
+
+**При запуске** stores the target executable path, window class, window
+title and auto-layout setting in the new
+`%LOCALAPPDATA%/Reg/window-layout.json`. We do **not** persist Windows HWNDs,
+which are transient. If the window is not running, the launcher waits until
+the selected app opens (checks every three seconds). It arranges both windows
+once per launcher session, leaving subsequent manual moves alone. If there
+are multiple windows with the same application and class, title matching
+must disambiguate them; an ambiguous match is not moved. Selecting a
+different application saves the preference immediately.
+
+For users with the legacy Mission Planner automatic-layout option enabled,
+the first run migrates their setting once Mission Planner is visible, then
+saves a stable target in the new format. Legacy settings are otherwise left
+untouched, and profile, RTSP and Blackbox settings do not change.
+
+A cross-platform pure C++ regression test covers target identity matching,
+transient handle reuse, case-insensitive executable paths and ambiguity.
+Win32 window enumeration and placement require real desktop validation.

@@ -1,10 +1,11 @@
 #include "launcher/LauncherConfig.hpp"
 #include "launcher/LauncherDisplay.hpp"
 #include "launcher/LauncherLayout.hpp"
-#include "launcher/MissionPlannerTile.hpp"
+#include "launcher/WindowTiling.hpp"
 #include "launcher/ProcessManager.hpp"
 #ifdef _WIN32
 #include "launcher/UpdateManager.hpp"
+#include <nlohmann/json.hpp>
 #include <shellapi.h>
 #endif
 
@@ -104,25 +105,64 @@ void writeLauncherDisplay(int number) {
     if (!output) throw std::runtime_error("Не удалось сохранить выбор монитора");
 }
 
-bool readMissionPlannerAutoLayout() {
 #ifdef _WIN32
-    std::ifstream file(reg::launcher::dataDirectory() /
-                       "mission-planner-layout.txt");
-    int enabled = 0;
-    return (file >> enabled) && enabled == 1;
-#else
-    return false;
-#endif
+struct WindowLayoutPreferences {
+    reg::launcher::WindowTarget target;
+    bool autoLayout{false};
+    bool migrateMissionPlanner{false};
+};
+
+fs::path windowLayoutConfigPath() {
+    return reg::launcher::dataDirectory() / "window-layout.json";
 }
 
-void writeMissionPlannerAutoLayout(bool enabled) {
-    const auto path = reg::launcher::dataDirectory() /
-                      "mission-planner-layout.txt";
-    fs::create_directories(path.parent_path());
-    std::ofstream out(path, std::ios::trunc);
-    out << (enabled ? 1 : 0) << '\n';
-    if (!out) throw std::runtime_error("Не удалось сохранить компоновку окон");
+WindowLayoutPreferences loadWindowLayoutPreferences() {
+    WindowLayoutPreferences preferences;
+    std::ifstream input(windowLayoutConfigPath(), std::ios::binary);
+    if (input) {
+        try {
+            const auto data = nlohmann::json::parse(input);
+            if (data.value("schema_version", 0) == 1) {
+                preferences.target = {
+                    data.value("executable_path", std::string{}),
+                    data.value("window_class", std::string{}),
+                    data.value("window_title", std::string{})
+                };
+                preferences.autoLayout = data.value("auto_layout", false);
+                if (preferences.target.empty()) preferences.autoLayout = false;
+                return preferences;
+            }
+        } catch (const std::exception&) {
+            // A corrupted settings file must never prevent Launcher startup.
+        }
+        return preferences;
+    }
+    // Preserve the old Mission Planner "При запуске" setting for users who
+    // enabled it. Migrate to an actual window selection once MP is running.
+    std::ifstream legacy(reg::launcher::dataDirectory() /
+                         "mission-planner-layout.txt");
+    int wasEnabled = 0;
+    if (legacy >> wasEnabled && wasEnabled == 1) {
+        preferences.migrateMissionPlanner = true;
+    }
+    return preferences;
 }
+
+void saveWindowLayoutPreferences(const WindowLayoutPreferences& preferences) {
+    const auto path = windowLayoutConfigPath();
+    fs::create_directories(path.parent_path());
+    nlohmann::json document{
+        {"schema_version", 1},
+        {"executable_path", preferences.target.executablePath},
+        {"window_class", preferences.target.windowClass},
+        {"window_title", preferences.target.title},
+        {"auto_layout", preferences.autoLayout}
+    };
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output << document.dump(2);
+    if (!output) throw std::runtime_error("Не удалось сохранить выбор окна");
+}
+#endif
 
 struct Ui {
     SDL_Window* window{nullptr};
@@ -145,9 +185,11 @@ struct Ui {
     bool showLogs{false};
     bool showCreateProfile{false};
 #ifdef _WIN32
-    bool missionPlannerAutoLayout{readMissionPlannerAutoLayout()};
-    bool missionPlannerTiledThisSession{false};
-    std::chrono::steady_clock::time_point lastMissionPlannerAttempt{};
+    WindowLayoutPreferences windowLayout{loadWindowLayoutPreferences()};
+    std::vector<reg::launcher::WindowChoice> applicationWindows;
+    std::uintptr_t preferredWindowHandle{};
+    bool tiledThisSession{false};
+    std::chrono::steady_clock::time_point lastWindowAttempt{};
 #endif
 #ifdef _WIN32
     reg::launcher::UpdateManager updater{reg::launcher::executableDirectory()};
@@ -159,6 +201,9 @@ struct Ui {
     explicit Ui(SDL_Window* targetWindow)
         : window(targetWindow), launcherDisplay(readLauncherDisplay()) {
         availableDisplays = reg::launcher::launcherDisplays();
+#ifdef _WIN32
+        applicationWindows = reg::launcher::openApplicationWindows();
+#endif
         if (launcherDisplay > 0 && !reg::launcher::moveLauncherToDisplay(
                 window, launcherDisplay)) {
             // If the selected display is disconnected, keep the window visible
@@ -267,17 +312,38 @@ struct Ui {
 #endif
         const auto now = std::chrono::steady_clock::now();
 #ifdef _WIN32
-        // Wait for Mission Planner if auto-layout is enabled, then tile once.
-        // Do not override the user's later manual window positioning.
-        if (missionPlannerAutoLayout && !missionPlannerTiledThisSession &&
-            (lastMissionPlannerAttempt == std::chrono::steady_clock::time_point{} ||
-             now - lastMissionPlannerAttempt >= std::chrono::seconds(3))) {
-            lastMissionPlannerAttempt = now;
-            const auto result = reg::launcher::tileWithMissionPlanner(
-                window, launcherDisplay);
-            if (result == reg::launcher::MissionPlannerTileResult::success) {
-                missionPlannerTiledThisSession = true;
-                message = "Launcher сверху, Mission Planner снизу";
+        // Refresh only every 3 seconds, never enumerate windows per frame.
+        // Auto-layout waits for the explicitly selected application and runs
+        // only once. Later manual window moves are left untouched.
+        if (lastWindowAttempt == std::chrono::steady_clock::time_point{} ||
+            now - lastWindowAttempt >= std::chrono::seconds(3)) {
+            lastWindowAttempt = now;
+            applicationWindows = reg::launcher::openApplicationWindows();
+            if (windowLayout.migrateMissionPlanner && windowLayout.target.empty()) {
+                for (const auto& choice : applicationWindows) {
+                    std::string title = choice.title;
+                    std::transform(title.begin(), title.end(), title.begin(),
+                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (title.find("mission planner") != std::string::npos) {
+                        windowLayout.target = reg::launcher::targetOf(choice);
+                        windowLayout.autoLayout = true;
+                        preferredWindowHandle = choice.handle;
+                        windowLayout.migrateMissionPlanner = false;
+                        try { saveWindowLayoutPreferences(windowLayout); }
+                        catch (const std::exception& e) { message = e.what(); }
+                        break;
+                    }
+                }
+            }
+            if (windowLayout.autoLayout && !tiledThisSession &&
+                !windowLayout.target.empty()) {
+                const auto result = reg::launcher::tileWithWindow(
+                    window, launcherDisplay, windowLayout.target,
+                    preferredWindowHandle);
+                if (result == reg::launcher::WindowTileResult::success) {
+                    tiledThisSession = true;
+                    message = "Окна размещены: Launcher сверху, выбранное окно снизу";
+                }
             }
         }
 #endif
@@ -450,6 +516,9 @@ struct Ui {
                 launcherDisplay = 0;
                 writeLauncherDisplay(0);
                 reg::launcher::moveLauncherToDisplay(window, 0);
+#ifdef _WIN32
+                tiledThisSession = !windowLayout.autoLayout;
+#endif
             }
             for (const auto& display : availableDisplays) {
                 const std::string option = "Монитор " + std::to_string(display.number);
@@ -458,7 +527,7 @@ struct Ui {
                     writeLauncherDisplay(launcherDisplay);
                     reg::launcher::moveLauncherToDisplay(window, launcherDisplay);
 #ifdef _WIN32
-                    missionPlannerTiledThisSession = !missionPlannerAutoLayout;
+                    tiledThisSession = !windowLayout.autoLayout;
 #endif
                 }
             }
@@ -521,42 +590,91 @@ struct Ui {
     }
 
 #ifdef _WIN32
-    void drawMissionPlannerLayout() {
+    void drawWindowTiling() {
+        using reg::launcher::WindowTileResult;
+        const int current = reg::launcher::findTargetIndex(
+            applicationWindows, windowLayout.target, preferredWindowHandle);
+        std::string preview = "Выберите запущенное окно";
+        if (current >= 0) {
+            const auto& selected = applicationWindows[static_cast<std::size_t>(current)];
+            preview = selected.application + " — " + selected.title;
+        } else if (!windowLayout.target.empty()) {
+            preview = windowLayout.target.title + " (не запущено)";
+        }
+
         ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("%s  Окна:", Symbols::displays);
         ImGui::SameLine();
-        if (ImGui::Button("Разместить 50/50 с Mission Planner")) {
-            switch (reg::launcher::tileWithMissionPlanner(
-                        window, launcherDisplay)) {
-                case reg::launcher::MissionPlannerTileResult::success:
-                    missionPlannerTiledThisSession = true;
-                    message = "Launcher сверху, Mission Planner снизу";
+        const float rowWidth = ImGui::GetContentRegionAvail().x;
+        ImGui::SetNextItemWidth(std::clamp(rowWidth * .44f, 190.0f, 370.0f));
+        if (ImGui::BeginCombo("##window-picker", preview.c_str())) {
+            if (applicationWindows.empty())
+                ImGui::TextDisabled("Нет доступных окон. Откройте приложение.");
+            for (std::size_t i = 0; i < applicationWindows.size(); ++i) {
+                const auto& choice = applicationWindows[i];
+                ImGui::PushID(static_cast<int>(i));
+                const auto label = choice.application + " — " + choice.title;
+                if (ImGui::Selectable(label.c_str(),
+                                      current == static_cast<int>(i))) {
+                    windowLayout.target = reg::launcher::targetOf(choice);
+                    windowLayout.migrateMissionPlanner = false;
+                    preferredWindowHandle = choice.handle;
+                    tiledThisSession = false;
+                    try { saveWindowLayoutPreferences(windowLayout); }
+                    catch (const std::exception& e) { message = e.what(); }
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Выберите открытое окно другой программы.\n"
+                "Выбор сохранится и после перезапуска приложения.");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Обновить список")) {
+            applicationWindows = reg::launcher::openApplicationWindows();
+        }
+
+        // On compact screens controls can wrap to a second row rather than
+        // squeezing the window list or stretching beyond the viewport.
+        if (ImGui::GetContentRegionAvail().x > 315.0f) ImGui::SameLine();
+        ImGui::BeginDisabled(windowLayout.target.empty());
+        if (ImGui::Button("Разместить 50/50")) {
+            switch (reg::launcher::tileWithWindow(
+                        window, launcherDisplay, windowLayout.target,
+                        preferredWindowHandle)) {
+                case WindowTileResult::success:
+                    tiledThisSession = true;
+                    message = "Launcher сверху, выбранная программа снизу";
                     break;
-                case reg::launcher::MissionPlannerTileResult::notFound:
-                    message = "Mission Planner не найден. Запустите его и повторите.";
+                case WindowTileResult::notRunning:
+                    message = "Выбранное окно не найдено. Откройте его и обновите список.";
                     break;
-                case reg::launcher::MissionPlannerTileResult::noMonitor:
+                case WindowTileResult::noMonitor:
                     message = "Монитор недоступен или слишком мал для двух окон";
                     break;
+                case WindowTileResult::noSelection:
+                    message = "Выберите окно из списка";
+                    break;
                 default:
-                    message = "Не удалось переместить окна. Проверьте права приложений.";
+                    message = "Не удалось переместить окна. Проверьте права программ.";
                     break;
             }
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("При запуске##auto-tiling", &missionPlannerAutoLayout)) {
-            try {
-                writeMissionPlannerAutoLayout(missionPlannerAutoLayout);
-                missionPlannerTiledThisSession = !missionPlannerAutoLayout;
-                lastMissionPlannerAttempt = {};
-            } catch (const std::exception& e) {
-                message = e.what();
-            }
+        if (ImGui::Checkbox("При запуске##auto-window-tiling",
+                            &windowLayout.autoLayout)) {
+            windowLayout.migrateMissionPlanner = false;
+            tiledThisSession = false;
+            lastWindowAttempt = {};
+            try { saveWindowLayoutPreferences(windowLayout); }
+            catch (const std::exception& e) { message = e.what(); }
         }
+        ImGui::EndDisabled();
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Дождаться Mission Planner и один раз разместить "
-                "оба окна по половинам выбранного экрана. "
-                "Ручные перемещения после этого не переопределяются.");
+            ImGui::SetTooltip("Один раз расположить выбранную программу снизу,\n"
+                "когда её окно появится. Ручные перемещения не сбрасываются.");
         }
     }
 #endif
@@ -730,7 +848,7 @@ struct Ui {
                           ImGuiChildFlags_None);
         drawProfileBar();
 #ifdef _WIN32
-        drawMissionPlannerLayout();
+        drawWindowTiling();
 #endif
         ImGui::Spacing();
         ImGui::BeginDisabled(process.running());

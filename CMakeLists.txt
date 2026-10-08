@@ -500,6 +500,17 @@ add_library(reg_launcher_core STATIC
 )
 target_include_directories(reg_launcher_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(reg_launcher_core PUBLIC nlohmann_json::nlohmann_json)
+if(REG_BUILD_TESTS)
+    add_executable(reg_window_identity_tests tests/window_identity_tests.cpp)
+    target_include_directories(reg_window_identity_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        target_compile_options(reg_window_identity_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(reg_window_identity_tests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME window_identity COMMAND reg_window_identity_tests)
+endif()
 # Lock responsive dashboard breakpoints independently of SDL/ImGui.
 if(REG_BUILD_TESTS)
     add_executable(reg_launcher_layout_tests tests/launcher_layout_tests.cpp)
@@ -568,11 +579,11 @@ target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
 add_executable(reg_launcher WIN32
     src/launcher/main.cpp
     src/launcher/LauncherDisplay.cpp
-    src/launcher/MissionPlannerTile.cpp
+    src/launcher/WindowTiling.cpp
 )
 target_link_libraries(reg_launcher PRIVATE reg_launcher_core reg_launcher_imgui)
 if(WIN32)
-    target_link_libraries(reg_launcher PRIVATE shell32 user32)
+    target_link_libraries(reg_launcher PRIVATE shell32 user32 dwmapi)
 endif()
 target_compile_definitions(reg_launcher PRIVATE
     REG_FONT_DIR=\"${REG_FONT_OUTPUT_DIR}\"
