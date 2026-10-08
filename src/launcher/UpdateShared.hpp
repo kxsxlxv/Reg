@@ -9,6 +9,8 @@ namespace reg::launcher {
 // Only executable/runtime files in the portable bundle are managed by updates.
 // User settings, sessions and recordings can never be included in a manifest.
 bool validManagedPath(std::string_view path);
+// Validate standalone release asset names, including MinGW C++ runtime DLLs.
+bool validUpdateAsset(std::string_view asset);
 std::filesystem::path managedPath(
     const std::filesystem::path& root, std::string_view relative);
 std::string sha256File(const std::filesystem::path& path);

@@ -562,6 +562,19 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/scripts/linux/reg-launcher.desktop"
     DESTINATION share/applications OPTIONAL)
 
 if(REG_BUILD_TESTS)
+    add_executable(reg_command_line_options_tests
+        tests/command_line_options_tests.cpp
+        src/app/CommandLine.cpp
+    )
+    target_include_directories(reg_command_line_options_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        target_compile_options(reg_command_line_options_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(reg_command_line_options_tests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME command_line_options COMMAND reg_command_line_options_tests)
+
     add_executable(reg_launcher_config_tests
         tests/launcher_config_tests.cpp
     )

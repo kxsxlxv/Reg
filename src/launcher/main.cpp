@@ -20,6 +20,8 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <cmath>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,9 +30,36 @@ namespace {
 namespace fs = std::filesystem;
 using reg::launcher::Profile;
 
+struct Symbols {
+    static constexpr const char* play = "\xee\x80\xb7";
+    static constexpr const char* stop = "\xee\x81\x87";
+    static constexpr const char* source = "\xee\x81\x8b";
+    static constexpr const char* displays = "\xee\x8c\xb3";
+    static constexpr const char* record = "\xee\x87\x9b";
+    static constexpr const char* network = "\xee\x98\xbe";
+    static constexpr const char* tune = "\xee\x90\xa9";
+    static constexpr const char* save = "\xee\x85\xa1";
+    static constexpr const char* refresh = "\xee\x97\x95";
+    static constexpr const char* download = "\xee\x8b\x84";
+    static constexpr const char* check = "\xee\xa1\xac";
+    static constexpr const char* warning = "\xee\x80\x82";
+    static constexpr const char* folder = "\xee\x8b\x87";
+    static constexpr const char* logs = "\xee\xa1\xaf";
+    static constexpr const char* info = "\xee\xa2\x8e";
+    static constexpr const char* add = "\xee\x85\x85";
+    static constexpr const char* settings = "\xee\xa2\xb8";
+};
+
+
 template <std::size_t N>
 void copyTo(std::array<char, N>& buffer, const std::string& source) {
     std::snprintf(buffer.data(), buffer.size(), "%s", source.c_str());
+}
+
+std::string utf8String(const fs::path& path) {
+    const auto bytes = path.u8string();
+    return std::string(
+        reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
 std::string tail(const fs::path& path, std::streamoff limit = 32768) {
@@ -63,6 +92,8 @@ struct Ui {
     std::string output;
     std::chrono::steady_clock::time_point lastRead{};
     bool showAdvanced{false};
+    bool showLogs{false};
+    bool showCreateProfile{false};
 #ifdef _WIN32
     reg::launcher::UpdateManager updater{reg::launcher::executableDirectory()};
     std::string updateChannel{"dev"};
@@ -188,85 +219,133 @@ struct Ui {
     void drawUpdates() {
         using reg::launcher::UpdatePhase;
         const auto info = updater.snapshot();
-        ImGui::Spacing();
-        ImGui::TextUnformatted("Обновления");
-        ImGui::SameLine();
-        const bool checkingOrDownloading =
-            info.phase == UpdatePhase::Checking || info.phase == UpdatePhase::Downloading;
-        ImGui::BeginDisabled(checkingOrDownloading);
-        if (ImGui::BeginCombo("Канал", updateChannel == "dev" ?
-                            "Development" : "Stable")) {
-            for (const auto* option : {"dev", "stable"}) {
-                if (ImGui::Selectable(option, option == updateChannel)) {
-                    updateChannel = option;
-                    autoUpdateStarted = false;
+        float height = info.phase == UpdatePhase::Downloading ? 150.0f : 115.0f;
+        if (card("##updates-card", height, ImVec4(.118f,.143f,.192f,1),
+                 Symbols::refresh, "Обновления", ImVec4(.54f,.72f,1,1))) {
+            const bool busy = info.phase == UpdatePhase::Checking ||
+                              info.phase == UpdatePhase::Downloading;
+            ImGui::BeginDisabled(busy);
+            ImGui::SetNextItemWidth(160);
+            if (ImGui::BeginCombo("##update-channel", updateChannel == "dev"
+                                 ? "Development" : "Stable")) {
+                for (const auto* option : {"dev", "stable"}) {
+                    if (ImGui::Selectable(option, updateChannel == option)) {
+                        updateChannel = option;
+                        autoUpdateStarted = false;
+                        try {
+                            fs::create_directories(reg::launcher::dataDirectory());
+                            std::ofstream out(reg::launcher::dataDirectory() /
+                                              "update-channel.txt", std::ios::trunc);
+                            out << updateChannel << '\n';
+                        } catch (...) {}
+                        updater.checkAsync(updateChannel);
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(info.phase == UpdatePhase::Error
+                              ? "Повторить" : "Проверить")) {
+                autoUpdateStarted = false;
+                if (info.phase == UpdatePhase::Error) updater.retryAsync();
+                else updater.checkAsync(updateChannel);
+            }
+            ImGui::EndDisabled();
+
+            if (info.phase == UpdatePhase::Error) {
+                ImGui::TextColored(ImVec4(1,.62,.53,1), "%s  Не удалось проверить обновления",
+                                   Symbols::warning);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", info.message.c_str());
+            } else {
+                ImGui::TextDisabled("%s", info.message.c_str());
+            }
+            if (info.phase == UpdatePhase::Downloading && info.totalBytes) {
+                ImGui::ProgressBar(std::clamp(
+                    static_cast<float>(info.downloadedBytes) /
+                    static_cast<float>(info.totalBytes), 0.0f, 1.0f),
+                    ImVec2(-1,0), "Загрузка");
+            }
+            if (info.phase == UpdatePhase::Available &&
+                updateChannel == "stable") {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Скачать")) updater.downloadAsync();
+            }
+            if (info.phase == UpdatePhase::Prepared && !process.running()) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Установить и перезапустить")) {
                     try {
-                        fs::create_directories(reg::launcher::dataDirectory());
-                        std::ofstream out(reg::launcher::dataDirectory() /
-                                          "update-channel.txt", std::ios::trunc);
-                        out << updateChannel << '\n';
-                    } catch (...) {}
-                    updater.checkAsync(updateChannel);
+                        commitEdits();
+                        reg::launcher::saveProfile(profileName, profile);
+                        updater.applyAndRestart();
+                        quitForUpdate = true;
+                    } catch (const std::exception& e) { message = e.what(); }
+                }
+            }
+        }
+        finishCard();
+    }
+#endif
+    // Reusable, consistently padded cards. The panel backgrounds are kept
+    // distinct from the window background for readability in the dark theme.
+    static bool card(const char* id, float height, ImVec4 background,
+                     const char* symbol, const char* label, ImVec4 accent) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, background);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(accent.x, accent.y, accent.z, 0.34f));
+        const bool visible = ImGui::BeginChild(
+            id, ImVec2(0, height), ImGuiChildFlags_Borders);
+        ImGui::PopStyleColor(2);
+        if (visible) {
+            ImGui::TextColored(accent, "%s  %s", symbol, label);
+            ImGui::Separator();
+        }
+        return visible;
+    }
+
+    static void finishCard() { ImGui::EndChild(); }
+
+    static void caption(const char* label) {
+        ImGui::TextDisabled("%s", label);
+    }
+
+    static void integer(const char* label, const char* id, int& value) {
+        caption(label);
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputInt(id, &value);
+    }
+
+    static int connectedDisplays() {
+        int count = 0;
+        SDL_DisplayID* displays = SDL_GetDisplays(&count);
+        if (displays) SDL_free(displays);
+        return std::clamp(count, 1, 16);
+    }
+
+    void displaySelector(const char* id, const char* label,
+                         int& selection, const char* defaultLabel) {
+        caption(label);
+        const int count = connectedDisplays();
+        std::string preview = selection == 0
+            ? std::string("Автоматически (") + defaultLabel + ")"
+            : "Монитор " + std::to_string(selection);
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::BeginCombo(id, preview.c_str())) {
+            if (ImGui::Selectable("Автоматически##auto", selection == 0)) selection = 0;
+            for (int number = 1; number <= count; ++number) {
+                const std::string item = "Монитор " + std::to_string(number);
+                if (ImGui::Selectable(item.c_str(), selection == number)) {
+                    selection = number;
                 }
             }
             ImGui::EndCombo();
         }
-        ImGui::SameLine();
-        if (ImGui::SmallButton(info.phase == UpdatePhase::Error ?
-                               "Повторить" : "Проверить")) {
-            autoUpdateStarted = false;
-            if (info.phase == UpdatePhase::Error) updater.retryAsync();
-            else updater.checkAsync(updateChannel);
-        }
-        ImGui::EndDisabled();
-        if (!info.tag.empty()) {
-            ImGui::Text("Версия: %s", info.tag.c_str());
-        }
-        ImGui::TextWrapped("%s", info.message.c_str());
-        if (info.phase == UpdatePhase::Downloading && info.totalBytes) {
-            const auto ratio = static_cast<float>(info.downloadedBytes) /
-                               static_cast<float>(info.totalBytes);
-            ImGui::ProgressBar(std::min(ratio, 1.0f), ImVec2(-1, 0),
-                               "Загрузка изменённых файлов");
-        }
-        if (info.phase == UpdatePhase::Available && updateChannel == "stable") {
-            ImGui::Text("Изменены файлы: %d, объём: %.1f МБ",
-                static_cast<int>(info.changedFiles),
-                static_cast<double>(info.totalBytes) / 1048576.0);
-            if (ImGui::Button("Скачать изменения")) updater.downloadAsync();
-        }
-        if (info.phase == UpdatePhase::Prepared) {
-            if (process.running()) {
-                ImGui::TextDisabled("Для установки сначала остановите видеопоток");
-            } else if (ImGui::Button("Установить и перезапустить")) {
-                try {
-                    commitEdits();
-                    reg::launcher::saveProfile(profileName, profile);
-                    updater.applyAndRestart();
-                    quitForUpdate = true;
-                } catch (const std::exception& e) { message = e.what(); }
-            }
-        }
-        ImGui::Spacing();
     }
-#endif
-    void draw() {
-        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-        const ImGuiIO& io = ImGui::GetIO();
-        ImGui::SetNextWindowSize(io.DisplaySize);
-        constexpr ImGuiWindowFlags flags =
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse;
-        ImGui::Begin("Панель управления", nullptr, flags);
 
-        ImGui::TextUnformatted("Панель управления");
-#ifdef _WIN32
-        drawUpdates();
-#endif
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        if (ImGui::BeginCombo("Профиль", profileName.c_str())) {
+    void drawProfileBar() {
+        ImGui::TextDisabled("Профиль запуска");
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float selectorWidth = std::max(140.0f, available - 265.0f);
+        ImGui::SetNextItemWidth(selectorWidth);
+        if (ImGui::BeginCombo("##profile", profileName.c_str())) {
             for (const auto& name : profileNames) {
                 if (ImGui::Selectable(name.c_str(), name == profileName)) {
                     try { selectProfile(name); }
@@ -275,103 +354,323 @@ struct Ui {
             }
             ImGui::EndCombo();
         }
-        if (!process.running()) {
-            ImGui::SameLine();
-            if (ImGui::Button("Сохранить")) {
-                try { save(); }
-                catch (const std::exception& e) { message = e.what(); }
-            }
-        }
-
+        ImGui::SameLine();
         ImGui::BeginDisabled(process.running());
-        ImGui::SetNextItemWidth(-1.0f);
-        ImGui::InputText("##rtsp", url.data(), url.size());
-        ImGui::TextDisabled("RTSP источник");
-
-        ImGui::Checkbox("CV Overlay", &profile.overlayEnabled);
+        if (ImGui::Button("Сохранить", ImVec2(110, 0))) {
+            try { save(); } catch (const std::exception& e) { message = e.what(); }
+        }
         ImGui::SameLine();
-        ImGui::Checkbox("Telemetry", &profile.telemetryEnabled);
-        ImGui::SameLine();
-        ImGui::Checkbox("Blackbox", &profile.recorderEnabled);
-
-        ImGui::SliderInt("Задержка Overlay, мс", &profile.overlayDelayMs, 0, 1000);
-        ImGui::InputInt("UDP порт метаданных", &profile.metadataPort);
-        ImGui::Checkbox("Дополнительные настройки", &showAdvanced);
-        if (showAdvanced) {
-            ImGui::SeparatorText("RTSP / Decode");
-            ImGui::InputInt("max_delay, мкс", &profile.maxDelayUs);
-            ImGui::InputInt("RTP reorder queue", &profile.reorderQueueSize);
-            ImGui::InputInt("Дополнительные GPU frames", &profile.extraHwFrames);
-            ImGui::InputText("UDP bind", bind.data(), bind.size());
-
-            ImGui::SeparatorText("Recorder");
-            ImGui::InputInt("Сегмент, мс", &profile.recordSegmentMs);
-            ImGui::InputInt("Хранение, сек", &profile.recordRetentionSec);
-            ImGui::InputInt("Очередь записи", &profile.recordQueueCapacity);
-
-            ImGui::SeparatorText("Диагностика");
-            ImGui::Checkbox("Vulkan validation", &profile.validationEnabled);
-            ImGui::Checkbox("Требовать frame identity", &profile.requireFrameIdentity);
-            ImGui::InputInt("Identity probe frames (0 = выкл)", &profile.identityProbeFrames);
-            ImGui::InputInt("Reconnect initial, мс", &profile.reconnectInitialMs);
-            ImGui::InputInt("Reconnect max, мс", &profile.reconnectMaxMs);
-            ImGui::SeparatorText("Создать профиль");
-            ImGui::InputText("Имя (латиница, цифры, - и _)", newName.data(), newName.size());
-            if (ImGui::Button("Сохранить как новый")) {
-                try { createProfile(); }
-                catch (const std::exception& e) { message = e.what(); }
-            }
+        if (ImGui::Button("Новый профиль", ImVec2(145, 0))) {
+            showCreateProfile = !showCreateProfile;
         }
         ImGui::EndDisabled();
 
+        if (showCreateProfile) {
+            ImGui::SetNextItemWidth(-155);
+            ImGui::InputTextWithHint("##new-name", "Имя латиницей, цифры, - или _",
+                                     newName.data(), newName.size());
+            ImGui::SameLine();
+            ImGui::BeginDisabled(process.running());
+            if (ImGui::Button("Создать", ImVec2(135, 0))) {
+                try {
+                    createProfile();
+                    showCreateProfile = false;
+                } catch (const std::exception& e) { message = e.what(); }
+            }
+            ImGui::EndDisabled();
+        }
+    }
+
+    void drawSource() {
+        if (card("##source-card", 116.0f, ImVec4(0.105f, 0.151f, 0.195f, 1),
+                 Symbols::source, "Источник видео", ImVec4(0.32f, 0.72f, 0.97f, 1))) {
+            caption("RTSP / RTSPS адрес");
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##rtsp", "rtsp://camera:8554/stream",
+                                     url.data(), url.size());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Адрес источника с поддержкой RTSP и RTSPS");
+            }
+        }
+        finishCard();
+    }
+
+    void drawDisplays() {
+        if (card("##display-card", 283.0f, ImVec4(0.109f, 0.157f, 0.163f, 1),
+                 Symbols::displays, "Экраны и наложения", ImVec4(0.34f, 0.84f, 0.71f, 1))) {
+            ImGui::Checkbox("CV Overlay", &profile.overlayEnabled);
+            ImGui::SameLine();
+            ImGui::Checkbox("Телеметрия", &profile.telemetryEnabled);
+#ifdef _WIN32
+            const char* defaultRaw = "3";
+            const char* defaultOverlay = "2";
+            const char* defaultTelemetry = "1";
+#else
+            const char* defaultRaw = "1";
+            const char* defaultOverlay = "2";
+            const char* defaultTelemetry = "3";
+#endif
+            displaySelector("##monitor-raw", "Raw / исходное видео",
+                            profile.rawDisplay, defaultRaw);
+            if (profile.overlayEnabled) {
+                displaySelector("##monitor-overlay", "CV Overlay",
+                                profile.overlayDisplay, defaultOverlay);
+            }
+            if (profile.telemetryEnabled) {
+                displaySelector("##monitor-telemetry", "Telemetry",
+                                profile.telemetryDisplay, defaultTelemetry);
+            }
+        }
+        finishCard();
+    }
+
+    void drawRecorder() {
+        if (card("##record-card", 283.0f, ImVec4(0.155f, 0.125f, 0.167f, 1),
+                 Symbols::record, "Запись Blackbox", ImVec4(0.91f, 0.65f, 0.94f, 1))) {
+            ImGui::Checkbox("Включить циклическую запись", &profile.recorderEnabled);
+            ImGui::BeginDisabled(!profile.recorderEnabled);
+            integer("Длительность сегмента, мс", "##record-segment", profile.recordSegmentMs);
+            caption("Срок хранения записей");
+            int minutes = std::max(1, profile.recordRetentionSec / 60);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputInt("##retention-minutes", &minutes, 1, 5)) {
+                profile.recordRetentionSec = std::clamp(minutes, 1, 100000) * 60;
+            }
+            ImGui::TextDisabled("минуты  ·  файлы в папке recordings/blackbox");
+            ImGui::EndDisabled();
+        }
+        finishCard();
+    }
+
+    void drawNetwork() {
+        if (card("##network-card", 215.0f, ImVec4(0.124f, 0.143f, 0.197f, 1),
+                 Symbols::network, "Сеть и удалённый UI", ImVec4(0.52f, 0.69f, 1, 1))) {
+            integer("Порт UDP метаданных", "##metadata-port", profile.metadataPort);
+            ImGui::Checkbox("Приём NetImgui", &profile.netImguiEnabled);
+            ImGui::BeginDisabled(!profile.netImguiEnabled);
+            integer("Порт TCP NetImgui", "##netimgui-port", profile.netImguiPort);
+            ImGui::EndDisabled();
+        }
+        finishCard();
+    }
+
+    void drawLatency() {
+        if (card("##latency-card", 215.0f, ImVec4(0.176f, 0.140f, 0.114f, 1),
+                 Symbols::tune, "Задержка и восстановление", ImVec4(1.0f, 0.73f, 0.40f, 1))) {
+            caption("Задержка CV Overlay, мс");
+            ImGui::SetNextItemWidth(-1);
+            ImGui::SliderInt("##overlay-delay", &profile.overlayDelayMs, 0, 1000);
+            integer("Начало переподключения, мс", "##reconnect-initial",
+                    profile.reconnectInitialMs);
+            integer("Максимум переподключения, мс", "##reconnect-max",
+                    profile.reconnectMaxMs);
+        }
+        finishCard();
+    }
+
+    void drawAdvanced() {
+        if (!ImGui::CollapsingHeader("Дополнительные параметры",
+                                   ImGuiTreeNodeFlags_None)) return;
+        ImGui::Indent(8.0f);
+        if (ImGui::BeginTable("##advanced-grid", 2, ImGuiTableFlags_SizingStretchSame)) {
+            ImGui::TableNextColumn();
+            ImGui::TextColored(ImVec4(.40f,.80f,.97f,1), "%s  Decode / RTSP", Symbols::tune);
+            integer("FFmpeg max_delay, мкс", "##max-delay", profile.maxDelayUs);
+            integer("RTP reorder queue", "##reorder", profile.reorderQueueSize);
+            integer("Дополнительные GPU frames", "##hw-frames", profile.extraHwFrames);
+            caption("UDP bind (интерфейс приёма)");
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputText("##metadata-bind", bind.data(), bind.size());
+            ImGui::TableNextColumn();
+            ImGui::TextColored(ImVec4(.90f,.70f,.97f,1), "%s  Диагностика и запись", Symbols::settings);
+            integer("Очередь записи", "##record-queue", profile.recordQueueCapacity);
+            ImGui::Checkbox("Vulkan validation", &profile.validationEnabled);
+            ImGui::Checkbox("Требовать FrameIdentity", &profile.requireFrameIdentity);
+            integer("Проверить N кадров (0 = выкл)", "##identity-frames",
+                    profile.identityProbeFrames);
+            ImGui::EndTable();
+        }
+        ImGui::Unindent(8.0f);
+    }
+
+    void drawLogs() {
+        if (!ImGui::CollapsingHeader("Логи текущей сессии",
+                                   ImGuiTreeNodeFlags_None)) return;
+        if (sessionDirectory.empty()) {
+            ImGui::TextDisabled("Запустите видеопоток для создания логов сессии");
+            return;
+        }
+        const auto path = utf8String(sessionDirectory);
+        ImGui::TextDisabled("%s", path.c_str());
+        if (ImGui::SmallButton("Копировать путь")) SDL_SetClipboardText(path.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Копировать логи")) SDL_SetClipboardText(output.c_str());
+        ImGui::BeginChild("##log-text", ImVec2(0, 180), ImGuiChildFlags_Borders);
+        ImGui::TextUnformatted(output.c_str());
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 30.0f) {
+            ImGui::SetScrollHereY(1.0f);
+        }
+        ImGui::EndChild();
+    }
+
+    void draw() {
+        const ImGuiIO& io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(io.DisplaySize);
+        constexpr ImGuiWindowFlags flags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse;
+        ImGui::Begin("##control-center", nullptr, flags);
+        ImGui::TextColored(ImVec4(.91f,.95f,1,1), "ПАНЕЛЬ УПРАВЛЕНИЯ");
+        ImGui::SameLine();
+        const auto statusColor = process.running()
+            ? ImVec4(.36f,.91f,.68f,1) : ImVec4(.65f,.72f,.84f,1);
+        ImGui::TextColored(statusColor, "  %s  %s",
+            process.running() ? Symbols::check : Symbols::info,
+            process.running() ? "Работает" : "Ожидание запуска");
+        ImGui::Separator();
+
+        // Reserve a non-scrolling footer for the primary action and status.
+        ImGui::BeginChild("##scroll-content", ImVec2(0, -75),
+                          ImGuiChildFlags_None);
+        ImGui::BeginDisabled(process.running());
+        drawProfileBar();
         ImGui::Spacing();
-        if (!process.running()) {
-            if (ImGui::Button("Запустить", ImVec2(160.0f, 38.0f))) {
+        drawSource();
+        ImGui::Spacing();
+        if (ImGui::BeginTable("##main-cards", 2,
+                             ImGuiTableFlags_SizingStretchSame)) {
+            ImGui::TableNextColumn();
+            drawDisplays();
+            ImGui::TableNextColumn();
+            drawRecorder();
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            drawNetwork();
+            ImGui::TableNextColumn();
+            drawLatency();
+            ImGui::EndTable();
+        }
+        ImGui::Spacing();
+        drawAdvanced();
+        ImGui::EndDisabled();
+
+#ifdef _WIN32
+        ImGui::Spacing();
+        drawUpdates();
+#endif
+        ImGui::Spacing();
+        drawLogs();
+        ImGui::EndChild();
+
+        ImGui::Separator();
+        const ImVec4 action = process.running()
+            ? ImVec4(.75f,.36f,.35f,1) : ImVec4(.19f,.69f,.48f,1);
+        ImGui::PushStyleColor(ImGuiCol_Button, action);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+            ImVec4(action.x+.10f, action.y+.08f, action.z+.08f, 1));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, action);
+        if (ImGui::Button(process.running() ? "Остановить" : "Запустить",
+                          ImVec2(180, 43))) {
+            if (process.running()) {
+                process.requestStop();
+                message = "Останавливаем видеопоток...";
+            } else {
                 try { start(); }
                 catch (const std::exception& e) { message = e.what(); }
             }
-        } else {
-            if (ImGui::Button("Остановить", ImVec2(160.0f, 38.0f))) {
-                process.requestStop();
-                message = "Ожидание корректного завершения...";
-            }
         }
+        ImGui::PopStyleColor(3);
         ImGui::SameLine();
-        if (process.running()) ImGui::TextUnformatted("● Работает");
-        else if (lastExit) ImGui::Text("Завершено: %d", *lastExit);
-        else ImGui::TextUnformatted("Остановлено");
-        if (!message.empty()) ImGui::TextWrapped("%s", message.c_str());
-
-        ImGui::SeparatorText("Логи текущей сессии");
-        if (!sessionDirectory.empty()) {
-            const auto utf8Path = sessionDirectory.u8string();
-            const std::string path(
-                reinterpret_cast<const char*>(utf8Path.data()), utf8Path.size());
-            ImGui::TextWrapped("%s", path.c_str());
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Копировать путь")) SDL_SetClipboardText(path.c_str());
-            if (ImGui::SmallButton("Копировать логи")) SDL_SetClipboardText(output.c_str());
+        ImGui::BeginGroup();
+        if (process.running()) ImGui::TextUnformatted("Видео и телеметрия активны");
+        else if (lastExit) ImGui::Text("Последнее завершение: %d", *lastExit);
+        else ImGui::TextUnformatted("Готово к запуску");
+        if (!message.empty()) {
+            ImGui::TextDisabled("%s", message.c_str());
+        } else {
+            ImGui::TextDisabled("Сессии и настройки сохраняются автоматически");
         }
-        if (ImGui::BeginChild("##logs", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
-            ImGui::TextUnformatted(output.c_str());
-        }
-        ImGui::EndChild();
+        ImGui::EndGroup();
         ImGui::End();
     }
+
 };
 
 void loadFont(const fs::path& appDir) {
-    auto candidate = appDir / "fonts" / "Roboto.ttf";
-    if (!fs::exists(candidate)) {
+    auto folder = appDir / "fonts";
+    if (!fs::is_regular_file(folder / "Roboto.ttf")) {
 #ifdef REG_FONT_DIR
-        candidate = fs::path(REG_FONT_DIR) / "Roboto.ttf";
+        folder = fs::path(REG_FONT_DIR);
 #endif
     }
-    if (fs::exists(candidate)) {
-        ImGuiIO& io = ImGui::GetIO();
-        io.Fonts->AddFontFromFileTTF(candidate.string().c_str(), 19.0f, nullptr,
-                                      io.Fonts->GetGlyphRangesCyrillic());
+    const auto roboto = folder / "Roboto.ttf";
+    const auto symbols = folder / "MaterialSymbolsOutlined.ttf";
+    auto& io = ImGui::GetIO();
+    if (fs::is_regular_file(roboto)) {
+        io.Fonts->AddFontFromFileTTF(
+            utf8String(roboto).c_str(), 17.0f, nullptr,
+            io.Fonts->GetGlyphRangesCyrillic());
     }
+    if (fs::is_regular_file(symbols)) {
+        ImFontConfig config{};
+        config.MergeMode = true;
+        config.PixelSnapH = true;
+        static constexpr ImWchar ranges[] = {
+        0xE002, 0xE002,
+        0xE037, 0xE037,
+        0xE047, 0xE047,
+        0xE04B, 0xE04B,
+        0xE145, 0xE145,
+        0xE161, 0xE161,
+        0xE1DB, 0xE1DB,
+        0xE2C4, 0xE2C4,
+        0xE2C7, 0xE2C7,
+        0xE333, 0xE333,
+        0xE429, 0xE429,
+        0xE5D5, 0xE5D5,
+        0xE63E, 0xE63E,
+        0xE86C, 0xE86C,
+        0xE86F, 0xE86F,
+        0xE88E, 0xE88E,
+        0xE8B8, 0xE8B8,
+            0
+        };
+        io.Fonts->AddFontFromFileTTF(
+            utf8String(symbols).c_str(), 20.0f,
+            &config, ranges);
+    }
+}
+
+void applyTheme() {
+    ImGui::StyleColorsDark();
+    auto& style = ImGui::GetStyle();
+    style.WindowPadding = ImVec2(17, 12);
+    style.FramePadding = ImVec2(9, 6);
+    style.ItemSpacing = ImVec2(9, 7);
+    style.ChildRounding = 11.0f;
+    style.FrameRounding = 6.0f;
+    style.PopupRounding = 8.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.GrabRounding = 5.0f;
+    style.WindowBorderSize = 0.0f;
+    style.ChildBorderSize = 1.0f;
+    auto* colors = style.Colors;
+    colors[ImGuiCol_WindowBg] = ImVec4(.065f,.086f,.12f,1);
+    colors[ImGuiCol_Text] = ImVec4(.92f,.95f,.99f,1);
+    colors[ImGuiCol_TextDisabled] = ImVec4(.59f,.65f,.75f,1);
+    colors[ImGuiCol_Border] = ImVec4(.23f,.30f,.39f,1);
+    colors[ImGuiCol_FrameBg] = ImVec4(.13f,.18f,.23f,1);
+    colors[ImGuiCol_FrameBgHovered] = ImVec4(.18f,.24f,.32f,1);
+    colors[ImGuiCol_FrameBgActive] = ImVec4(.21f,.30f,.41f,1);
+    colors[ImGuiCol_Header] = ImVec4(.18f,.30f,.39f,1);
+    colors[ImGuiCol_HeaderHovered] = ImVec4(.21f,.37f,.48f,1);
+    colors[ImGuiCol_Button] = ImVec4(.18f,.31f,.40f,1);
+    colors[ImGuiCol_ButtonHovered] = ImVec4(.22f,.43f,.56f,1);
+    colors[ImGuiCol_CheckMark] = ImVec4(.43f,.88f,.76f,1);
+    colors[ImGuiCol_SliderGrab] = ImVec4(.43f,.78f,.97f,1);
+    colors[ImGuiCol_SliderGrabActive] = ImVec4(.57f,.86f,1,1);
+    colors[ImGuiCol_Separator] = ImVec4(.20f,.26f,.34f,1);
 }
 
 } // namespace
@@ -382,7 +681,7 @@ int main(int, char**) {
         return 1;
     }
     SDL_Window* window = SDL_CreateWindow(
-        "Панель управления", 1000, 820,
+        "Панель управления", 1040, 800,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         std::fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
@@ -405,7 +704,7 @@ int main(int, char**) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+    applyTheme();
     ImGui::GetIO().IniFilename = nullptr;
     loadFont(reg::launcher::executableDirectory());
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);

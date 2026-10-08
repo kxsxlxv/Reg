@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci/ffmpeg-install
-          key: ucrt64-ffmpeg-v1-${{ hashFiles('ffmpeg/configure', 'ffmpeg/libavcodec/version_major.h', '.github/workflows/windows-build.yml') }}
+          key: ucrt64-ffmpeg-v1-${{ hashFiles('ffmpeg/configure', 'ffmpeg/libavcodec/version_major.h') }}
 
       - name: Build FFmpeg libraries
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'

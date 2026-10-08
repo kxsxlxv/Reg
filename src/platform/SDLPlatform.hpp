@@ -36,6 +36,8 @@ public:
 
     std::vector<DisplayInfo> displays() const;
 
+    // Optional positive override selects the Windows Settings display number
+    // (or 1-based SDL ordinal on Linux); zero uses the original mapping.
     // Call sites pass logical roles in creation order: Raw=0, Overlay=1,
     // Telemetry=2. On Windows these are mapped to the numbers shown by
     // Settings -> System -> Display -> Identify using active CCD
@@ -46,7 +48,8 @@ public:
     // three Vulkan presentation surfaces.
     bool placeWindowOnDisplay(
         SDL_Window* window,
-        std::size_t logicalRole);
+        std::size_t logicalRole,
+        int displayNumberOverride = 0);
 
     // Portable ordinal fallback used outside Windows. Despite the retained API
     // name this uses a borderless monitor-sized window, not SDL fullscreen.

@@ -73,3 +73,35 @@ during multi-file replacement are not yet implemented. Retained backup files
 are available for manual recovery in rare incomplete updates. On first install,
 Windows SmartScreen may warn for an unsigned build; validation on clean target
 Windows with the NVIDIA driver is still needed.
+
+## Compact control panel
+
+The launch panel uses the project's pinned Roboto and Google Material Symbols
+fonts. Its primary launch/stop button stays visible in a fixed footer; session
+logs and advanced diagnostics are collapsed by default. Separate tinted cards
+group source, output monitors, recording, network and reconnect settings.
+
+The per-profile monitor selection is stored alongside the RTSP source:
+- **Automatic (0):** retain historical mapping. On Windows, Raw is monitor 3,
+  CV Overlay is monitor 2 and Telemetry is monitor 1, as shown by Windows
+  Display Settings -> Identify.
+- **Monitor 1..N:** explicitly choose the monitor number shown by Windows
+  Display Settings. On Linux this is a one-based SDL display index.
+- Topology changes reapply the selected mapping without restarting the viewer.
+
+NetImgui can be disabled independently or configured to listen on a profile
+specific TCP port (default 8888). The listener starts after command-line
+parsing, before the RTSP/Vulkan runtime. A binary compiled without
+REG_ENABLE_NETIMGUI_REMOTE still accepts these startup options but does not
+open a remote listener.
+
+The new flags accepted by reg_probe are --raw-display, --overlay-display,
+--telemetry-display, --netimgui-port and --disable-netimgui. Profiles saved by
+earlier versions are upgraded on read with compatible defaults.
+
+## Update compatibility fix
+
+MinGW's standard runtime includes libstdc++-6.dll. Update manifests and asset
+names now allow '+' in an otherwise tightly restricted basename and include a
+specific regression test. Old portable installations can install the next
+release after the update has been published.

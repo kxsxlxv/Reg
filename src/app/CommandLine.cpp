@@ -49,6 +49,24 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         } else if (arg == "--extra-hw-frames") {
             options.extraHwFrames = parseInteger<int>(
                 requireValue(i, argc, argv, "--extra-hw-frames"), "--extra-hw-frames");
+        } else if (arg == "--raw-display") {
+            options.rawDisplay = parseInteger<int>(
+                requireValue(i, argc, argv, "--raw-display"), "--raw-display");
+        } else if (arg == "--overlay-display") {
+            options.overlayDisplay = parseInteger<int>(
+                requireValue(i, argc, argv, "--overlay-display"), "--overlay-display");
+        } else if (arg == "--telemetry-display") {
+            options.telemetryDisplay = parseInteger<int>(
+                requireValue(i, argc, argv, "--telemetry-display"), "--telemetry-display");
+        } else if (arg == "--netimgui-port") {
+            const auto port = parseInteger<unsigned>(
+                requireValue(i, argc, argv, "--netimgui-port"), "--netimgui-port");
+            if (port > 65535U || port == 0) {
+                throw std::runtime_error("--netimgui-port must be in [1,65535]");
+            }
+            options.netImguiPort = static_cast<std::uint16_t>(port);
+        } else if (arg == "--disable-netimgui") {
+            options.netImguiEnabled = false;
         } else if (arg == "--require-frame-identity") {
             options.requireFrameIdentity = true;
         } else if (arg == "--identity-probe-frames") {
@@ -106,6 +124,11 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.rtspUrl.empty()) {
         throw std::runtime_error("RTSP URL is required. Use --url rtsp://...");
     }
+    if (options.rawDisplay < 0 || options.rawDisplay > 16 ||
+        options.overlayDisplay < 0 || options.overlayDisplay > 16 ||
+        options.telemetryDisplay < 0 || options.telemetryDisplay > 16) {
+        throw std::runtime_error("Display number must be in [0,16] (0 = automatic)");
+    }
     if (options.maxDelayUs < 0) {
         throw std::runtime_error("--max-delay-us must be >= 0");
     }
@@ -155,6 +178,11 @@ void printUsage(const char* executableName) {
         << "  --max-delay-us N         FFmpeg RTSP demux max_delay (default: 0)\n"
         << "  --reorder-queue-size N   RTP packet reorder queue size (default: 0)\n"
         << "  --extra-hw-frames N      Extra Vulkan decode surfaces (default: 32)\n"
+        << "  --raw-display N          Raw monitor, 0=automatic (Windows default 3)\n"
+        << "  --overlay-display N      Overlay monitor, 0=automatic (Windows default 2)\n"
+        << "  --telemetry-display N    Telemetry monitor, 0=automatic (Windows default 1)\n"
+        << "  --netimgui-port N        NetImgui TCP port (default: 8888)\n"
+        << "  --disable-netimgui       Do not start embedded NetImgui listener\n"
         << "  --require-frame-identity Fail if a decoded frame lacks/duplicates/regresses FrameIdentity\n"
         << "  --identity-probe-frames N Validate N decoded frames then exit (implies --require-frame-identity)\n"
         << "  --metadata-bind ADDR     UDP metadata bind IPv4 address (default: 0.0.0.0)\n"

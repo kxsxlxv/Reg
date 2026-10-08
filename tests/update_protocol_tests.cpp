@@ -12,6 +12,11 @@ int main() {
     assert(validManagedPath("reg_replay.exe"));
     assert(validManagedPath("reg_updater.exe"));
     assert(validManagedPath("SDL3.dll"));
+    assert(validManagedPath("libstdc++-6.dll"));
+    assert(reg::launcher::validUpdateAsset(
+        "file-0023-b30dbd914d903992acb2-libstdc++-6.dll"));
+    assert(!reg::launcher::validUpdateAsset("file-23-evil/backup.exe"));
+    assert(!reg::launcher::validUpdateAsset("../file-23.dll"));
     assert(validManagedPath("fonts/Roboto.ttf"));
     assert(validManagedPath("shaders/video.vert.spv"));
     for (const auto* candidate : {
@@ -19,7 +24,7 @@ int main() {
         "fonts/../../settings.json", "fonts/evil.ttf/other",
         "shaders\\video.spv", "sessions/session.json", "profile.json",
         "contrib/../x.dll", "evil.exe", "fonts/sub/font.ttf",
-        "evil.dll/", "Launcher.exe:stream"}) {
+        "evil.dll/", "Launcher.exe:stream", "libstdc++-6.dll/../profile.json"}) {
         assert(!validManagedPath(candidate));
     }
 

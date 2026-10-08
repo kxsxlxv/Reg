@@ -10,6 +10,13 @@ struct CommandLineOptions {
     std::int64_t maxDelayUs{0};
     int reorderQueueSize{0};
     int extraHwFrames{32};
+    // 0 retains existing placement; 1..16 selects Windows Settings
+    // display number, or a 1-based SDL display ordinal on Linux.
+    int rawDisplay{0};
+    int overlayDisplay{0};
+    int telemetryDisplay{0};
+    std::uint16_t netImguiPort{8888};
+    bool netImguiEnabled{true};
     bool requireFrameIdentity{false};
     std::uint64_t identityProbeFrames{0};
 

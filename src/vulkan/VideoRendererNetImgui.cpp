@@ -1,4 +1,5 @@
 #include "vulkan/VideoRenderer.hpp"
+#include "vulkan/NetImguiSettings.hpp"
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
 
@@ -13,10 +14,12 @@ namespace reg::vulkan {
 namespace {
 
 std::weak_ptr<const int> gRawNetImguiOwner;
+std::uint16_t gNetImguiPort = 8888;
+bool gNetImguiEnabled = true;
 
 remote::NetImguiHostConfig rawNetImguiConfig() noexcept {
     return remote::NetImguiHostConfig{
-        .port = 8888,
+        .port = gNetImguiPort,
         .maxClients = 1,
         .activeFps = 60.0F,
         .inactiveFps = 10.0F,
@@ -29,7 +32,7 @@ std::unique_ptr<remote::NetImguiHost> prestartNetImguiListener() noexcept {
         auto host = std::make_unique<remote::NetImguiHost>(
             rawNetImguiConfig());
         std::cout
-            << "[netimgui] build enabled; listener prestarted tcp=8888\n";
+            << "[netimgui] listener prestarted tcp=" << gNetImguiPort << '\n';
         return host;
     } catch (const std::exception& error) {
         std::cerr
@@ -48,13 +51,22 @@ std::unique_ptr<remote::NetImguiHost> prestartNetImguiListener() noexcept {
 // first Raw render/NO-SIGNAL pass. Ownership is transferred to the Vulkan
 // renderer on first use by stopping this lightweight listener and immediately
 // recreating the host inside RemoteImGuiRenderer.
-std::unique_ptr<remote::NetImguiHost> gPrestartedNetImguiHost =
-    prestartNetImguiListener();
+std::unique_ptr<remote::NetImguiHost> gPrestartedNetImguiHost;
 
 } // namespace
 
+void configureNetImguiServer(std::uint16_t port, bool enabled) {
+    gNetImguiPort = port;
+    gNetImguiEnabled = enabled;
+    gPrestartedNetImguiHost.reset();
+    if (enabled) {
+        gPrestartedNetImguiHost = prestartNetImguiListener();
+    }
+}
+
 render::VideoOverlayRecorder*
 VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
+    if (!gNetImguiEnabled) return nullptr;
     if (!netImguiRoleToken_) {
         if (!gRawNetImguiOwner.expired()) {
             return nullptr;
@@ -83,7 +95,7 @@ VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
                     rawNetImguiConfig());
 
             std::cout
-                << "[netimgui] Raw overlay server attached tcp=8888\n";
+                << "[netimgui] Raw overlay server attached tcp=" << gNetImguiPort << '\n';
             remoteOverlay_ = std::move(remote);
         }
 

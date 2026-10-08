@@ -17,6 +17,7 @@
 #include "video/VideoTransform.hpp"
 #include "vulkan/RenderWindow.hpp"
 #include "vulkan/VideoRenderer.hpp"
+#include "vulkan/NetImguiSettings.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/VulkanError.hpp"
 
@@ -130,7 +131,8 @@ int runApplication(
 
         if (!platform.placeWindowOnDisplay(
                 rawSdlWindow,
-                0)) {
+                0,
+                options.rawDisplay)) {
             std::cerr
                 << "[display] raw display 0 unavailable; using window-manager placement\n";
         }
@@ -159,7 +161,8 @@ int runApplication(
 
             if (!platform.placeWindowOnDisplay(
                     overlaySdlWindow,
-                    1)) {
+                    1,
+                    options.overlayDisplay)) {
                 std::cerr
                     << "[display] overlay display 1 unavailable; using window-manager placement\n";
             }
@@ -180,7 +183,8 @@ int runApplication(
 
             if (!platform.placeWindowOnDisplay(
                     telemetrySdlWindow,
-                    2)) {
+                    2,
+                    options.telemetryDisplay)) {
                 std::cerr
                     << "[display] telemetry display 2 unavailable; using window-manager placement\n";
             }
@@ -850,20 +854,20 @@ int runApplication(
                     static_cast<void>(
                         platform.placeWindowOnDisplay(
                             rawWindow.sdlWindow(),
-                            0));
+                            0, options.rawDisplay));
 
                     if (overlayWindow) {
                         static_cast<void>(
                             platform.placeWindowOnDisplay(
                                 overlayWindow->sdlWindow(),
-                                1));
+                                1, options.overlayDisplay));
                     }
 
                     if (telemetryWindow) {
                         static_cast<void>(
                             platform.placeWindowOnDisplay(
                                 telemetryWindow->sdlWindow(),
-                                2));
+                                2, options.telemetryDisplay));
                     }
 
                     nextRawSurfaceRecovery = loopNow;
@@ -1640,6 +1644,11 @@ int main(int argc, char** argv) {
                 : "reg_probe");
         return 1;
     }
+
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    reg::vulkan::configureNetImguiServer(
+        options.netImguiPort, options.netImguiEnabled);
+#endif
 
     std::uint64_t deviceRecoveryAttempt = 0;
     auto recoveryDelay =

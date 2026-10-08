@@ -21,7 +21,7 @@ bool safeComponent(std::string_view segment) {
         segment.back() == '.' || segment.back() == ' ') return false;
     for (const unsigned char c : segment) {
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) {
+              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' || c == '+')) {
             return false;
         }
     }
@@ -65,6 +65,17 @@ bool validManagedPath(std::string_view path) {
     if (path.starts_with("shaders/") && endsWith(path, ".spv") &&
         path.find('/', 8) == std::string_view::npos) return true;
     return false;
+}
+
+bool validUpdateAsset(std::string_view asset) {
+    if (asset.size() < 5 || asset.size() > 180 ||
+        !asset.starts_with("file-")) return false;
+    for (const unsigned char c : asset) {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-' ||
+              c == '.' || c == '+')) return false;
+    }
+    return true;
 }
 
 std::filesystem::path managedPath(

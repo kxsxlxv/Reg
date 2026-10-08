@@ -18,6 +18,12 @@ struct Profile {
     int maxDelayUs{0};
     int reorderQueueSize{0};
     int extraHwFrames{32};
+    // Zero keeps the original automatic role-to-monitor mapping.
+    int rawDisplay{0};
+    int overlayDisplay{0};
+    int telemetryDisplay{0};
+    bool netImguiEnabled{true};
+    int netImguiPort{8888};
     std::string metadataBind{"0.0.0.0"};
     int metadataPort{50010};
     int overlayDelayMs{150};

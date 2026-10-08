@@ -81,6 +81,11 @@ json toJson(const Profile& p) {
         {"max_delay_us", p.maxDelayUs},
         {"reorder_queue_size", p.reorderQueueSize},
         {"extra_hw_frames", p.extraHwFrames},
+        {"raw_display", p.rawDisplay},
+        {"overlay_display", p.overlayDisplay},
+        {"telemetry_display", p.telemetryDisplay},
+        {"netimgui_enabled", p.netImguiEnabled},
+        {"netimgui_port", p.netImguiPort},
         {"metadata_bind", p.metadataBind},
         {"metadata_port", p.metadataPort},
         {"overlay_delay_ms", p.overlayDelayMs},
@@ -107,6 +112,11 @@ Profile fromJson(const json& j) {
     p.maxDelayUs = j.value("max_delay_us", p.maxDelayUs);
     p.reorderQueueSize = j.value("reorder_queue_size", p.reorderQueueSize);
     p.extraHwFrames = j.value("extra_hw_frames", p.extraHwFrames);
+    p.rawDisplay = j.value("raw_display", p.rawDisplay);
+    p.overlayDisplay = j.value("overlay_display", p.overlayDisplay);
+    p.telemetryDisplay = j.value("telemetry_display", p.telemetryDisplay);
+    p.netImguiEnabled = j.value("netimgui_enabled", p.netImguiEnabled);
+    p.netImguiPort = j.value("netimgui_port", p.netImguiPort);
     p.metadataBind = j.value("metadata_bind", p.metadataBind);
     p.metadataPort = j.value("metadata_port", p.metadataPort);
     p.overlayDelayMs = j.value("overlay_delay_ms", p.overlayDelayMs);
@@ -281,6 +291,14 @@ std::string validate(const Profile& p) {
         p.identityProbeFrames < 0 || p.overlayDelayMs < 0) {
         return "Video and latency parameters cannot be negative";
     }
+    if (p.rawDisplay < 0 || p.rawDisplay > 16 ||
+        p.overlayDisplay < 0 || p.overlayDisplay > 16 ||
+        p.telemetryDisplay < 0 || p.telemetryDisplay > 16) {
+        return "Display number must be from 0 (automatic) to 16";
+    }
+    if (p.netImguiPort < 1 || p.netImguiPort > 65535) {
+        return "NetImgui TCP port must be from 1 to 65535";
+    }
     if (p.metadataPort < 1 || p.metadataPort > 65535 || p.metadataBind.empty()) {
         return "Invalid metadata bind address/port";
     }
@@ -303,6 +321,10 @@ std::vector<std::string> arguments(
         "--max-delay-us", asText(p.maxDelayUs),
         "--reorder-queue-size", asText(p.reorderQueueSize),
         "--extra-hw-frames", asText(p.extraHwFrames),
+        "--raw-display", asText(p.rawDisplay),
+        "--overlay-display", asText(p.overlayDisplay),
+        "--telemetry-display", asText(p.telemetryDisplay),
+        "--netimgui-port", asText(p.netImguiPort),
         "--metadata-bind", p.metadataBind,
         "--metadata-port", asText(p.metadataPort),
         "--overlay-delay-ms", asText(p.overlayDelayMs),
@@ -317,6 +339,7 @@ std::vector<std::string> arguments(
         "--reconnect-initial-ms", asText(p.reconnectInitialMs),
         "--reconnect-max-ms", asText(p.reconnectMaxMs)
     };
+    if (!p.netImguiEnabled) result.push_back("--disable-netimgui");
     if (!p.overlayEnabled) result.push_back("--disable-overlay");
     if (!p.telemetryEnabled) result.push_back("--disable-telemetry");
     if (!p.recorderEnabled) result.push_back("--disable-recorder");

@@ -682,7 +682,8 @@ SDLPlatform::displays() const {
 
 bool SDLPlatform::placeWindowOnDisplay(
     SDL_Window* window,
-    std::size_t logicalRole) {
+    std::size_t logicalRole,
+    int displayNumberOverride) {
     if (window == nullptr) {
         throw std::invalid_argument(
             "placeWindowOnDisplay requires a window");
@@ -695,9 +696,11 @@ bool SDLPlatform::placeWindowOnDisplay(
     constexpr std::array<int, 3> roleToWindowsSettingsDisplay{3, 2, 1};
 
 #ifdef _WIN32
-    if (logicalRole < roleToWindowsSettingsDisplay.size()) {
-        const int settingsNumber =
-            roleToWindowsSettingsDisplay[logicalRole];
+    if (displayNumberOverride > 0 ||
+        logicalRole < roleToWindowsSettingsDisplay.size()) {
+        const int settingsNumber = displayNumberOverride > 0
+            ? displayNumberOverride
+            : roleToWindowsSettingsDisplay[logicalRole];
         const auto display =
             windowsSettingsDisplayByNumber(settingsNumber);
         if (!display.has_value()) {
@@ -716,7 +719,10 @@ bool SDLPlatform::placeWindowOnDisplay(
     // Portable fallback: use SDL enumeration order. This path is only for
     // non-Windows platforms; Windows uses CCD path numbering above so the
     // operator-facing Settings numbers are authoritative.
-    return placeWindowFullscreenOnDisplay(window, logicalRole);
+    return placeWindowFullscreenOnDisplay(
+        window, displayNumberOverride > 0
+            ? static_cast<std::size_t>(displayNumberOverride - 1)
+            : logicalRole);
 }
 
 bool SDLPlatform::placeWindowFullscreenOnDisplay(

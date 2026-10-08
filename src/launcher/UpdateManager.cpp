@@ -83,15 +83,6 @@ bool hexSha256(const std::string& text) {
         });
 }
 
-bool safeAsset(std::string_view asset) {
-    if (asset.size() < 5 || asset.size() > 180) return false;
-    for (unsigned char c : asset) {
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) return false;
-    }
-    return true;
-}
-
 bool safeTag(const std::string& tag, const std::string& channel) {
     if (channel == "dev") {
         if (tag.size() != 44 || !tag.starts_with("dev-")) return false;
@@ -317,7 +308,7 @@ void UpdateManager::check(std::string channel) {
         file.asset = entry.at("asset").get<std::string>();
         file.sha256 = entry.at("sha256").get<std::string>();
         file.size = entry.at("size").get<std::uint64_t>();
-        if (!validManagedPath(file.path) || !safeAsset(file.asset) ||
+        if (!validManagedPath(file.path) || !validUpdateAsset(file.asset) ||
             !hexSha256(file.sha256) || !names.insert(file.path).second ||
             file.size == 0 || file.size > kMaxFileBytes) {
             throw std::runtime_error("Unsafe update manifest entry");

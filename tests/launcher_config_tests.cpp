@@ -26,6 +26,11 @@ int main() {
     profile.rtspUrl = "rtsp://user:password@localhost:8554/demo";
     profile.overlayDelayMs = 125;
     profile.metadataPort = 50011;
+    profile.rawDisplay = 2;
+    profile.overlayDisplay = 1;
+    profile.telemetryDisplay = 3;
+    profile.netImguiPort = 8899;
+    profile.netImguiEnabled = false;
     profile.telemetryEnabled = false;
     profile.recordRetentionSec = 600;
     assert(validate(profile).empty());
@@ -34,6 +39,11 @@ int main() {
     assert(loaded.rtspUrl == profile.rtspUrl);
     assert(loaded.overlayDelayMs == 125);
     assert(loaded.metadataPort == 50011);
+    assert(loaded.rawDisplay == 2);
+    assert(loaded.overlayDisplay == 1);
+    assert(loaded.telemetryDisplay == 3);
+    assert(loaded.netImguiPort == 8899);
+    assert(!loaded.netImguiEnabled);
     assert(!loaded.telemetryEnabled);
     assert(loaded.recordRetentionSec == 600);
     const auto names = listProfiles();
@@ -41,6 +51,11 @@ int main() {
     const auto recordingDir = root / "some path" / "blackbox";
     const auto args = arguments(loaded, recordingDir);
     assert(std::find(args.begin(), args.end(), "--disable-telemetry") != args.end());
+    assert(std::find(args.begin(), args.end(), "--disable-netimgui") != args.end());
+    const auto raw = std::find(args.begin(), args.end(), "--raw-display");
+    assert(raw != args.end() && raw + 1 != args.end() && *(raw + 1) == "2");
+    const auto port = std::find(args.begin(), args.end(), "--netimgui-port");
+    assert(port != args.end() && port + 1 != args.end() && *(port + 1) == "8899");
     assert(std::find(args.begin(), args.end(), recordingDir.string()) != args.end());
     assert(redactCredentials(profile.rtspUrl) == "rtsp://***@localhost:8554/demo");
     const auto session1 = newSessionDirectory();
@@ -58,6 +73,12 @@ int main() {
     try { saveProfile("../escape", profile); }
     catch (const std::exception&) { invalidNameRejected = true; }
     assert(invalidNameRejected);
+    profile.rawDisplay = 17;
+    assert(!validate(profile).empty());
+    profile.rawDisplay = 2;
+    profile.netImguiPort = 0;
+    assert(!validate(profile).empty());
+    profile.netImguiPort = 8899;
     profile.reconnectMaxMs = 10;
     assert(!validate(profile).empty());
     fs::remove_all(root);
