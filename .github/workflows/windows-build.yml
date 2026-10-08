@@ -100,6 +100,15 @@ jobs:
           make -j2
           make install
 
+      - name: Verify MSYS2 compiler cache
+        shell: msys2 {0}
+        run: |
+          mkdir -p .ci
+          echo 'int ccache_smoke() { return 7; }' > .ci/ccache-smoke.cpp
+          ccache g++ -std=c++23 -c .ci/ccache-smoke.cpp -o .ci/ccache-smoke.o
+          ccache g++ -std=c++23 -c .ci/ccache-smoke.cpp -o .ci/ccache-smoke.o
+          ccache --show-stats --verbose
+
       - name: Configure project
         shell: msys2 {0}
         run: |
@@ -120,7 +129,7 @@ jobs:
       - name: C++ compiler cache statistics
         if: always()
         shell: msys2 {0}
-        run: ccache --show-stats
+        run: ccache --show-stats --verbose
 
       - name: Check standalone Windows updater dependencies
         shell: msys2 {0}
