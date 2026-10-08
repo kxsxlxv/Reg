@@ -48,6 +48,19 @@ class PackagingTests(unittest.TestCase):
             self.assertIn("VideoConsole/Launcher.exe", archive.namelist())
             self.assertIn("VideoConsole/manifest.json", archive.namelist())
 
+    def test_transitional_release_keeps_cpp_dll_in_portable(self):
+        (self.root / "libstdc++-6.dll").write_bytes(b"mingw dll")
+        tag = "dev-" + "b" * 40
+        manifest = MODULE.package(
+            self.root, self.out, "dev", tag, bridge_legacy_updater=True)
+        paths = {entry["path"] for entry in manifest["files"]}
+        self.assertNotIn("libstdc++-6.dll", paths)
+        with zipfile.ZipFile(self.out / "portable.zip") as archive:
+            self.assertIn("VideoConsole/libstdc++-6.dll", archive.namelist())
+        full = MODULE.package(self.root, self.out, "dev", tag)
+        self.assertIn("libstdc++-6.dll",
+                      {entry["path"] for entry in full["files"]})
+
     def test_rejects_missing_critical_binary(self):
         (self.root / "reg_updater.exe").unlink()
         with self.assertRaises(ValueError):

@@ -105,3 +105,23 @@ MinGW's standard runtime includes libstdc++-6.dll. Update manifests and asset
 names now allow '+' in an otherwise tightly restricted basename and include a
 specific regression test. Old portable installations can install the next
 release after the update has been published.
+
+## One-time legacy updater migration
+
+The original Windows updater wrongly rejected + in the standard MinGW DLL
+name libstdc++-6.dll. A single Development release marked [legacy-bridge]
+in its commit message omits that DLL from the **delta manifest only**.
+The DLL remains in the complete portable archive. A later release returns
+to the complete manifest after the corrected validator is deployed.
+
+The updater executable is now statically linked against MinGW runtime
+libraries, because it must run from a staging directory while the installed
+runtime DLLs are being replaced. Windows CI checks PE imports for
+libstdc++/libgcc/libwinpthread to prevent this regression.
+
+The old updater's dependency search could also prevent it from launching
+after being copied to the staging directory. In that case, the initial
+legacy installation cannot update itself: install the newly produced
+portable.zip once to establish a working statically linked updater.
+Subsequent updates are in-app. Do not delete %LOCALAPPDATA%/Reg, which
+contains profiles and recordings.

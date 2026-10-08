@@ -96,6 +96,16 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build-win --parallel 3
 
+      - name: Check standalone Windows updater dependencies
+        shell: msys2 {0}
+        run: |
+          objdump -p build-win/reg_updater.exe | grep 'DLL Name:'
+          if objdump -p build-win/reg_updater.exe |
+              grep -iE 'DLL Name:.*(libstdc\\+\\+|libgcc|libwinpthread)'; then
+            echo "Updater must not depend on application-shipped MinGW DLLs"
+            exit 1
+          fi
+
       - name: Run C++ tests
         shell: msys2 {0}
         run: |
@@ -117,6 +127,10 @@ jobs:
 
       - name: Create delta assets and portable bundle
         shell: pwsh
+        env:
+          # A single migration commit can omit the already-installed MinGW
+          # DLL containing '+'. Later updates use the corrected validator.
+          LEGACY_UPDATE_BRIDGE: ${{ contains(github.event.head_commit.message, '[legacy-bridge]') }}
         run: |
           if ($env:GITHUB_REF -like "refs/tags/v*") {
             $channel = "stable"
@@ -125,7 +139,11 @@ jobs:
             $channel = "dev"
             $tag = "dev-$env:GITHUB_SHA"
           }
-          python scripts/windows/package-update.py --root build-win --out dist --channel $channel --tag $tag
+          $extra = @()
+          if ($env:LEGACY_UPDATE_BRIDGE -eq "true" -and $channel -eq "dev") {
+            $extra += "--bridge-legacy-updater"
+          }
+          python scripts/windows/package-update.py --root build-win --out dist --channel $channel --tag $tag @extra
           if ($LASTEXITCODE -ne 0) { throw "Package creation failed" }
 
       - name: Upload initial portable bundle

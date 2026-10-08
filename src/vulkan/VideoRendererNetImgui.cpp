@@ -46,11 +46,9 @@ std::unique_ptr<remote::NetImguiHost> prestartNetImguiListener() noexcept {
     return nullptr;
 }
 
-// Start the embedded receiving side as soon as the NetImgui-enabled module is
-// loaded. This keeps TCP :8888 independent of RTSP availability and of the
-// first Raw render/NO-SIGNAL pass. Ownership is transferred to the Vulkan
-// renderer on first use by stopping this lightweight listener and immediately
-// recreating the host inside RemoteImGuiRenderer.
+// The listener is started explicitly after command-line parsing so a user
+// supplied TCP port can take effect before Vulkan and RTSP startup. The
+// listener is transferred to the renderer at its first use.
 std::unique_ptr<remote::NetImguiHost> gPrestartedNetImguiHost;
 
 } // namespace
@@ -82,7 +80,7 @@ VideoRenderer::ensureNetImguiOverlay(Swapchain& swapchain) {
 
     try {
         if (!remoteOverlay_) {
-            // The prestarted host exists only to guarantee that :8888 is live
+            // The prestarted host keeps the selected TCP port live
             // before video rendering begins. RemoteImGuiRenderer owns the real
             // host lifetime because it must stop network producers before GPU
             // texture teardown.

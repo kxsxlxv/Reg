@@ -58,13 +58,16 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def package(root: Path, output: Path, channel: str, tag: str) -> dict:
+def package(root: Path, output: Path, channel: str, tag: str,
+            bridge_legacy_updater: bool = False) -> dict:
     if channel not in {"dev", "stable"}:
         raise ValueError("Invalid channel")
     if not re.fullmatch(r"(dev-[a-f0-9]{40}|v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?)", tag):
         raise ValueError("Invalid release tag")
     if channel == "dev" and not tag.startswith("dev-"):
         raise ValueError("Dev channel needs a dev tag")
+    if bridge_legacy_updater and channel != "dev":
+        raise ValueError("Legacy bridge is only allowed for dev builds")
     if channel == "stable" and not tag.startswith("v"):
         raise ValueError("Stable channel needs a version tag")
 
@@ -86,6 +89,12 @@ def package(root: Path, output: Path, channel: str, tag: str) -> dict:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
         shutil.copy2(source, assets / filename)
+        # A single transitional dev release must be readable by the *old*
+        # updater, which incorrectly rejected '+' in MinGW DLL basenames.
+        # Still bundle that DLL in the initial portable ZIP. Its existing copy
+        # remains untouched on an incremental update from the previous build.
+        if bridge_legacy_updater and "+" in relative:
+            continue
         records.append({"path": relative, "asset": filename,
                         "sha256": checksum, "size": source.stat().st_size})
 
@@ -110,8 +119,11 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--channel", choices=("dev", "stable"), required=True)
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--bridge-legacy-updater", action="store_true",
+                        help="Only for the single migration release from the old '+' validator")
     args = parser.parse_args()
-    manifest = package(args.root.resolve(), args.out.resolve(), args.channel, args.tag)
+    manifest = package(args.root.resolve(), args.out.resolve(), args.channel,
+                       args.tag, bridge_legacy_updater=args.bridge_legacy_updater)
     print(f"Packed {len(manifest['files'])} files into {args.out}")
 
 

@@ -2,6 +2,7 @@
 #include "launcher/ProcessManager.hpp"
 #ifdef _WIN32
 #include "launcher/UpdateManager.hpp"
+#include <shellapi.h>
 #endif
 
 #include <SDL3/SDL.h>
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <cstdint>
 #include <cmath>
 #include <utility>
 #include <string>
@@ -503,6 +505,15 @@ struct Ui {
         const auto path = utf8String(sessionDirectory);
         ImGui::TextDisabled("%s", path.c_str());
         if (ImGui::SmallButton("Копировать путь")) SDL_SetClipboardText(path.c_str());
+#ifdef _WIN32
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Открыть папку")) {
+            const auto value = reinterpret_cast<std::intptr_t>(
+                ShellExecuteW(nullptr, L"open", sessionDirectory.c_str(),
+                              nullptr, nullptr, SW_SHOWNORMAL));
+            if (value <= 32) message = "Не удалось открыть папку сессии";
+        }
+#endif
         ImGui::SameLine();
         if (ImGui::SmallButton("Копировать логи")) SDL_SetClipboardText(output.c_str());
         ImGui::BeginChild("##log-text", ImVec2(0, 180), ImGuiChildFlags_Borders);
@@ -538,18 +549,25 @@ struct Ui {
         ImGui::Spacing();
         drawSource();
         ImGui::Spacing();
-        if (ImGui::BeginTable("##main-cards", 2,
-                             ImGuiTableFlags_SizingStretchSame)) {
-            ImGui::TableNextColumn();
+        if (ImGui::GetContentRegionAvail().x >= 750.0f) {
+            if (ImGui::BeginTable("##main-cards", 2,
+                                 ImGuiTableFlags_SizingStretchSame)) {
+                ImGui::TableNextColumn();
+                drawDisplays();
+                ImGui::TableNextColumn();
+                drawRecorder();
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                drawNetwork();
+                ImGui::TableNextColumn();
+                drawLatency();
+                ImGui::EndTable();
+            }
+        } else {
             drawDisplays();
-            ImGui::TableNextColumn();
             drawRecorder();
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
             drawNetwork();
-            ImGui::TableNextColumn();
             drawLatency();
-            ImGui::EndTable();
         }
         ImGui::Spacing();
         drawAdvanced();
@@ -597,6 +615,19 @@ struct Ui {
 
 };
 
+ImFont* loadUiFont(const fs::path& path, float size,
+                   const ImWchar* ranges, ImFontConfig* config = nullptr) {
+    std::size_t length = 0;
+    void* bytes = SDL_LoadFile(utf8String(path).c_str(), &length);
+    if (!bytes || length == 0) return nullptr;
+    void* atlasBytes = ImGui::MemAlloc(length);
+    std::memcpy(atlasBytes, bytes, length);
+    SDL_free(bytes);
+    // ImGui owns and later frees atlasBytes.
+    return ImGui::GetIO().Fonts->AddFontFromMemoryTTF(
+        atlasBytes, static_cast<int>(length), size, config, ranges);
+}
+
 void loadFont(const fs::path& appDir) {
     auto folder = appDir / "fonts";
     if (!fs::is_regular_file(folder / "Roboto.ttf")) {
@@ -608,11 +639,10 @@ void loadFont(const fs::path& appDir) {
     const auto symbols = folder / "MaterialSymbolsOutlined.ttf";
     auto& io = ImGui::GetIO();
     if (fs::is_regular_file(roboto)) {
-        io.Fonts->AddFontFromFileTTF(
-            utf8String(roboto).c_str(), 17.0f, nullptr,
-            io.Fonts->GetGlyphRangesCyrillic());
+        static_cast<void>(loadUiFont(
+            roboto, 17.0f, io.Fonts->GetGlyphRangesCyrillic()));
     }
-    if (fs::is_regular_file(symbols)) {
+    if (fs::is_regular_file(roboto) && fs::is_regular_file(symbols)) {
         ImFontConfig config{};
         config.MergeMode = true;
         config.PixelSnapH = true;
@@ -636,9 +666,7 @@ void loadFont(const fs::path& appDir) {
         0xE8B8, 0xE8B8,
             0
         };
-        io.Fonts->AddFontFromFileTTF(
-            utf8String(symbols).c_str(), 20.0f,
-            &config, ranges);
+        static_cast<void>(loadUiFont(symbols, 20.0f, ranges, &config));
     }
 }
 

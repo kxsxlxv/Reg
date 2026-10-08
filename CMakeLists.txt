@@ -512,6 +512,11 @@ if(WIN32)
     )
     target_include_directories(reg_updater PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(reg_updater PRIVATE nlohmann_json::nlohmann_json bcrypt shell32)
+    if(MINGW)
+        # The updater is copied outside the install directory while replacing
+        # DLLs. It must not need MinGW runtime DLLs from that install directory.
+        target_link_options(reg_updater PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
 endif()
 if(WIN32)
     target_link_libraries(reg_launcher_core PUBLIC user32)
@@ -533,6 +538,9 @@ target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
 
 add_executable(reg_launcher WIN32 src/launcher/main.cpp)
 target_link_libraries(reg_launcher PRIVATE reg_launcher_core reg_launcher_imgui)
+if(WIN32)
+    target_link_libraries(reg_launcher PRIVATE shell32)
+endif()
 target_compile_definitions(reg_launcher PRIVATE
     REG_FONT_DIR=\"${REG_FONT_OUTPUT_DIR}\"
 )
