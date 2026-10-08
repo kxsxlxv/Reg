@@ -53,6 +53,7 @@ int main() {
                          std::istreambuf_iterator<char>());
     assert(content.find("password") == std::string::npos);
     assert(content.find("***@") != std::string::npos);
+    manifest.close(); // Windows prevents deletion of an open file.
     bool invalidNameRejected = false;
     try { saveProfile("../escape", profile); }
     catch (const std::exception&) { invalidNameRejected = true; }

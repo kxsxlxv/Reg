@@ -1,5 +1,8 @@
 #include "launcher/LauncherConfig.hpp"
 #include "launcher/ProcessManager.hpp"
+#ifdef _WIN32
+#include "launcher/UpdateManager.hpp"
+#endif
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -60,6 +63,12 @@ struct Ui {
     std::string output;
     std::chrono::steady_clock::time_point lastRead{};
     bool showAdvanced{false};
+#ifdef _WIN32
+    reg::launcher::UpdateManager updater{reg::launcher::executableDirectory()};
+    std::string updateChannel{"dev"};
+    bool quitForUpdate{false};
+    bool autoUpdateStarted{false};
+#endif
 
     Ui() {
         profileNames = reg::launcher::listProfiles();
@@ -68,6 +77,16 @@ struct Ui {
             selected = profileNames.front();
         }
         selectProfile(selected);
+#ifdef _WIN32
+        try {
+            std::ifstream selectedChannel(reg::launcher::dataDirectory() / "update-channel.txt");
+            std::string channel;
+            if (std::getline(selectedChannel, channel) && channel == "stable") {
+                updateChannel = channel;
+            }
+        } catch (...) {}
+        updater.checkAsync(updateChannel);
+#endif
     }
 
     void selectProfile(const std::string& name) {
@@ -131,6 +150,26 @@ struct Ui {
                 message = "Процесс завершён (код " + std::to_string(*code) + ")";
             }
         }
+#ifdef _WIN32
+        const auto state = updater.snapshot();
+        if (updateChannel == "dev" && state.phase == reg::launcher::UpdatePhase::Available &&
+            !autoUpdateStarted) {
+            autoUpdateStarted = true;
+            updater.downloadAsync();
+        }
+        // Developer channel stages in the background, then installs when the
+        // video child is not active. Never interrupt a running RTSP session.
+        if (updateChannel == "dev" && state.phase == reg::launcher::UpdatePhase::Prepared &&
+            !process.running()) {
+            try {
+                updater.applyAndRestart();
+                quitForUpdate = true;
+            } catch (const std::exception& e) {
+                message = e.what();
+                updateChannel = "stable"; // Avoid endlessly retrying a failed install.
+            }
+        }
+#endif
         const auto now = std::chrono::steady_clock::now();
         if (!sessionDirectory.empty() &&
             (lastRead == std::chrono::steady_clock::time_point{} ||
@@ -142,6 +181,69 @@ struct Ui {
         }
     }
 
+
+#ifdef _WIN32
+    void drawUpdates() {
+        using reg::launcher::UpdatePhase;
+        const auto info = updater.snapshot();
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Обновления");
+        ImGui::SameLine();
+        const bool checkingOrDownloading =
+            info.phase == UpdatePhase::Checking || info.phase == UpdatePhase::Downloading;
+        ImGui::BeginDisabled(checkingOrDownloading);
+        if (ImGui::BeginCombo("Канал", updateChannel == "dev" ?
+                            "Development" : "Stable")) {
+            for (const auto* option : {"dev", "stable"}) {
+                if (ImGui::Selectable(option, option == updateChannel)) {
+                    updateChannel = option;
+                    autoUpdateStarted = false;
+                    try {
+                        fs::create_directories(reg::launcher::dataDirectory());
+                        std::ofstream out(reg::launcher::dataDirectory() /
+                                          "update-channel.txt", std::ios::trunc);
+                        out << updateChannel << '\n';
+                    } catch (...) {}
+                    updater.checkAsync(updateChannel);
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Проверить")) {
+            autoUpdateStarted = false;
+            updater.checkAsync(updateChannel);
+        }
+        ImGui::EndDisabled();
+        if (!info.tag.empty()) {
+            ImGui::Text("Версия: %s", info.tag.c_str());
+        }
+        ImGui::TextWrapped("%s", info.message.c_str());
+        if (info.phase == UpdatePhase::Downloading && info.totalBytes) {
+            const auto ratio = static_cast<float>(info.downloadedBytes) /
+                               static_cast<float>(info.totalBytes);
+            ImGui::ProgressBar(std::min(ratio, 1.0f), ImVec2(-1, 0),
+                               "Загрузка изменённых файлов");
+        }
+        if (info.phase == UpdatePhase::Available && updateChannel == "stable") {
+            ImGui::Text("Изменены файлы: %d, объём: %.1f МБ",
+                static_cast<int>(info.changedFiles),
+                static_cast<double>(info.totalBytes) / 1048576.0);
+            if (ImGui::Button("Скачать изменения")) updater.downloadAsync();
+        }
+        if (info.phase == UpdatePhase::Prepared) {
+            if (process.running()) {
+                ImGui::TextDisabled("Для установки сначала остановите видеопоток");
+            } else if (ImGui::Button("Установить и перезапустить")) {
+                try {
+                    updater.applyAndRestart();
+                    quitForUpdate = true;
+                } catch (const std::exception& e) { message = e.what(); }
+            }
+        }
+        ImGui::Spacing();
+    }
+#endif
     void draw() {
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
         const ImGuiIO& io = ImGui::GetIO();
@@ -152,6 +254,9 @@ struct Ui {
         ImGui::Begin("Панель управления", nullptr, flags);
 
         ImGui::TextUnformatted("Панель управления");
+#ifdef _WIN32
+        drawUpdates();
+#endif
         ImGui::Separator();
         ImGui::Spacing();
 
@@ -315,6 +420,9 @@ int main(int, char**) {
             }
             if (done) break;
             ui.update();
+#ifdef _WIN32
+            if (ui.quitForUpdate) break;
+#endif
             ImGui_ImplSDLRenderer3_NewFrame();
             ImGui_ImplSDL3_NewFrame();
             ImGui::NewFrame();

@@ -501,6 +501,19 @@ add_library(reg_launcher_core STATIC
 target_include_directories(reg_launcher_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(reg_launcher_core PUBLIC nlohmann_json::nlohmann_json)
 if(WIN32)
+    target_sources(reg_launcher_core PRIVATE
+        src/launcher/UpdateManager.cpp
+        src/launcher/UpdateShared.cpp
+    )
+    target_link_libraries(reg_launcher_core PUBLIC winhttp bcrypt)
+    add_executable(reg_updater WIN32
+        src/launcher/updater_main.cpp
+        src/launcher/UpdateShared.cpp
+    )
+    target_include_directories(reg_updater PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_updater PRIVATE nlohmann_json::nlohmann_json bcrypt shell32)
+endif()
+if(WIN32)
     target_link_libraries(reg_launcher_core PUBLIC user32)
 endif()
 
@@ -529,6 +542,9 @@ set_target_properties(reg_probe reg_replay reg_launcher PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib"
 )
 install(TARGETS reg_launcher reg_probe reg_replay RUNTIME DESTINATION bin)
+if(WIN32)
+    install(TARGETS reg_updater RUNTIME DESTINATION bin)
+endif()
 install(DIRECTORY "${REG_FONT_OUTPUT_DIR}/" DESTINATION bin/fonts)
 install(DIRECTORY "${REG_SHADER_OUTPUT_DIR}/" DESTINATION bin/shaders)
 if(UNIX AND NOT APPLE)
@@ -565,4 +581,20 @@ if(REG_BUILD_TESTS)
         target_compile_options(reg_launcher_process_tests PRIVATE -UNDEBUG)
     endif()
     add_test(NAME launcher_process COMMAND reg_launcher_process_tests)
+
+    if(WIN32)
+        add_executable(reg_update_protocol_tests
+            tests/update_protocol_tests.cpp
+            src/launcher/UpdateShared.cpp
+        )
+        target_include_directories(reg_update_protocol_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(reg_update_protocol_tests PRIVATE bcrypt)
+        if(MSVC)
+            target_compile_options(reg_update_protocol_tests PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(reg_update_protocol_tests PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME update_protocol COMMAND reg_update_protocol_tests)
+        add_test(NAME updater_install COMMAND reg_updater --self-test)
+    endif()
 endif()

@@ -10,6 +10,7 @@ set(_executables
     "${REG_BUILD_DIR}/reg_probe.exe"
     "${REG_BUILD_DIR}/reg_replay.exe"
     "${REG_BUILD_DIR}/reg_launcher.exe"
+    "${REG_BUILD_DIR}/reg_updater.exe"
 )
 foreach(_exe IN LISTS _executables)
     if(NOT EXISTS "${_exe}")

@@ -41,3 +41,35 @@ data/recordings/blackbox, preserving retention across restarts.
 The standalone CLI works as before. GUI replay, NetImgui port override,
 display mapping and automatic session cleanup are future increments; these
 are not currently exposed as non-functional controls.
+
+## Windows self-updates (Development and Stable)
+
+Only the first installation requires downloading/extracting portable.zip from
+a successful Windows CI artifact or GitHub Release. Run Launcher.exe afterward.
+Development build trees are deliberately never overwritten by the updater.
+
+Windows CI caches compiled FFmpeg, builds and tests, deploys DLLs, verifies the
+package and publishes immutable GitHub Releases: dev-<full SHA> for branch
+pushes and vMAJOR.MINOR.PATCH for stable version tags. Pull requests are
+tested but never publish executables. Failures block release publication.
+
+Each release contains a portable archive, a JSON manifest with per-file
+SHA-256/size, and independent file assets. The launcher checks the official
+GitHub Releases API over HTTPS, hashes local runtime files, downloads only
+changed files, checks their SHA-256 and stages them in the user-data updates
+folder under %LOCALAPPDATA%/Reg/updates.
+
+Development automatically checks and downloads; it only installs after the
+video child has stopped. Stable uses explicit download/install buttons.
+A separate updater waits for the launcher to exit, backs up modified files,
+atomically replaces them, attempts rollback on failure and restarts the GUI.
+
+The portable installation folder must be writable by the logged-in user;
+do not extract it to Program Files. RTSP profiles, logs and recordings remain
+under %LOCALAPPDATA% and cannot appear in the managed file whitelist.
+
+Current limitations: signing/Authenticode and handling sudden power loss
+during multi-file replacement are not yet implemented. Retained backup files
+are available for manual recovery in rare incomplete updates. On first install,
+Windows SmartScreen may warn for an unsigned build; validation on clean target
+Windows with the NVIDIA driver is still needed.

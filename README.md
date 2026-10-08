@@ -45,5 +45,6 @@ After Phase A passes on the target NVIDIA machines, the next implementation mile
 ## GUI launcher
 
 The optional SDL3 + Dear ImGui launcher supports reusable RTSP profiles,
-start/stop control and per-session logs without a persistent terminal environment.
+start/stop control, per-session logs and verified in-app Windows updates
+without a persistent terminal environment.
 See [GUI launcher instructions](docs/LAUNCHER.md).
