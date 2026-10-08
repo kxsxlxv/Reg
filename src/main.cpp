@@ -949,6 +949,7 @@ int runApplication(
                     rawMailbox.clear();
                     overlayFrames.clear();
                     metadataStore.clear();
+                    exactSyncDiagnostics.clearPending();
                     lastAcceptedMetadataNs.store(
                         0,
                         std::memory_order_release);
@@ -1023,6 +1024,7 @@ int runApplication(
                         rawMailbox.clear();
                         overlayFrames.clear();
                         metadataStore.clear();
+                        exactSyncDiagnostics.clearPending();
                         pendingOverlayFrame.reset();
                         lastRawPresented.reset();
                         trackHistory.clear();
@@ -1047,6 +1049,7 @@ int runApplication(
                     } else if (signalPresent) {
                         overlayFrames.clear();
                         metadataStore.clear();
+                        exactSyncDiagnostics.clearPending();
                         pendingOverlayFrame.reset();
                         trackHistory.clear();
                         telemetryModel.clearTargets();
@@ -1310,6 +1313,7 @@ int runApplication(
                                     pendingOverlayFrame.reset();
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    exactSyncDiagnostics.clearPending();
                                     trackHistory.clear();
                                     telemetryModel.clearTargets();
 
