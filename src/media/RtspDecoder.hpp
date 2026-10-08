@@ -1,6 +1,7 @@
 #pragma once
 
 #include "media/CompressedVideoPacket.hpp"
+#include "media/IoDeadline.hpp"
 #include "media/VideoStreamDescriptor.hpp"
 #include "video/VideoFrame.hpp"
 
@@ -82,6 +83,7 @@ private:
     int videoStreamIndex_{-1};
 
     std::atomic_bool stopRequested_{false};
+    IoDeadline ioDeadline_{};
 };
 
 } // namespace reg::media
