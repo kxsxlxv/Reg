@@ -3,6 +3,7 @@
 #ifdef _WIN32
 
 #include "launcher/LauncherConfig.hpp"
+#include "launcher/UpdateReleaseSelection.hpp"
 #include "launcher/UpdateShared.hpp"
 
 #include <nlohmann/json.hpp>
@@ -81,22 +82,6 @@ bool hexSha256(const std::string& text) {
         std::all_of(text.begin(), text.end(), [](unsigned char c) {
             return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
         });
-}
-
-bool safeTag(const std::string& tag, const std::string& channel) {
-    if (channel == "dev") {
-        if (tag.size() != 44 || !tag.starts_with("dev-")) return false;
-        return std::all_of(tag.begin() + 4, tag.end(), [](unsigned char c) {
-            return std::isxdigit(c) != 0;
-        });
-    }
-    if (channel == "stable") {
-        if (tag.size() < 6 || tag.size() > 40 || tag[0] != 'v') return false;
-        return std::all_of(tag.begin() + 1, tag.end(), [](unsigned char c) {
-            return std::isalnum(c) || c == '.' || c == '-';
-        });
-    }
-    return false;
 }
 
 // WinHTTP performs certificate validation. Redirects to GitHub's asset CDN
@@ -251,23 +236,46 @@ void UpdateManager::check(std::string channel) {
     const auto releases = json::parse(readHttpText(
         "https://api.github.com/repos/kxsxlxv/Reg/releases?per_page=40"));
     if (!releases.is_array()) throw std::runtime_error("Invalid releases API response");
-    const json* selected = nullptr;
-    std::string tag;
-    for (const auto& release : releases) {
-        if (release.value("draft", true)) continue;
-        const auto current = release.value("tag_name", "");
-        if (!safeTag(current, channel)) continue;
-        if (channel == "dev" && !release.value("prerelease", false)) continue;
-        if (channel == "stable" && release.value("prerelease", true)) continue;
-        selected = &release;
-        tag = current;
-        break;
-    }
+    // The release API may return items out of chronological order (confirmed
+    // in production). Select by published_at, not the first matching entry.
+    const json* selected = latestRelease(releases, channel);
     if (!selected) {
         std::lock_guard lock(mutex_);
         view_.phase = UpdatePhase::UpToDate;
         view_.message = "Для этого канала пока нет опубликованных сборок";
         return;
+    }
+
+    const std::string tag = selected->at("tag_name").get<std::string>();
+
+    // Prevent an older (or re-ordered) release from overwriting a newer
+    // installation. Use the installed manifest's tag, not any cached UI text.
+    std::ifstream installedFile(appDirectory_ / "manifest.json", std::ios::binary);
+    if (!installedFile) throw std::runtime_error("Cannot read installed update manifest");
+    const auto installedManifest = json::parse(installedFile);
+    const std::string installedTag = installedManifest.value("tag", std::string{});
+    if (validReleaseTag(installedTag, channel) && installedTag != tag) {
+        const json* installedRelease = releaseWithTag(releases, installedTag);
+        json downloadedInstalledRelease;
+        if (!installedRelease) {
+            // Avoid silently downgrading after the installed build ages out of
+            // the first page of the releases listing.
+            downloadedInstalledRelease = json::parse(readHttpText(
+                "https://api.github.com/repos/kxsxlxv/Reg/releases/tags/" +
+                installedTag));
+            installedRelease = &downloadedInstalledRelease;
+        }
+        const auto installedPublished = releasePublishedAt(*installedRelease);
+        if (installedPublished.empty()) {
+            throw std::runtime_error("Cannot establish installed release chronology");
+        }
+        if (installedPublished >= releasePublishedAt(*selected)) {
+            std::lock_guard lock(mutex_);
+            view_.tag = installedTag;
+            view_.phase = UpdatePhase::UpToDate;
+            view_.message = "Установленная сборка новее последнего опубликованного релиза";
+            return;
+        }
     }
 
     const auto failedResult = dataDirectory() / "updates" / tag / "result.txt";
@@ -328,13 +336,15 @@ void UpdateManager::check(std::string channel) {
     view_.totalBytes = bytes;
     view_.changedFiles = changed_.size();
     view_.phase = changed_.empty() ? UpdatePhase::UpToDate : UpdatePhase::Available;
-    view_.message = changed_.empty() ? "Установлена актуальная версия"
-                                    : "Доступно обновление";
+    view_.message = changed_.empty()
+        ? "Актуальная версия: " + tag.substr(0, 13)
+        : "Найдена версия " + tag.substr(0, 13) +
+              " (" + std::to_string(view_.changedFiles) + " файлов)";
 }
 
 void UpdateManager::retryAsync() {
     const auto current = snapshot();
-    if (safeTag(current.tag, current.channel)) {
+    if (validReleaseTag(current.tag, current.channel)) {
         std::error_code ignored;
         std::filesystem::remove(
             dataDirectory() / "updates" / current.tag / "result.txt", ignored);

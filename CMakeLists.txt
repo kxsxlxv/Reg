@@ -500,6 +500,23 @@ add_library(reg_launcher_core STATIC
 )
 target_include_directories(reg_launcher_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(reg_launcher_core PUBLIC nlohmann_json::nlohmann_json)
+# Regression: GitHub's releases API may be out of chronological order.
+# Test release selection on both Windows and Linux, independently of WinHTTP.
+if(REG_BUILD_TESTS)
+    add_executable(reg_update_release_selection_tests
+        tests/update_release_selection_tests.cpp
+    )
+    target_include_directories(reg_update_release_selection_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_update_release_selection_tests PRIVATE
+        nlohmann_json::nlohmann_json)
+    if(MSVC)
+        target_compile_options(reg_update_release_selection_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(reg_update_release_selection_tests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME update_release_selection COMMAND reg_update_release_selection_tests)
+endif()
 if(WIN32)
     target_sources(reg_launcher_core PRIVATE
         src/launcher/UpdateManager.cpp

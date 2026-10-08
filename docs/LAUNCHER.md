@@ -170,3 +170,27 @@ small or advanced/log sections are expanded. The launch/stop footer remains
 fixed. All delay/port inputs and the Overlay delay slider now share a compact
 116-pixel control column. Profile and monitor selectors retain their own
 bounded widths and settings.
+
+## GitHub Releases ordering and updater recovery
+
+The GitHub Releases listing is not guaranteed to be sorted by creation or
+publication date. A real October 8 response listed a previously published
+Development build first, ahead of a newer release. The launcher now selects
+the matching non-draft release with the greatest UTC published_at value,
+then reads the installed manifest's tag to refuse a downgrade. If the
+installed version is not included in the first API page, the updater fetches
+that version's release metadata separately to compare dates. Invalid dates
+are never interpreted as an update.
+
+The updater reports the selected version identifier in its status text and
+does not install an older release. Unit tests use an intentionally shuffled
+GitHub response to guard against regressions.
+
+IMPORTANT: a launcher built before this fix will keep selecting the wrong
+release because the bug is inside that installed Launcher.exe. If it cannot
+discover the repaired version, replace **only Launcher.exe** from the latest
+verified Development release (download the standalone launcher EXE asset,
+close the application, rename the downloaded file to Launcher.exe, and
+replace it in the portable directory). Then reopen and check for updates;
+the new updater can fetch remaining changed files incrementally. No
+reinstallation of settings or complete portable ZIP is required.
