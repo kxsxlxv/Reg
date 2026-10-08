@@ -133,8 +133,17 @@ void ProcessManager::start(
 #ifdef _WIN32
     HANDLE stdoutHandle = outputFile(stdoutPath);
     HANDLE stderrHandle = nullptr;
+    HANDLE stdinHandle = nullptr;
     try {
         stderrHandle = outputFile(stderrPath);
+        SECURITY_ATTRIBUTES inputAttributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+        stdinHandle = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ,
+            &inputAttributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (stdinHandle == INVALID_HANDLE_VALUE) {
+            stdinHandle = nullptr;
+            throw std::system_error(static_cast<int>(GetLastError()),
+                std::system_category(), "Cannot open child stdin");
+        }
         std::wstring command = quote(executable.wstring());
         for (const auto& arg : args) {
             command += L" ";
@@ -143,7 +152,7 @@ void ProcessManager::start(
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         startup.dwFlags = STARTF_USESTDHANDLES;
-        startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        startup.hStdInput = stdinHandle;
         startup.hStdOutput = stdoutHandle;
         startup.hStdError = stderrHandle;
         PROCESS_INFORMATION result{};
@@ -159,10 +168,12 @@ void ProcessManager::start(
         process_ = result.hProcess;
         pid_ = result.dwProcessId;
     } catch (...) {
+        if (stdinHandle) CloseHandle(stdinHandle);
         if (stderrHandle) CloseHandle(stderrHandle);
         CloseHandle(stdoutHandle);
         throw;
     }
+    CloseHandle(stdinHandle);
     CloseHandle(stderrHandle);
     CloseHandle(stdoutHandle);
 #else
@@ -174,6 +185,12 @@ void ProcessManager::start(
         close(stdoutFd);
         throw;
     }
+    std::vector<std::string> argvStrings{executable.string()};
+    argvStrings.insert(argvStrings.end(), args.begin(), args.end());
+    std::vector<char*> argv;
+    argv.reserve(argvStrings.size() + 1);
+    for (auto& value : argvStrings) argv.push_back(value.data());
+    argv.push_back(nullptr);
     const pid_t child = fork();
     if (child == -1) {
         const int error = errno;
@@ -189,12 +206,6 @@ void ProcessManager::start(
         }
         close(stdoutFd);
         close(stderrFd);
-        std::vector<std::string> argvStrings{executable.string()};
-        argvStrings.insert(argvStrings.end(), args.begin(), args.end());
-        std::vector<char*> argv;
-        argv.reserve(argvStrings.size() + 1);
-        for (auto& value : argvStrings) argv.push_back(value.data());
-        argv.push_back(nullptr);
         execv(executable.c_str(), argv.data());
         _exit(127);
     }

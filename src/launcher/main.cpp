@@ -63,7 +63,11 @@ struct Ui {
 
     Ui() {
         profileNames = reg::launcher::listProfiles();
-        selectProfile(profileNames.front());
+        auto selected = reg::launcher::lastSelectedProfile();
+        if (std::find(profileNames.begin(), profileNames.end(), selected) == profileNames.end()) {
+            selected = profileNames.front();
+        }
+        selectProfile(selected);
     }
 
     void selectProfile(const std::string& name) {
@@ -71,6 +75,7 @@ struct Ui {
         profile = reg::launcher::loadProfile(profileName);
         copyTo(url, profile.rtspUrl);
         copyTo(bind, profile.metadataBind);
+        reg::launcher::setLastSelectedProfile(name);
         message.clear();
     }
 
@@ -228,7 +233,9 @@ struct Ui {
 
         ImGui::SeparatorText("Логи текущей сессии");
         if (!sessionDirectory.empty()) {
-            const auto path = sessionDirectory.string();
+            const auto utf8Path = sessionDirectory.u8string();
+            const std::string path(
+                reinterpret_cast<const char*>(utf8Path.data()), utf8Path.size());
             ImGui::TextWrapped("%s", path.c_str());
             ImGui::SameLine();
             if (ImGui::SmallButton("Копировать путь")) SDL_SetClipboardText(path.c_str());

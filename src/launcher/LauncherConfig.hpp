@@ -33,6 +33,8 @@ std::filesystem::path executableDirectory();
 std::filesystem::path profilesDirectory();
 std::filesystem::path profilePath(const std::string& name);
 std::vector<std::string> listProfiles();
+std::string lastSelectedProfile();
+void setLastSelectedProfile(const std::string& name);
 Profile loadProfile(const std::string& name);
 void saveProfile(const std::string& name, const Profile& profile);
 std::string validate(const Profile& profile);

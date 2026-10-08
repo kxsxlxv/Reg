@@ -15,15 +15,17 @@ but not to RUN a previously deployed bundle.
 
 Ubuntu: build with the usual CMake workflow. Launch build/reg_launcher from
 your desktop. Optionally install with cmake --install build --prefix ~/.local.
-The Linux install process does not yet bundle external FFmpeg libraries; if
-FFmpeg is not available from system paths you must configure its runtime
-load path during packaging.
+The Linux install layout copies the directly linked FFmpeg and SDL3 shared
+libraries into lib/ and sets an executable-relative RPATH. The NVIDIA driver
+and ordinary system libraries are intentionally not bundled. A packaged build
+must still be tested on the target Ubuntu desktop.
 
 Profiles:
 - Windows: %LOCALAPPDATA%/Reg/profiles/*.json
 - Linux: $XDG_DATA_HOME/reg/profiles/*.json or ~/.local/share/reg/profiles
 
-Enter an RTSP URL, save the profile and click **Запустить**. Advanced options
+Enter an RTSP URL, save the profile and click **Запустить**. The last
+selected profile is restored at the next launch. Advanced options
 can create named profiles. Names are restricted to ASCII letters, digits,
 underscore and dash for safe cross-platform filenames.
 

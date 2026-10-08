@@ -531,6 +531,13 @@ set_target_properties(reg_probe reg_replay reg_launcher PROPERTIES
 install(TARGETS reg_launcher reg_probe reg_replay RUNTIME DESTINATION bin)
 install(DIRECTORY "${REG_FONT_OUTPUT_DIR}/" DESTINATION bin/fonts)
 install(DIRECTORY "${REG_SHADER_OUTPUT_DIR}/" DESTINATION bin/shaders)
+if(UNIX AND NOT APPLE)
+    install(FILES "$<TARGET_FILE:SDL3::SDL3>" DESTINATION lib FOLLOW_SYMLINK_CHAIN)
+    foreach(_ffmpeg_lib IN ITEMS
+        "${FFMPEG_AVCODEC_LIBRARY}" "${FFMPEG_AVFORMAT_LIBRARY}" "${FFMPEG_AVUTIL_LIBRARY}")
+        install(FILES "${_ffmpeg_lib}" DESTINATION lib FOLLOW_SYMLINK_CHAIN)
+    endforeach()
+endif()
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/scripts/linux/reg-launcher.desktop"
     DESTINATION share/applications OPTIONAL)
 
@@ -539,5 +546,19 @@ if(REG_BUILD_TESTS)
         tests/launcher_config_tests.cpp
     )
     target_link_libraries(reg_launcher_config_tests PRIVATE reg_launcher_core)
+    if(MSVC)
+        target_compile_options(reg_launcher_config_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(reg_launcher_config_tests PRIVATE -UNDEBUG)
+    endif()
     add_test(NAME launcher_config COMMAND reg_launcher_config_tests)
+
+    add_executable(reg_launcher_process_tests tests/launcher_process_tests.cpp)
+    target_link_libraries(reg_launcher_process_tests PRIVATE reg_launcher_core)
+    if(MSVC)
+        target_compile_options(reg_launcher_process_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(reg_launcher_process_tests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME launcher_process COMMAND reg_launcher_process_tests)
 endif()

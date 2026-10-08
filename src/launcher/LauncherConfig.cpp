@@ -21,10 +21,23 @@ namespace {
 using json = nlohmann::json;
 
 std::filesystem::path fromEnv(const char* name) {
+#ifdef _WIN32
+    std::wstring wideName;
+    for (const char* current = name; *current; ++current) {
+        wideName.push_back(static_cast<wchar_t>(*current));
+    }
+    std::wstring result(32768, L'\0');
+    const DWORD count = GetEnvironmentVariableW(
+        wideName.c_str(), result.data(), static_cast<DWORD>(result.size()));
+    if (count == 0 || count >= result.size()) return {};
+    result.resize(count);
+    return std::filesystem::path(result);
+#else
     const char* value = std::getenv(name);
     return value != nullptr && *value != '\0'
         ? std::filesystem::path(value)
         : std::filesystem::path{};
+#endif
 }
 
 std::filesystem::path userHome() {
@@ -128,6 +141,9 @@ void writeJson(const std::filesystem::path& path, const json& j) {
     }
 #else
     std::filesystem::rename(temporary, path);
+    std::filesystem::permissions(path,
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace);
 #endif
 }
 
@@ -200,6 +216,30 @@ std::vector<std::string> listProfiles() {
     return result;
 }
 
+std::string lastSelectedProfile() {
+    std::ifstream in(dataDirectory() / "last-profile.txt");
+    std::string name;
+    if (std::getline(in, name)) {
+        try {
+            checkName(name);
+            if (std::filesystem::exists(profilePath(name))) {
+                return name;
+            }
+        } catch (const std::exception&) {
+            // Previous profile disappeared or the state file is invalid.
+        }
+    }
+    return "default";
+}
+
+void setLastSelectedProfile(const std::string& name) {
+    checkName(name);
+    std::filesystem::create_directories(dataDirectory());
+    std::ofstream out(dataDirectory() / "last-profile.txt", std::ios::trunc);
+    if (!out) throw std::runtime_error("Cannot store selected profile");
+    out << name << '\n';
+}
+
 Profile loadProfile(const std::string& name) {
     const auto path = profilePath(name);
     if (!std::filesystem::exists(path)) {
@@ -266,7 +306,11 @@ std::vector<std::string> arguments(
         "--metadata-bind", p.metadataBind,
         "--metadata-port", asText(p.metadataPort),
         "--overlay-delay-ms", asText(p.overlayDelayMs),
-        "--record-dir", recordingDirectory.string(),
+        "--record-dir", [&] {
+            const auto utf8 = recordingDirectory.u8string();
+            return std::string(
+                reinterpret_cast<const char*>(utf8.data()), utf8.size());
+        }(),
         "--record-segment-ms", asText(p.recordSegmentMs),
         "--record-retention-sec", asText(p.recordRetentionSec),
         "--record-queue-capacity", asText(p.recordQueueCapacity),
@@ -291,9 +335,22 @@ std::filesystem::path newSessionDirectory() {
         now.time_since_epoch()).count();
     const auto base = dataDirectory() / "sessions";
     std::filesystem::create_directories(base);
+#ifndef _WIN32
+    std::filesystem::permissions(dataDirectory(),
+        std::filesystem::perms::owner_all,
+        std::filesystem::perm_options::replace);
+    std::filesystem::permissions(base,
+        std::filesystem::perms::owner_all,
+        std::filesystem::perm_options::replace);
+#endif
     for (int i = 0; i < 1000; ++i) {
         const auto path = base / (std::to_string(stamp) + "-" + std::to_string(i));
         if (std::filesystem::create_directory(path)) {
+#ifndef _WIN32
+            std::filesystem::permissions(path,
+                std::filesystem::perms::owner_all,
+                std::filesystem::perm_options::replace);
+#endif
             return path;
         }
     }

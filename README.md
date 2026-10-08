@@ -41,3 +41,9 @@ See:
 - [Phase A hardware smoke test](docs/PHASE_A_SMOKE_TEST.md)
 
 After Phase A passes on the target NVIDIA machines, the next implementation milestone is source SEI frame identity plus the delayed exact-frame Overlay buffer.
+
+## GUI launcher
+
+The optional SDL3 + Dear ImGui launcher supports reusable RTSP profiles,
+start/stop control and per-session logs without a persistent terminal environment.
+See [GUI launcher instructions](docs/LAUNCHER.md).
