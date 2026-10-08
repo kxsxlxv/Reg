@@ -68,17 +68,26 @@ inline int findTargetIndex(const std::vector<WindowChoice>& windows,
     if (target.empty()) return -1;
     int firstMatch = -1;
     int totalMatches = 0;
+    int exactTitleMatch = -1;
+    int exactTitleCount = 0;
     for (std::size_t i = 0; i < windows.size(); ++i) {
         if (!matchesTarget(windows[i], target)) continue;
+        // A valid, currently-live handle wins. Its identity is verified
+        // before trusting it; HWND reuse across apps is never accepted.
         if (preferredHandle && windows[i].handle == preferredHandle)
             return static_cast<int>(i);
-        if (caseInsensitiveEqual(windows[i].title, target.title))
-            return static_cast<int>(i);
+        if (caseInsensitiveEqual(windows[i].title, target.title)) {
+            exactTitleMatch = static_cast<int>(i);
+            ++exactTitleCount;
+        }
         if (firstMatch < 0) firstMatch = static_cast<int>(i);
         ++totalMatches;
     }
-    // Ambiguous: never move some other window of the same application
-    // simply because a title changed after the last run.
+    // Avoid arbitrary choices when multiple windows have identical titles.
+    if (exactTitleCount == 1) return exactTitleMatch;
+    if (exactTitleCount > 1) return -1;
+    // A renamed window can still be found after reopening if it is the only
+    // window from the saved application and window class.
     return totalMatches == 1 ? firstMatch : -1;
 }
 

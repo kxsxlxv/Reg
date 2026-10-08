@@ -39,6 +39,12 @@ int main() {
 
     const WindowTarget selectedNotes = targetOf(running[2]);
     assert(findTargetIndex(running, selectedNotes) == 2);
+    auto sameTitle = running;
+    sameTitle[1].title = "Notes — Personal";
+    // A duplicate caption cannot disambiguate windows after a restart.
+    assert(findTargetIndex(sameTitle, selectedNotes) == -1);
+    // But the currently selected, verified handle wins over both captions.
+    assert(findTargetIndex(sameTitle, selectedNotes, 103) == 2);
     // Current handle wins while the app is running, even if its title changes.
     auto updated = running;
     updated[2].title = "New Notes — Personal";
