@@ -17,6 +17,7 @@ SyncDecision FrameSynchronizer::next(
             .type = SyncDecisionType::DropMissingMetadata,
             .frame = std::nullopt,
             .droppedKey = due->key,
+            .droppedDeadline = due->deadline,
         };
     }
 
@@ -27,6 +28,7 @@ SyncDecision FrameSynchronizer::next(
             .metadata = std::move(metadata),
         },
         .droppedKey = std::nullopt,
+        .droppedDeadline = std::nullopt,
     };
 }
 
