@@ -1,4 +1,5 @@
 #include "app/CommandLine.hpp"
+#include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "diagnostics/FrameTimingLogger.hpp"
 #include "media/RtspDecoder.hpp"
 #include "media/VulkanHwDevice.hpp"
@@ -298,6 +299,7 @@ int runApplication(
                         telemetryWindow->swapchain());
         }
 
+        reg::diagnostics::ExactSyncDiagnostics exactSyncDiagnostics;
         std::atomic<std::int64_t> lastAcceptedMetadataNs{0};
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
@@ -317,6 +319,7 @@ int runApplication(
                         lastAcceptedMetadataNs.store(
                             steadyNowNs(),
                             std::memory_order_release);
+                        exactSyncDiagnostics.metadataAccepted(metadata);
 
                         if (blackboxRecorder) {
                             static_cast<void>(
@@ -377,6 +380,7 @@ int runApplication(
                                     rawMailbox.clear();
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    exactSyncDiagnostics.clearPending();
                                     lastDecodedFrameNs.store(
                                         0,
                                         std::memory_order_release);
@@ -432,6 +436,7 @@ int runApplication(
                                     bool identityViolation = false;
 
                                     if (identity) {
+                                        exactSyncDiagnostics.videoDecoded(identity->key);
                                         identityPresentFrames.fetch_add(
                                             1,
                                             std::memory_order_relaxed);
@@ -1226,6 +1231,11 @@ int runApplication(
                                         overlayMissingMetadataDrops.fetch_add(
                                             1,
                                             std::memory_order_relaxed);
+                                        if (decision.droppedKey && decision.droppedDeadline) {
+                                            exactSyncDiagnostics.frameDueWithoutMetadata(
+                                                *decision.droppedKey,
+                                                *decision.droppedDeadline);
+                                        }
                                         didWork = true;
                                         continue;
                                     }
@@ -1233,6 +1243,19 @@ int runApplication(
                                     if (decision.type ==
                                             reg::video::SyncDecisionType::Present &&
                                         decision.frame) {
+                                        const auto& pair = *decision.frame;
+                                        if (!exactSyncDiagnostics.exactPair(
+                                                pair.buffered.key,
+                                                *pair.metadata,
+                                                pair.buffered.decodedAt,
+                                                pair.buffered.deadline,
+                                                std::chrono::steady_clock::now())) {
+                                            telemetryModel.log(
+                                                reg::telemetry::Severity::Error,
+                                                "Exact Sync: rejected mismatched video/CVM1 keys");
+                                            didWork = true;
+                                            continue;
+                                        }
                                         trackHistory.update(
                                             *decision.frame->metadata,
                                             std::chrono::steady_clock::now());
@@ -1384,6 +1407,8 @@ int runApplication(
                             .overlayMissingMetadataDrops =
                                 overlayMissingMetadataDrops.load(
                                     std::memory_order_relaxed),
+                            .overlayBufferEvictions = overlayBufferEvictions.load(std::memory_order_relaxed),
+                            .overlayMissingIdentity = overlayMissingIdentity.load(std::memory_order_relaxed),
                             .metadataPackets =
                                 receiverStats.packetsReceived,
                             .metadataInvalid =
@@ -1393,6 +1418,10 @@ int runApplication(
                                 receiverStats.frameDuplicates,
                             .metadataSequenceGaps =
                                 receiverStats.sequenceGaps,
+                            .metadataOutOfOrder = receiverStats.packetsOutOfOrder,
+                            .metadataStoreEvictions = receiverStats.storeEvictions,
+                            .exactSync = exactSyncDiagnostics.snapshot(),
+                            .configuredOverlayDelayMs = static_cast<std::uint32_t>(options.overlayDelayMs),
                             .recorderPacketsWritten =
                                 recorderStats.packetsWritten,
                             .recorderQueueDrops =
