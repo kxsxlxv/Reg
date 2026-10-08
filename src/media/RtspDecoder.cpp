@@ -25,6 +25,7 @@ namespace {
 // ever reporting a broken MediaMTX session. These bounds turn silence into
 // a recoverable decoder error and allow the outer reconnect loop to run.
 constexpr auto kRtspOpenTimeout = std::chrono::seconds{12};
+constexpr auto kRtspCloseTimeout = std::chrono::seconds{3};
 constexpr auto kRtspPacketSilenceTimeout = std::chrono::seconds{5};
 
 AVPixelFormat selectVulkanFormat(AVCodecContext*, const AVPixelFormat* formats) {
@@ -378,7 +379,14 @@ void RtspDecoder::close() noexcept {
         avcodec_free_context(&codecContext_);
     }
     if (formatContext_ != nullptr) {
+        // RTSP TEARDOWN may itself perform network I/O after a relay crash.
+        // Keep the FFmpeg interrupt mechanism armed through session cleanup.
+        if (config_.inputKind == VideoInputKind::RtspUdp) {
+            ioDeadline_.armUntil(
+                IoDeadline::Clock::now() + kRtspCloseTimeout);
+        }
         avformat_close_input(&formatContext_);
+        ioDeadline_.disarm();
     }
     videoStreamIndex_ = -1;
 }
