@@ -254,7 +254,7 @@ int runApplication(
             overlayFrames,
             metadataStore);
 
-        reg::vulkan::VideoRenderer rawRenderer(vulkan);
+        reg::vulkan::VideoRenderer rawRenderer(vulkan, true);
         auto rawSignalRenderer =
             std::make_unique<reg::render::ImGuiOverlayRenderer>(
                 vulkan,
@@ -1123,7 +1123,7 @@ int runApplication(
                                 rawWindow.swapchain());
 
                             const bool renderSucceeded =
-                                rawRenderer.render(
+                                rawRenderer.renderRaw(
                                     latest,
                                     rawWindow.swapchain(),
                                     rawSignalRenderer.get());
