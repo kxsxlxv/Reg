@@ -259,8 +259,7 @@ struct Ui {
     void drawUpdates() {
         using reg::launcher::UpdatePhase;
         const auto info = updater.snapshot();
-        float height = info.phase == UpdatePhase::Downloading ? 117.0f : 89.0f;
-        if (card("##updates-card", height, ImVec4(.118f,.143f,.192f,1),
+        if (card("##updates-card", ImVec4(.118f,.143f,.192f,1),
                  Symbols::refresh, "Обновления", ImVec4(.54f,.72f,1,1))) {
             const bool busy = info.phase == UpdatePhase::Checking ||
                               info.phase == UpdatePhase::Downloading;
@@ -327,12 +326,20 @@ struct Ui {
 #endif
     // Reusable, consistently padded cards. The panel backgrounds are kept
     // distinct from the window background for readability in the dark theme.
-    static bool card(const char* id, float height, ImVec4 background,
+    static bool card(const char* id, ImVec4 background,
                      const char* symbol, const char* label, ImVec4 accent) {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, background);
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(accent.x, accent.y, accent.z, 0.34f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 9.0f));
+        // Auto-size vertically to the real number of visible fields. A
+        // fixed child height previously clipped the RTSP URL and introduced
+        // scrollbars inside almost every card.
         const bool visible = ImGui::BeginChild(
-            id, ImVec2(0, height), ImGuiChildFlags_Borders);
+            id, ImVec2(0.0f, 0.0f),
+            ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
+                ImGuiChildFlags_AlwaysUseWindowPadding,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleVar();
         ImGui::PopStyleColor(2);
         if (visible) {
             ImGui::TextColored(accent, "%s  %s", symbol, label);
@@ -466,7 +473,7 @@ struct Ui {
     }
 
     void drawSource() {
-        if (card("##source-card", 83.0f, ImVec4(0.105f, 0.151f, 0.195f, 1),
+        if (card("##source-card", ImVec4(0.105f, 0.151f, 0.195f, 1),
                  Symbols::source, "Источник видео", ImVec4(0.32f, 0.72f, 0.97f, 1))) {
             caption("RTSP / RTSPS адрес");
             ImGui::SetNextItemWidth(-1);
@@ -480,7 +487,7 @@ struct Ui {
     }
 
     void drawDisplays() {
-        if (card("##display-card", 186.0f, ImVec4(0.109f, 0.157f, 0.163f, 1),
+        if (card("##display-card", ImVec4(0.109f, 0.157f, 0.163f, 1),
                  Symbols::displays, "Экраны и наложения", ImVec4(0.34f, 0.84f, 0.71f, 1))) {
             ImGui::Checkbox("CV Overlay", &profile.overlayEnabled);
             ImGui::SameLine();
@@ -509,7 +516,7 @@ struct Ui {
     }
 
     void drawRecorder() {
-        if (card("##record-card", 186.0f, ImVec4(0.155f, 0.125f, 0.167f, 1),
+        if (card("##record-card", ImVec4(0.155f, 0.125f, 0.167f, 1),
                  Symbols::record, "Запись Blackbox", ImVec4(0.91f, 0.65f, 0.94f, 1))) {
             ImGui::Checkbox("Включить циклическую запись", &profile.recorderEnabled);
             ImGui::BeginDisabled(!profile.recorderEnabled);
@@ -526,7 +533,7 @@ struct Ui {
     }
 
     void drawNetwork() {
-        if (card("##network-card", 155.0f, ImVec4(0.124f, 0.143f, 0.197f, 1),
+        if (card("##network-card", ImVec4(0.124f, 0.143f, 0.197f, 1),
                  Symbols::network, "Сеть и удалённый UI", ImVec4(0.52f, 0.69f, 1, 1))) {
             integer("Порт UDP метаданных", "##metadata-port", profile.metadataPort);
             ImGui::Checkbox("Приём NetImgui", &profile.netImguiEnabled);
@@ -538,9 +545,9 @@ struct Ui {
     }
 
     void drawLatency() {
-        if (card("##latency-card", 155.0f, ImVec4(0.176f, 0.140f, 0.114f, 1),
+        if (card("##latency-card", ImVec4(0.176f, 0.140f, 0.114f, 1),
                  Symbols::tune, "Задержка и восстановление", ImVec4(1.0f, 0.73f, 0.40f, 1))) {
-            rowControl("Overlay, мс", 155.0f);
+            rowControl("Overlay, мс", 116.0f);
             ImGui::SliderInt("##overlay-delay", &profile.overlayDelayMs, 0, 1000);
             integer("Начало переподключения, мс", "##reconnect-initial",
                     profile.reconnectInitialMs);
@@ -612,6 +619,14 @@ struct Ui {
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse;
         ImGui::Begin("##control-center", nullptr, flags);
+        // A fixed maximum content width is intentional: narrower controls
+        // cannot save horizontal space while the cards still span the entire
+        // window. Center a compact dashboard on 1080px portrait screens.
+        const float availableWidth = ImGui::GetContentRegionAvail().x;
+        const float layoutWidth = std::min(availableWidth, 750.0f);
+        const float layoutX = ImGui::GetCursorPosX() +
+            std::max(0.0f, (availableWidth - layoutWidth) * 0.5f);
+        ImGui::SetCursorPosX(layoutX);
         ImGui::TextColored(ImVec4(.91f,.95f,1,1), "ПАНЕЛЬ УПРАВЛЕНИЯ");
         ImGui::SameLine();
         const auto statusColor = process.running()
@@ -619,11 +634,12 @@ struct Ui {
         ImGui::TextColored(statusColor, "  %s  %s",
             process.running() ? Symbols::check : Symbols::info,
             process.running() ? "Работает" : "Ожидание запуска");
-        ImGui::Separator();
-
-        // Reserve a non-scrolling footer for the primary action and status.
-        ImGui::BeginChild("##scroll-content", ImVec2(0, -68),
-                          ImGuiChildFlags_None);
+        // Reserve a non-scrolling footer and keep the whole settings area
+        // width-bounded. This is the *only* scroll container: individual
+        // cards auto-grow and never show their own scrollbar.
+        ImGui::SetCursorPosX(layoutX);
+        ImGui::BeginChild("##scroll-content", ImVec2(layoutWidth, -68),
+                          ImGuiChildFlags_None, ImGuiWindowFlags_None);
         drawProfileBar();
         ImGui::BeginDisabled(process.running());
         ImGui::Spacing();
@@ -661,7 +677,14 @@ struct Ui {
         drawLogs();
         ImGui::EndChild();
 
-        ImGui::Separator();
+        ImGui::SetCursorPosX(layoutX);
+        ImGui::Dummy(ImVec2(layoutWidth, 1.0f));
+        const ImVec2 separatorStart = ImGui::GetItemRectMin();
+        ImGui::GetWindowDrawList()->AddLine(
+            separatorStart,
+            ImVec2(separatorStart.x + layoutWidth, separatorStart.y),
+            ImGui::GetColorU32(ImGuiCol_Separator));
+        ImGui::SetCursorPosX(layoutX);
         const ImVec4 action = process.running()
             ? ImVec4(.75f,.36f,.35f,1) : ImVec4(.19f,.69f,.48f,1);
         ImGui::PushStyleColor(ImGuiCol_Button, action);

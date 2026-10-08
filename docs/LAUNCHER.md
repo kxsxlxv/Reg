@@ -155,3 +155,18 @@ diagnostics reported 144 unsupported compiler-option invocations and 4
 precompiled-header incompatibilities; it produced no reusable C++ objects.
 C++ object caching should not be advertised until its compatibility is fixed
 and measured in consecutive successful CI runs.
+
+## Portrait dashboard layout fix
+
+The settings dashboard is now centered in an at-most **750 logical pixel**
+column; the two-column card table therefore stops expanding across the whole
+portrait desktop. Each colored card uses Dear ImGui child auto-height
+(ImGuiChildFlags_AutoResizeY) and disables its own scrollbar. Card height
+follows the visible controls, including changing Overlay/Telemetry or
+Blackbox visibility. This also prevents the earlier RTSP URL clipping.
+
+Only the outer settings region may scroll when the window is genuinely too
+small or advanced/log sections are expanded. The launch/stop footer remains
+fixed. All delay/port inputs and the Overlay delay slider now share a compact
+116-pixel control column. Profile and monitor selectors retain their own
+bounded widths and settings.
