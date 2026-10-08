@@ -28,7 +28,7 @@ class VulkanContext;
 
 class VideoRenderer final {
 public:
-    explicit VideoRenderer(const VulkanContext& vulkan);
+    explicit VideoRenderer(const VulkanContext& vulkan, bool allowNetImgui = false);
     ~VideoRenderer();
 
     VideoRenderer(const VideoRenderer&) = delete;
@@ -46,6 +46,14 @@ public:
         return render(frame, swapchain, nullptr);
 #endif
     }
+
+    // Raw video: records the caller's overlay first, then the remote NetImgui
+    // overlay on top in the SAME Vulkan pass. Video and remote UI must both
+    // remain visible throughout RTSP reconnects.
+    bool renderRaw(
+        const video::VideoFramePtr& frame,
+        Swapchain& swapchain,
+        render::VideoOverlayRecorder* overlay);
 
     // Non-blocking video render with an explicit caller-owned overlay. Returns
     // false when the GPU/swapchain is temporarily not ready.
@@ -190,6 +198,7 @@ private:
     TrackedSwapchainPtr lastSwapchain_{};
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    bool allowNetImgui_{false};
     std::unique_ptr<render::VideoOverlayRecorder> remoteOverlay_;
     std::shared_ptr<const int> netImguiRoleToken_;
     bool netImguiStartupFailed_{false};
