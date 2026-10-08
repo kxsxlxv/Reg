@@ -282,3 +282,42 @@ untouched, and profile, RTSP and Blackbox settings do not change.
 A cross-platform pure C++ regression test covers target identity matching,
 transient handle reuse, case-insensitive executable paths and ambiguity.
 Win32 window enumeration and placement require real desktop validation.
+
+
+## Exact Sync diagnostics (Reg telemetry)
+
+The Launcher continues to own Reg startup, profiles, monitor placement, RTSP,
+CVM1 UDP port, and the existing overlay-delay setting. No separate probe
+executable, launch mode, additional port, or update procedure is required.
+
+With **Overlay** and **Telemetry** enabled in the Launcher, start a session and
+open the **Exact Sync** tab on the Reg Telemetry monitor. When NetImgui is
+enabled, F10 cycles Overview / Exact Sync / NetImgui. You may also click the tabs.
+
+The diagnostic page reports independent latest video/CVM1 FrameKeys
+(`stream_epoch / frame_id`), last exact pair and target count, number of
+exact pairs selected versus overlay frames presented, missing identity,
+buffer evictions, frames dropped without metadata at their playout deadline,
+and late metadata observed for an *already discarded exact FrameKey*.
+It also distinguishes packets that arrived after their deadline but were
+still paired before the render loop discarded the video.
+
+The page shows the actual `overlay-delay-ms` from the Launcher profile,
+current buffer depths, CVM1 invalid/duplicate/out-of-order counters, and
+a rolling bounded (256-pair) P50/P95/P99 of
+`max(0, CVM1_received_on_Reg - video_decoded_on_Reg)`.
+The last signed receive-minus-decode value can be negative: metadata can
+reach Reg before its video frame is decoded.
+
+**Clock-domain limitation:** the numbers use Reg's local steady clock.
+They are *not* Jetson inference time or end-to-end source-to-display latency.
+CVM1 `cvBeginNs` and `cvEndNs` are not subtracted from the Windows clock.
+The latest independent FrameKeys need not match because reception is
+asynchronous. Only an exact match on the complete `(stream_epoch, frame_id)`
+is eligible for display. Mismatch attempts are rejected and counted.
+
+When the CVM1 signal is absent, the page explicitly says it is waiting for
+metadata. Overlay buffer evictions can increase during this condition;
+this is not the same metric as a frame whose deadline expired while the
+synchronizer was running. Diagnostic drop-key history is bounded and
+cleared on stream/signal resets; cumulative counters remain available.
