@@ -532,10 +532,14 @@ install(TARGETS reg_launcher reg_probe reg_replay RUNTIME DESTINATION bin)
 install(DIRECTORY "${REG_FONT_OUTPUT_DIR}/" DESTINATION bin/fonts)
 install(DIRECTORY "${REG_SHADER_OUTPUT_DIR}/" DESTINATION bin/shaders)
 if(UNIX AND NOT APPLE)
-    install(FILES "$<TARGET_FILE:SDL3::SDL3>" DESTINATION lib FOLLOW_SYMLINK_CHAIN)
-    foreach(_ffmpeg_lib IN ITEMS
-        "${FFMPEG_AVCODEC_LIBRARY}" "${FFMPEG_AVFORMAT_LIBRARY}" "${FFMPEG_AVUTIL_LIBRARY}")
-        install(FILES "${_ffmpeg_lib}" DESTINATION lib FOLLOW_SYMLINK_CHAIN)
+    # install(FILES) cannot follow soname symlink chains. This variant can.
+    # Delay the copy until installation so the built SDL3 library exists.
+    foreach(_reg_runtime_library IN ITEMS
+        "$<TARGET_FILE:SDL3::SDL3>"
+        "${FFMPEG_AVCODEC_LIBRARY}"
+        "${FFMPEG_AVFORMAT_LIBRARY}"
+        "${FFMPEG_AVUTIL_LIBRARY}")
+        install(CODE "file(INSTALL \"${_reg_runtime_library}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}/lib\" FOLLOW_SYMLINK_CHAIN)")
     endforeach()
 endif()
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/scripts/linux/reg-launcher.desktop"
