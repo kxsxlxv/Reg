@@ -536,10 +536,13 @@ target_include_directories(reg_launcher_imgui PUBLIC
 )
 target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
 
-add_executable(reg_launcher WIN32 src/launcher/main.cpp)
+add_executable(reg_launcher WIN32
+    src/launcher/main.cpp
+    src/launcher/LauncherDisplay.cpp
+)
 target_link_libraries(reg_launcher PRIVATE reg_launcher_core reg_launcher_imgui)
 if(WIN32)
-    target_link_libraries(reg_launcher PRIVATE shell32)
+    target_link_libraries(reg_launcher PRIVATE shell32 user32)
 endif()
 target_compile_definitions(reg_launcher PRIVATE
     REG_FONT_DIR=\"${REG_FONT_OUTPUT_DIR}\"

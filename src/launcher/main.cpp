@@ -1,4 +1,5 @@
 #include "launcher/LauncherConfig.hpp"
+#include "launcher/LauncherDisplay.hpp"
 #include "launcher/ProcessManager.hpp"
 #ifdef _WIN32
 #include "launcher/UpdateManager.hpp"
@@ -21,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <cstdint>
 #include <cmath>
 #include <utility>
@@ -80,7 +82,31 @@ std::string tail(const fs::path& path, std::streamoff limit = 32768) {
     return text;
 }
 
+int readLauncherDisplay() {
+#ifdef _WIN32
+    int number = 3; // Default: monitor 3 in Windows Settings > Identify.
+#else
+    int number = 0;
+#endif
+    std::ifstream file(reg::launcher::dataDirectory() / "launcher-display.txt");
+    int saved = 0;
+    if (file >> saved && saved >= 0 && saved <= 16) number = saved;
+    return number;
+}
+
+void writeLauncherDisplay(int number) {
+    const auto path = reg::launcher::dataDirectory() / "launcher-display.txt";
+    fs::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::trunc);
+    output << number << '\n';
+    if (!output) throw std::runtime_error("Не удалось сохранить выбор монитора");
+}
+
 struct Ui {
+    SDL_Window* window{nullptr};
+    int launcherDisplay{0};
+    std::vector<reg::launcher::LauncherDisplay> availableDisplays;
+    std::chrono::steady_clock::time_point lastDisplayScan{};
     Profile profile;
     std::string profileName{"default"};
     std::vector<std::string> profileNames;
@@ -103,7 +129,14 @@ struct Ui {
     bool autoUpdateStarted{false};
 #endif
 
-    Ui() {
+    explicit Ui(SDL_Window* targetWindow)
+        : window(targetWindow), launcherDisplay(readLauncherDisplay()) {
+        availableDisplays = reg::launcher::launcherDisplays();
+        if (launcherDisplay > 0 && !reg::launcher::moveLauncherToDisplay(
+                window, launcherDisplay)) {
+            // If the selected display is disconnected, keep the window visible
+            // in its default location while retaining the stored preference.
+        }
         profileNames = reg::launcher::listProfiles();
         auto selected = reg::launcher::lastSelectedProfile();
         if (std::find(profileNames.begin(), profileNames.end(), selected) == profileNames.end()) {
@@ -206,6 +239,11 @@ struct Ui {
         }
 #endif
         const auto now = std::chrono::steady_clock::now();
+        if (lastDisplayScan == std::chrono::steady_clock::time_point{} ||
+            now - lastDisplayScan > std::chrono::seconds(3)) {
+            availableDisplays = reg::launcher::launcherDisplays();
+            lastDisplayScan = now;
+        }
         if (!sessionDirectory.empty() &&
             (lastRead == std::chrono::steady_clock::time_point{} ||
              now - lastRead >= std::chrono::milliseconds(500))) {
@@ -221,13 +259,13 @@ struct Ui {
     void drawUpdates() {
         using reg::launcher::UpdatePhase;
         const auto info = updater.snapshot();
-        float height = info.phase == UpdatePhase::Downloading ? 150.0f : 115.0f;
+        float height = info.phase == UpdatePhase::Downloading ? 117.0f : 89.0f;
         if (card("##updates-card", height, ImVec4(.118f,.143f,.192f,1),
                  Symbols::refresh, "Обновления", ImVec4(.54f,.72f,1,1))) {
             const bool busy = info.phase == UpdatePhase::Checking ||
                               info.phase == UpdatePhase::Downloading;
             ImGui::BeginDisabled(busy);
-            ImGui::SetNextItemWidth(160);
+            ImGui::SetNextItemWidth(148);
             if (ImGui::BeginCombo("##update-channel", updateChannel == "dev"
                                  ? "Development" : "Stable")) {
                 for (const auto* option : {"dev", "stable"}) {
@@ -309,82 +347,126 @@ struct Ui {
         ImGui::TextDisabled("%s", label);
     }
 
-    static void integer(const char* label, const char* id, int& value) {
-        caption(label);
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputInt(id, &value);
+    // Put a bounded control on the right instead of occupying the full
+    // card width. Inline rows reduce the height of a 1080x1920 portrait UI.
+    static void rowControl(const char* label, float width) {
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float field = std::min(width, available * .48f);
+        const float textWidth = ImGui::CalcTextSize(label).x;
+        ImGui::AlignTextToFramePadding();
+        if (textWidth + field + 16.0f > available) {
+            ImGui::TextDisabled("%s", label);
+        } else {
+            ImGui::TextDisabled("%s", label);
+            ImGui::SameLine();
+        }
+        const float right = ImGui::GetWindowContentRegionMax().x;
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - field));
+        ImGui::SetNextItemWidth(field);
     }
 
-    static int connectedDisplays() {
-        int count = 0;
-        SDL_DisplayID* displays = SDL_GetDisplays(&count);
-        if (displays) SDL_free(displays);
-        return std::clamp(count, 1, 16);
+    static void integer(const char* label, const char* id, int& value) {
+        rowControl(label, 116.0f);
+        // No redundant +/- buttons: type a number or use Ctrl+Click.
+        ImGui::InputInt(id, &value, 0, 0);
     }
 
     void displaySelector(const char* id, const char* label,
                          int& selection, const char* defaultLabel) {
-        caption(label);
-        const int count = connectedDisplays();
-        std::string preview = selection == 0
-            ? std::string("Автоматически (") + defaultLabel + ")"
+        rowControl(label, 168.0f);
+        const std::string preview = selection == 0
+            ? std::string("Авто (") + defaultLabel + ")"
             : "Монитор " + std::to_string(selection);
-        ImGui::SetNextItemWidth(-1);
         if (ImGui::BeginCombo(id, preview.c_str())) {
-            if (ImGui::Selectable("Автоматически##auto", selection == 0)) selection = 0;
-            for (int number = 1; number <= count; ++number) {
-                const std::string item = "Монитор " + std::to_string(number);
-                if (ImGui::Selectable(item.c_str(), selection == number)) {
-                    selection = number;
-                }
+            if (ImGui::Selectable("Автоматически##default", selection == 0))
+                selection = 0;
+            for (const auto& display : availableDisplays) {
+                const std::string item = "Монитор " + std::to_string(display.number);
+                if (ImGui::Selectable(item.c_str(), selection == display.number))
+                    selection = display.number;
             }
             ImGui::EndCombo();
         }
     }
 
-    void drawProfileBar() {
-        ImGui::TextDisabled("Профиль запуска");
-        const float available = ImGui::GetContentRegionAvail().x;
-        const float selectorWidth = std::max(140.0f, available - 265.0f);
-        ImGui::SetNextItemWidth(selectorWidth);
-        if (ImGui::BeginCombo("##profile", profileName.c_str())) {
-            for (const auto& name : profileNames) {
-                if (ImGui::Selectable(name.c_str(), name == profileName)) {
-                    try { selectProfile(name); }
-                    catch (const std::exception& e) { message = e.what(); }
+    void launcherDisplaySelector() {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("Окно:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(155.0f);
+        const std::string label = launcherDisplay == 0
+            ? "Системный" : "Монитор " + std::to_string(launcherDisplay);
+        if (ImGui::BeginCombo("##launcher-display", label.c_str())) {
+            if (ImGui::Selectable("Системный монитор", launcherDisplay == 0)) {
+                launcherDisplay = 0;
+                writeLauncherDisplay(0);
+                reg::launcher::moveLauncherToDisplay(window, 0);
+            }
+            for (const auto& display : availableDisplays) {
+                const std::string option = "Монитор " + std::to_string(display.number);
+                if (ImGui::Selectable(option.c_str(), launcherDisplay == display.number)) {
+                    launcherDisplay = display.number;
+                    writeLauncherDisplay(launcherDisplay);
+                    reg::launcher::moveLauncherToDisplay(window, launcherDisplay);
                 }
             }
             ImGui::EndCombo();
         }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(process.running());
-        if (ImGui::Button("Сохранить", ImVec2(110, 0))) {
-            try { save(); } catch (const std::exception& e) { message = e.what(); }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Монитор окна лаунчера по нумерации Windows -> Дисплей -> Определить.\nНастройка сохраняется отдельно от профиля.");
         }
+    }
+
+    void drawProfileBar() {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("Профиль:");
         ImGui::SameLine();
-        if (ImGui::Button("Новый профиль", ImVec2(145, 0))) {
-            showCreateProfile = !showCreateProfile;
+        ImGui::SetNextItemWidth(196.0f);
+        ImGui::BeginDisabled(process.running());
+        if (ImGui::BeginCombo("##profile", profileName.c_str())) {
+            for (const auto& name : profileNames) {
+                if (ImGui::Selectable(name.c_str(), name == profileName)) {
+                    try { selectProfile(name); }
+                    catch (const std::exception& error) { message = error.what(); }
+                }
+            }
+            ImGui::EndCombo();
         }
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(process.running());
+        if (ImGui::Button("Сохранить", ImVec2(95, 0))) {
+            try { save(); } catch (const std::exception& error) {
+                message = error.what();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Новый", ImVec2(75, 0))) showCreateProfile = !showCreateProfile;
+        ImGui::EndDisabled();
 
+        // Keep launcher location independent of the video output mapping.
+        if (ImGui::GetContentRegionAvail().x > 215.0f) {
+            ImGui::SameLine();
+            launcherDisplaySelector();
+        } else {
+            launcherDisplaySelector();
+        }
         if (showCreateProfile) {
-            ImGui::SetNextItemWidth(-155);
-            ImGui::InputTextWithHint("##new-name", "Имя латиницей, цифры, - или _",
+            ImGui::SetNextItemWidth(210);
+            ImGui::InputTextWithHint("##new-name", "Новое имя профиля",
                                      newName.data(), newName.size());
             ImGui::SameLine();
             ImGui::BeginDisabled(process.running());
-            if (ImGui::Button("Создать", ImVec2(135, 0))) {
-                try {
-                    createProfile();
-                    showCreateProfile = false;
-                } catch (const std::exception& e) { message = e.what(); }
+            if (ImGui::Button("Создать", ImVec2(100, 0))) {
+                try { createProfile(); showCreateProfile = false; }
+                catch (const std::exception& error) { message = error.what(); }
             }
             ImGui::EndDisabled();
         }
     }
 
     void drawSource() {
-        if (card("##source-card", 116.0f, ImVec4(0.105f, 0.151f, 0.195f, 1),
+        if (card("##source-card", 83.0f, ImVec4(0.105f, 0.151f, 0.195f, 1),
                  Symbols::source, "Источник видео", ImVec4(0.32f, 0.72f, 0.97f, 1))) {
             caption("RTSP / RTSPS адрес");
             ImGui::SetNextItemWidth(-1);
@@ -398,7 +480,7 @@ struct Ui {
     }
 
     void drawDisplays() {
-        if (card("##display-card", 283.0f, ImVec4(0.109f, 0.157f, 0.163f, 1),
+        if (card("##display-card", 186.0f, ImVec4(0.109f, 0.157f, 0.163f, 1),
                  Symbols::displays, "Экраны и наложения", ImVec4(0.34f, 0.84f, 0.71f, 1))) {
             ImGui::Checkbox("CV Overlay", &profile.overlayEnabled);
             ImGui::SameLine();
@@ -427,25 +509,24 @@ struct Ui {
     }
 
     void drawRecorder() {
-        if (card("##record-card", 283.0f, ImVec4(0.155f, 0.125f, 0.167f, 1),
+        if (card("##record-card", 186.0f, ImVec4(0.155f, 0.125f, 0.167f, 1),
                  Symbols::record, "Запись Blackbox", ImVec4(0.91f, 0.65f, 0.94f, 1))) {
             ImGui::Checkbox("Включить циклическую запись", &profile.recorderEnabled);
             ImGui::BeginDisabled(!profile.recorderEnabled);
             integer("Длительность сегмента, мс", "##record-segment", profile.recordSegmentMs);
-            caption("Срок хранения записей");
+            rowControl("Хранение, мин", 116.0f);
             int minutes = std::max(1, profile.recordRetentionSec / 60);
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::InputInt("##retention-minutes", &minutes, 1, 5)) {
+            if (ImGui::InputInt("##retention-minutes", &minutes, 0, 0)) {
                 profile.recordRetentionSec = std::clamp(minutes, 1, 100000) * 60;
             }
-            ImGui::TextDisabled("минуты  ·  файлы в папке recordings/blackbox");
+            ImGui::TextDisabled("Каталог: recordings/blackbox");
             ImGui::EndDisabled();
         }
         finishCard();
     }
 
     void drawNetwork() {
-        if (card("##network-card", 215.0f, ImVec4(0.124f, 0.143f, 0.197f, 1),
+        if (card("##network-card", 155.0f, ImVec4(0.124f, 0.143f, 0.197f, 1),
                  Symbols::network, "Сеть и удалённый UI", ImVec4(0.52f, 0.69f, 1, 1))) {
             integer("Порт UDP метаданных", "##metadata-port", profile.metadataPort);
             ImGui::Checkbox("Приём NetImgui", &profile.netImguiEnabled);
@@ -457,10 +538,9 @@ struct Ui {
     }
 
     void drawLatency() {
-        if (card("##latency-card", 215.0f, ImVec4(0.176f, 0.140f, 0.114f, 1),
+        if (card("##latency-card", 155.0f, ImVec4(0.176f, 0.140f, 0.114f, 1),
                  Symbols::tune, "Задержка и восстановление", ImVec4(1.0f, 0.73f, 0.40f, 1))) {
-            caption("Задержка CV Overlay, мс");
-            ImGui::SetNextItemWidth(-1);
+            rowControl("Overlay, мс", 155.0f);
             ImGui::SliderInt("##overlay-delay", &profile.overlayDelayMs, 0, 1000);
             integer("Начало переподключения, мс", "##reconnect-initial",
                     profile.reconnectInitialMs);
@@ -542,14 +622,14 @@ struct Ui {
         ImGui::Separator();
 
         // Reserve a non-scrolling footer for the primary action and status.
-        ImGui::BeginChild("##scroll-content", ImVec2(0, -75),
+        ImGui::BeginChild("##scroll-content", ImVec2(0, -68),
                           ImGuiChildFlags_None);
-        ImGui::BeginDisabled(process.running());
         drawProfileBar();
+        ImGui::BeginDisabled(process.running());
         ImGui::Spacing();
         drawSource();
         ImGui::Spacing();
-        if (ImGui::GetContentRegionAvail().x >= 750.0f) {
+        if (ImGui::GetContentRegionAvail().x >= 705.0f) {
             if (ImGui::BeginTable("##main-cards", 2,
                                  ImGuiTableFlags_SizingStretchSame)) {
                 ImGui::TableNextColumn();
@@ -709,8 +789,9 @@ int main(int, char**) {
         return 1;
     }
     SDL_Window* window = SDL_CreateWindow(
-        "Панель управления", 1040, 800,
+        "Панель управления", 960, 840,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    if (window) SDL_SetWindowMinimumSize(window, 720, 650);
     if (!window) {
         std::fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
         SDL_Quit();
@@ -740,7 +821,7 @@ int main(int, char**) {
 
     int exitCode = 0;
     try {
-        Ui ui;
+        Ui ui(window);
         bool done = false;
         while (!done) {
             SDL_Event event;

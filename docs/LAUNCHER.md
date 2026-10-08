@@ -125,3 +125,29 @@ legacy installation cannot update itself: install the newly produced
 portable.zip once to establish a working statically linked updater.
 Subsequent updates are in-app. Do not delete %LOCALAPPDATA%/Reg, which
 contains profiles and recordings.
+
+## Portrait Full HD layout and launcher window placement
+
+The launcher defaults to a 960 x 840 window, so it fits comfortably on a
+1080 x 1920 portrait display without occupying the full vertical desktop.
+The launch/stop footer remains visible. Display selection combos are now
+168 logical pixels wide and placed inline with monitor names; other numeric
+fields are 116 pixels wide without redundant increment/decrement buttons.
+The two-column card layout fits a 1080-wide display and falls back to a
+single column on small windows. Detailed settings and logs are collapsible.
+The scrolling region only becomes necessary if the window is resized small
+or extra sections are expanded.
+
+An **Окно: Монитор 3** selector in the profile toolbar configures which
+Windows Settings -> Display -> Identify monitor the launcher should open on.
+It uses the same QueryDisplayConfig CCD numbering as video output mapping,
+rather than SDL enumeration or GDI display suffixes. The default is monitor
+3 on Windows, with fallback to the system placement when that monitor does
+not exist. The choice is stored in
+%LOCALAPPDATA%/Reg/launcher-display.txt, independent of video profiles;
+0 means the system's primary display. Changing the selection immediately
+moves and centers the existing launcher window.
+
+Windows CI now caches C++ compilation via MSYS2 UCRT64 ccache in addition
+to the FFmpeg dependency cache. The first build fills caches; following
+commits restore compiled objects and print cache hit/miss statistics.
