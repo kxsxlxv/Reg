@@ -24,6 +24,7 @@ struct SyncDecision {
     SyncDecisionType type{SyncDecisionType::None};
     std::optional<SynchronizedFrame> frame{};
     std::optional<media::FrameKey> droppedKey{};
+    std::optional<std::chrono::steady_clock::time_point> droppedDeadline{};
 };
 
 class FrameSynchronizer final {
