@@ -21,11 +21,6 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 90
-    env:
-      CCACHE_DIR: ${{ github.workspace }}/.ci/ccache
-      CCACHE_MAXSIZE: 600M
-      CCACHE_COMPRESS: "true"
-      CCACHE_BASEDIR: ${{ github.workspace }}
 
     steps:
       - name: Checkout
@@ -45,27 +40,12 @@ jobs:
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
-            mingw-w64-ucrt-x86_64-ccache
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-vulkan-headers
             mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-shaderc
 
       # Reuse FFmpeg for code-only edits. The key includes workflow flags.
-      # ccache survives ephemeral GitHub runners. A unique key writes updated
-      # entries while restore-keys picks the newest prior compiler cache.
-      - name: Restore C++ compiler cache
-        uses: actions/cache@v4
-        with:
-          path: .ci/ccache
-          key: win-ucrt64-ccache-v1-${{ github.sha }}
-          restore-keys: |
-            win-ucrt64-ccache-v1-
-
-      - name: Reset compiler cache counters
-        shell: msys2 {0}
-        run: ccache --zero-stats
-
       - name: Restore FFmpeg build
         id: ffmpeg-cache
         uses: actions/cache@v4
@@ -100,15 +80,6 @@ jobs:
           make -j2
           make install
 
-      - name: Verify MSYS2 compiler cache
-        shell: msys2 {0}
-        run: |
-          mkdir -p .ci
-          echo 'int ccache_smoke() { return 7; }' > .ci/ccache-smoke.cpp
-          ccache g++ -std=c++23 -c .ci/ccache-smoke.cpp -o .ci/ccache-smoke.o
-          ccache g++ -std=c++23 -c .ci/ccache-smoke.cpp -o .ci/ccache-smoke.o
-          ccache --show-stats --verbose
-
       - name: Configure project
         shell: msys2 {0}
         run: |
@@ -117,7 +88,6 @@ jobs:
             -DFFMPEG_ROOT="$PWD/.ci/ffmpeg-install" \
             -DREG_ENABLE_VALIDATION=OFF \
             -DREG_BUILD_TESTS=ON \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DREG_ENABLE_NETIMGUI_REMOTE=ON \
             -DVulkan_INCLUDE_DIR=/ucrt64/include \
             -DVulkan_LIBRARY=/ucrt64/lib/libvulkan-1.dll.a
@@ -125,11 +95,6 @@ jobs:
       - name: Build application
         shell: msys2 {0}
         run: cmake --build build-win --parallel 3
-
-      - name: C++ compiler cache statistics
-        if: always()
-        shell: msys2 {0}
-        run: ccache --show-stats --verbose
 
       - name: Check standalone Windows updater dependencies
         shell: msys2 {0}

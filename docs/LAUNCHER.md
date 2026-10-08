@@ -148,6 +148,10 @@ not exist. The choice is stored in
 0 means the system's primary display. Changing the selection immediately
 moves and centers the existing launcher window.
 
-Windows CI now caches C++ compilation via MSYS2 UCRT64 ccache in addition
-to the FFmpeg dependency cache. The first build fills caches; following
-commits restore compiled objects and print cache hit/miss statistics.
+Windows CI restores the previously built FFmpeg dependencies from a stable
+content-addressed cache key, skipping its expensive compilation when those
+sources remain unchanged. An MSYS2 ccache experiment was removed after
+diagnostics reported 144 unsupported compiler-option invocations and 4
+precompiled-header incompatibilities; it produced no reusable C++ objects.
+C++ object caching should not be advertised until its compatibility is fixed
+and measured in consecutive successful CI runs.
