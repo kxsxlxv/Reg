@@ -794,6 +794,154 @@ void drawEvents(
     ImGui::EndChild();
 }
 
+
+std::string exactKeyLabel(
+    const std::optional<media::FrameKey>& key) {
+    if (!key) {
+        return "—";
+    }
+    return std::to_string(key->streamEpoch) +
+        " / " + std::to_string(key->frameId);
+}
+
+void drawExactSyncDiagnostics(const telemetry::Counters& counters) {
+    const auto& sync = counters.exactSync;
+
+    if (!ImGui::BeginChild(
+            "exact_sync_scroller",
+            ImVec2(0.0F, 0.0F),
+            false,
+            ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+        ImGui::EndChild();
+        return;
+    }
+
+    drawPipelineSectionHeader("EXACT SYNC / VIDEO + CVM1", kAccentBlue);
+    if (!counters.videoSignalPresent) {
+        ImGui::TextColored(kWarningAmber, "ОЖИДАНИЕ ВИДЕО");
+    } else if (!counters.cvSignalPresent) {
+        ImGui::TextColored(
+            kWarningAmber, "ОЖИДАНИЕ CVM1 — детекции не поступают");
+    } else if (sync.matchedPairs == 0U) {
+        ImGui::TextColored(
+            kWarningAmber, "CVM1 есть, точных совпадений пока нет");
+    } else {
+        ImGui::TextColored(
+            kSignalGreen, "Точные пары найдены по epoch + frame_id");
+    }
+    ImGui::TextDisabled(
+        "Последние ID показывают независимые потоки и не обязаны совпадать.");
+    ImGui::TextDisabled(
+        "Ожидание CVM1 не считается ошибкой идентичности.");
+
+    const auto row = [](const char* label, const std::string& value) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("%s", label);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(value.c_str());
+    };
+    const auto number = [](std::uint64_t value) {
+        return std::to_string(value);
+    };
+
+    if (ImGui::BeginTable(
+            "exact_sync_table",
+            2,
+            ImGuiTableFlags_BordersInnerH |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn(
+            "Метрика", ImGuiTableColumnFlags_WidthStretch, 0.58F);
+        ImGui::TableSetupColumn(
+            "Значение", ImGuiTableColumnFlags_WidthStretch, 0.42F);
+
+        row("Последний video epoch / frame",
+            exactKeyLabel(sync.lastVideoKey));
+        row("Последний CVM1 epoch / frame",
+            exactKeyLabel(sync.lastMetadataKey));
+        row("Последняя точная пара",
+            exactKeyLabel(sync.lastMatchedKey));
+        row("Целей в последней паре",
+            number(sync.lastMatchedTargetCount));
+
+        row("Декодировано видео", number(counters.decodedFrames));
+        row("Video без SEI",
+            number(counters.overlayMissingIdentity));
+        row("CVM1 получено", number(counters.metadataPackets));
+        row("CVM1 некорректных",
+            number(counters.metadataInvalid));
+        row("CVM1 дубликатов",
+            number(counters.metadataDuplicates));
+        row("CVM1 не по порядку",
+            number(counters.metadataOutOfOrder));
+        row("Пропусков packet sequence",
+            number(counters.metadataSequenceGaps));
+
+        row("Точных пар найдено",
+            number(sync.matchedPairs));
+        row("Overlay показано",
+            number(counters.overlayPresentedFrames));
+        row("Отвергнуто неверных FrameKey",
+            number(sync.rejectedKeyMismatches));
+        row("Видео без CVM1 к дедлайну",
+            number(sync.dueWithoutMetadata));
+        row("Видео вытеснено из буфера",
+            number(counters.overlayBufferEvictions));
+        row("CVM1 после отброса кадра",
+            number(sync.metadataAfterDroppedFrame));
+        row("Из них позже дедлайна",
+            number(sync.metadataArrivedAfterDeadline));
+        row("Поздние CVM1 в точных парах",
+            number(sync.matchedAfterDeadline));
+        row("CVM1 вытеснено из хранилища",
+            number(counters.metadataStoreEvictions));
+
+        row("Буфер видео / вместимость",
+            number(counters.overlayBufferDepth) + " / 64");
+        row("Хранилище CVM1",
+            number(counters.metadataStoreDepth));
+        row("Задержка overlay",
+            number(counters.configuredOverlayDelayMs) + " ms");
+
+        if (sync.hasTimingSample) {
+            char buffer[96]{};
+            std::snprintf(
+                buffer, sizeof(buffer), "%.2f ms",
+                sync.lastArrivalRelativeToDecodeMs);
+            row("CVM1 - local video decode", buffer);
+            std::snprintf(
+                buffer, sizeof(buffer), "%.2f ms",
+                sync.lastPlayoutWaitMs);
+            row("Decode -> exact pair", buffer);
+            std::snprintf(
+                buffer, sizeof(buffer),
+                "%.2f / %.2f / %.2f ms",
+                sync.arrivalDelayP50Ms,
+                sync.arrivalDelayP95Ms,
+                sync.arrivalDelayP99Ms);
+            row("Ожидание CVM1 P50/P95/P99", buffer);
+            row("Выборка последних пар",
+                number(sync.latencySampleCount));
+        } else {
+            row("Задержки", "Нет точных пар");
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled(
+        "Задержка CVM1 измерена относительно decode в Reg; "
+        "отрицательная разница означает CVM1 раньше видео.");
+    ImGui::TextDisabled(
+        "P50/P95/P99: max(0, receive_time - decode_time), "
+        "последние 256 пар.");
+    ImGui::TextDisabled(
+        "Эти числа НЕ являются измерением Jetson inference "
+        "или end-to-end latency.");
+    ImGui::EndChild();
+}
+
 void drawNetImguiDiagnostics(const NetImguiDiagnostics& diagnostics) {
     ImGui::SeparatorText("NETIMGUI / РЕНДЕР");
     ImGui::TextDisabled(
@@ -1182,13 +1330,15 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             return;
         }
 
-        if (!netImgui.enabled) {
-            drawOverview(snapshot, now);
-        } else if (ImGui::BeginTabBar("telemetry_tabs")) {
+        if (ImGui::BeginTabBar("telemetry_tabs")) {
             const app::TelemetryPage selectedPage =
                 app::telemetryPage();
             const ImGuiTabItemFlags overviewFlags =
                 selectedPage == app::TelemetryPage::Overview
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
+            const ImGuiTabItemFlags exactSyncFlags =
+                selectedPage == app::TelemetryPage::ExactSync
                     ? ImGuiTabItemFlags_SetSelected
                     : ImGuiTabItemFlags_None;
             const ImGuiTabItemFlags netImguiFlags =
@@ -1208,16 +1358,30 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 ImGui::EndTabItem();
             }
 
-            const bool netImguiOpen = ImGui::BeginTabItem(
-                "NetImgui",
+            const bool exactSyncOpen = ImGui::BeginTabItem(
+                "Exact Sync",
                 nullptr,
-                netImguiFlags);
+                exactSyncFlags);
             if (ImGui::IsItemClicked()) {
-                app::setTelemetryPage(app::TelemetryPage::NetImgui);
+                app::setTelemetryPage(app::TelemetryPage::ExactSync);
             }
-            if (netImguiOpen) {
-                drawNetImguiDiagnostics(netImgui);
+            if (exactSyncOpen) {
+                drawExactSyncDiagnostics(snapshot.counters);
                 ImGui::EndTabItem();
+            }
+
+            if (netImgui.enabled) {
+                const bool netImguiOpen = ImGui::BeginTabItem(
+                    "NetImgui",
+                    nullptr,
+                    netImguiFlags);
+                if (ImGui::IsItemClicked()) {
+                    app::setTelemetryPage(app::TelemetryPage::NetImgui);
+                }
+                if (netImguiOpen) {
+                    drawNetImguiDiagnostics(netImgui);
+                    ImGui::EndTabItem();
+                }
             }
             ImGui::EndTabBar();
         }
