@@ -162,6 +162,8 @@ struct Ui {
         if (updateChannel == "dev" && state.phase == reg::launcher::UpdatePhase::Prepared &&
             !process.running()) {
             try {
+                commitEdits();
+                reg::launcher::saveProfile(profileName, profile);
                 updater.applyAndRestart();
                 quitForUpdate = true;
             } catch (const std::exception& e) {
@@ -210,9 +212,11 @@ struct Ui {
             ImGui::EndCombo();
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("Проверить")) {
+        if (ImGui::SmallButton(info.phase == UpdatePhase::Error ?
+                               "Повторить" : "Проверить")) {
             autoUpdateStarted = false;
-            updater.checkAsync(updateChannel);
+            if (info.phase == UpdatePhase::Error) updater.retryAsync();
+            else updater.checkAsync(updateChannel);
         }
         ImGui::EndDisabled();
         if (!info.tag.empty()) {
@@ -236,6 +240,8 @@ struct Ui {
                 ImGui::TextDisabled("Для установки сначала остановите видеопоток");
             } else if (ImGui::Button("Установить и перезапустить")) {
                 try {
+                    commitEdits();
+                    reg::launcher::saveProfile(profileName, profile);
                     updater.applyAndRestart();
                     quitForUpdate = true;
                 } catch (const std::exception& e) { message = e.what(); }

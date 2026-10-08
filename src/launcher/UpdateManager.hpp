@@ -34,6 +34,7 @@ public:
 
     void checkAsync(std::string channel);
     void downloadAsync();
+    void retryAsync();
     UpdateView snapshot() const;
     void applyAndRestart(); // Starts the detached helper; caller must exit its process.
 private:

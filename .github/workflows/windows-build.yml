@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: windows-build-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false # Keep the prior build/test result while a new push queues
 
 jobs:
   build:

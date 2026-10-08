@@ -279,6 +279,21 @@ void UpdateManager::check(std::string channel) {
         return;
     }
 
+    const auto failedResult = dataDirectory() / "updates" / tag / "result.txt";
+    if (std::filesystem::is_regular_file(failedResult)) {
+        std::ifstream previous(failedResult);
+        std::string firstLine;
+        std::getline(previous, firstLine);
+        if (firstLine.starts_with("Update failed:")) {
+            std::lock_guard lock(mutex_);
+            view_.tag = tag;
+            view_.phase = UpdatePhase::Error;
+            view_.message = "Не удалось установить прошлое обновление. " +
+                            firstLine + " Нажмите Повторить.";
+            return;
+        }
+    }
+
     const std::string manifestUrl = urlForManifestAsset(*selected, "manifest.json");
     const std::string manifest = readHttpText(manifestUrl);
     const auto metadata = json::parse(manifest);
@@ -324,6 +339,16 @@ void UpdateManager::check(std::string channel) {
     view_.phase = changed_.empty() ? UpdatePhase::UpToDate : UpdatePhase::Available;
     view_.message = changed_.empty() ? "Установлена актуальная версия"
                                     : "Доступно обновление";
+}
+
+void UpdateManager::retryAsync() {
+    const auto current = snapshot();
+    if (safeTag(current.tag, current.channel)) {
+        std::error_code ignored;
+        std::filesystem::remove(
+            dataDirectory() / "updates" / current.tag / "result.txt", ignored);
+    }
+    checkAsync(current.channel);
 }
 
 void UpdateManager::downloadAsync() {
