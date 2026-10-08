@@ -11,6 +11,7 @@ extern "C" {
 }
 
 #include <cerrno>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -19,6 +20,12 @@ extern "C" {
 
 namespace reg::media {
 namespace {
+
+// An idle RTSP/UDP demuxer may block indefinitely, or return EAGAIN without
+// ever reporting a broken MediaMTX session. These bounds turn silence into
+// a recoverable decoder error and allow the outer reconnect loop to run.
+constexpr auto kRtspOpenTimeout = std::chrono::seconds{12};
+constexpr auto kRtspPacketSilenceTimeout = std::chrono::seconds{5};
 
 AVPixelFormat selectVulkanFormat(AVCodecContext*, const AVPixelFormat* formats) {
     for (const AVPixelFormat* current = formats; *current != AV_PIX_FMT_NONE; ++current) {
@@ -100,18 +107,34 @@ void RtspDecoder::run(
         }
 
         std::uint64_t packetCount = 0;
+        const bool liveRtsp =
+            config_.inputKind == VideoInputKind::RtspUdp;
+        auto packetDeadline =
+            IoDeadline::Clock::now() + kRtspPacketSilenceTimeout;
 
         while (!stopRequested_.load(
             std::memory_order_acquire)) {
+            if (liveRtsp) {
+                // This deadline is NOT reset on EAGAIN. Repeated empty reads
+                // cannot conceal a dead RTP source from the watchdog.
+                ioDeadline_.armUntil(packetDeadline);
+            }
             const int result =
                 av_read_frame(
                     formatContext_,
                     packet.get());
+            const bool timedOut = liveRtsp && ioDeadline_.expired();
+            ioDeadline_.disarm();
 
             if (result == AVERROR_EXIT &&
                 stopRequested_.load(
                     std::memory_order_acquire)) {
                 break;
+            }
+
+            if (timedOut && result < 0) {
+                throw std::runtime_error(
+                    "RTSP read stalled: no demuxed packets for 5000 ms");
             }
 
             if (result == AVERROR(EAGAIN)) {
@@ -152,6 +175,10 @@ void RtspDecoder::run(
             }
 
             av_packet_unref(packet.get());
+            if (liveRtsp) {
+                packetDeadline =
+                    IoDeadline::Clock::now() + kRtspPacketSilenceTimeout;
+            }
         }
 
         std::cout
@@ -213,12 +240,20 @@ VideoStreamDescriptorPtr RtspDecoder::openInput() {
             0);
     }
 
+    const bool liveRtsp =
+        config_.inputKind == VideoInputKind::RtspUdp;
+    if (liveRtsp) {
+        ioDeadline_.armUntil(
+            IoDeadline::Clock::now() + kRtspOpenTimeout);
+    }
     const int openResult =
         avformat_open_input(
             &formatContext_,
             config_.url.c_str(),
             nullptr,
             &options);
+    const bool openTimedOut = liveRtsp && ioDeadline_.expired();
+    ioDeadline_.disarm();
 
     // avformat_open_input() may leave the complete option dictionary untouched
     // when opening the input itself fails (for example, when the RTSP server is
@@ -238,8 +273,23 @@ VideoStreamDescriptorPtr RtspDecoder::openInput() {
     }
     av_dict_free(&options);
 
+    if (openTimedOut && openResult < 0) {
+        throw std::runtime_error("RTSP open stalled for 12000 ms");
+    }
     checkFfmpeg(openResult, "avformat_open_input");
-    checkFfmpeg(avformat_find_stream_info(formatContext_, nullptr), "avformat_find_stream_info");
+
+    if (liveRtsp) {
+        ioDeadline_.armUntil(
+            IoDeadline::Clock::now() + kRtspOpenTimeout);
+    }
+    const int streamInfoResult =
+        avformat_find_stream_info(formatContext_, nullptr);
+    const bool infoTimedOut = liveRtsp && ioDeadline_.expired();
+    ioDeadline_.disarm();
+    if (infoTimedOut && streamInfoResult < 0) {
+        throw std::runtime_error("RTSP stream-info stalled for 12000 ms");
+    }
+    checkFfmpeg(streamInfoResult, "avformat_find_stream_info");
 
     videoStreamIndex_ = av_find_best_stream(
         formatContext_,
@@ -323,6 +373,7 @@ void RtspDecoder::openDecoder() {
 }
 
 void RtspDecoder::close() noexcept {
+    ioDeadline_.disarm();
     if (codecContext_ != nullptr) {
         avcodec_free_context(&codecContext_);
     }
@@ -365,7 +416,8 @@ void RtspDecoder::decodePacket(
 
 int RtspDecoder::interruptCallback(void* opaque) {
     const auto* self = static_cast<const RtspDecoder*>(opaque);
-    return self->stopRequested_.load(std::memory_order_acquire) ? 1 : 0;
+    return (self->stopRequested_.load(std::memory_order_acquire) ||
+            self->ioDeadline_.expired()) ? 1 : 0;
 }
 
 } // namespace reg::media
