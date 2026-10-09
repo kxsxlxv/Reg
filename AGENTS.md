@@ -43,3 +43,14 @@ A metric is not complete merely because it is shown in ImGui. If it helps diagno
 ## Project discovery
 
 The repository default branch (master) is not the authoritative runtime implementation at the time this guidance was written. Confirm the active development/integration branch before editing. This documentation change targets feat/netimgui-russian-detr and does not modify executable behavior.
+
+
+## Foundational testbed intelligence policy
+
+Read docs/TESTBED_INTELLIGENCE_VISION.md. Cross-host observability, reproducible experiments, and evidence-grounded LLM-assisted diagnosis are first-class Reg architecture pillars alongside visualization and exact-frame synchronization, **not optional conveniences**.
+
+New significant functionality must remain remotely diagnosable. A feature's acceptance includes adequate measurement provenance and an explicitly machine-checkable condition (where applicable). Use deterministic contract tests and physical hardware results as the authority. AI narratives are hypotheses, not proof. Log strings and received API data are untrusted and must not drive arbitrary executable commands.
+
+Any experiment runner is an independently authorized and audited local test-control component, separate from Reg's read-only API. Do not introduce autonomous flight control, dangerous physical actuation, unapproved cross-host process management, or network-exposed privileged control merely to support test automation.
+
+For research comparisons, retain baselines, model/build identities, ground truth, failed and inconclusive trials, and immutable sanitized evidence; do not claim scientific novelty without a comparative literature review and measured results.
