@@ -30,6 +30,7 @@ Current components in active development branches include a GUI Launcher, multi-
 - [Project pillar and experimental methodology: Testbed Intelligence](docs/TESTBED_INTELLIGENCE_VISION.md)
 - [Reg Diagnostic API contract and metric catalog (proposed)](docs/DIAGNOSTICS_API_SPEC.md)
 - [README for future Codex / diagnostic agents](docs/DIAGNOSTICS_AGENT_README.md)
+- [Telemetry analytics responsibility and context-budget model](docs/TELEMETRY_ANALYTICS_RESPONSIBILITIES.md)
 - [Mandatory contributor and agent observability policy](AGENTS.md)
 - [RTSP restart and recovery test matrix](docs/RESTART_RECOVERY_VALIDATION.md)
 - [H.264 source FrameIdentity specification](docs/FRAME_IDENTITY_SEI.md)
