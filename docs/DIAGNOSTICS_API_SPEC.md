@@ -358,3 +358,16 @@ Existing code: src/telemetry/TelemetryModel.hpp; src/diagnostics/ExactSyncDiagno
 MediaMTX: https://mediamtx.org/docs/features/control-api and https://mediamtx.org/docs/features/metrics
 Prometheus instrumentation/metric naming: https://prometheus.io/docs/practices/instrumentation/ and https://prometheus.io/docs/practices/naming/
 Codex MCP documentation: https://developers.openai.com/learn/docs-mcp
+
+
+## 15. Foundational role in the testbed
+
+The API is now part of the project's accepted *foundational architectural direction* for experimental observability and evidence-grounded agent diagnosis. It remains **DESIGN ONLY** until implemented and validated. See [Testbed Intelligence vision](TESTBED_INTELLIGENCE_VISION.md).
+
+This affects implementation priorities:
+- Structured observations, stable provenance and frame/session correlation come before model/agent features.
+- Each assertion in an agent diagnostic report should refer to accessible, immutable evidence records and should explicitly distinguish a measurement from an inference or a hypothesis.
+- Instrument first for fault isolation: source/publisher -> RTSP/demux -> decoder -> Raw, and source -> Jetson CV -> CVM1 sender -> Reg receiver -> exact Overlay decision. Bound missing-data cases.
+- The API and a deterministic test/evidence engine must remain usable **without an LLM**.
+- A later scientific evaluation must compare manual, deterministic/rules-only, log-only LLM and evidence-grounded hybrid approaches under the same fault injections, including false confident diagnoses and justified INCONCLUSIVE outcomes.
+- Root-cause and recovery verdicts must never be generated as a substitute for independent machine-checkable criteria; never widen the default read-only permission boundary.
