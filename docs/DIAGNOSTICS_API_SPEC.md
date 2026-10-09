@@ -371,3 +371,12 @@ This affects implementation priorities:
 - The API and a deterministic test/evidence engine must remain usable **without an LLM**.
 - A later scientific evaluation must compare manual, deterministic/rules-only, log-only LLM and evidence-grounded hybrid approaches under the same fault injections, including false confident diagnoses and justified INCONCLUSIVE outcomes.
 - Root-cause and recovery verdicts must never be generated as a substitute for independent machine-checkable criteria; never widen the default read-only permission boundary.
+
+
+## 16. Telemetry analytics ownership and context efficiency
+
+The normative responsibility model is in [Telemetry Analytics Responsibilities](TELEMETRY_ANALYTICS_RESPONSIBILITIES.md). Local owner components define and measure each latency/rate population. Their background statistical layer exposes scoped count/sum/min/max/avg and mergeable histograms for derived P50/P95/P99, 1 s/10 s/60 s and experiment windows. A lab deterministic analyzer correlates host states by FrameKey, experiment and session and evaluates PASS/FAIL/INCONCLUSIVE. The LLM chooses diagnostic questions and describes evidence; it does NOT calculate primary statistics by parsing logs.
+
+Future contract additions must include typed, budgeted operations: lab.overview, lab.list_episodes, lab.metric_stats, lab.compare_windows and lab.frame_lifecycle. Legacy logs should be grouped into episodes with evidence handles before LLM access. The default overview target is <=2 KiB JSON with <=5 episodes. A normal drilldown target is <=8 KiB and log excerpt <=20 lines, adjustable after validation. These bounds prevent agent-context flooding but MUST NOT destroy bounded local diagnostic evidence.
+
+Require count, sum, sample population, freshness, reset domain, time window and histogram accuracy alongside reported quantiles. It is mathematically invalid to average P95 values from disjoint hosts/windows. Missing, late and incomplete CV workloads are separately accounted for rather than dropped from every latency population.
