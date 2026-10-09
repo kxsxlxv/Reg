@@ -54,3 +54,10 @@ New significant functionality must remain remotely diagnosable. A feature's acce
 Any experiment runner is an independently authorized and audited local test-control component, separate from Reg's read-only API. Do not introduce autonomous flight control, dangerous physical actuation, unapproved cross-host process management, or network-exposed privileged control merely to support test automation.
 
 For research comparisons, retain baselines, model/build identities, ground truth, failed and inconclusive trials, and immutable sanitized evidence; do not claim scientific novelty without a comparative literature review and measured results.
+
+
+## Telemetry aggregation and agent context budgets
+
+Read docs/TELEMETRY_ANALYTICS_RESPONSIBILITIES.md whenever changing instrumentation, Diagnostics API, Jetson integration or agent tools. **Each component must own its measurements and primary statistics.** Compute count/sum/min/max/avg/histograms off time-critical threads. Central deterministic queries own cross-host joins and verdicts; LLM owns only hypotheses, drill-down selection and evidence-backed interpretation.
+
+Do not create APIs returning unlimited log tails or frame arrays to LLMs. Publish bounded overview and incident/episode queries with pagination and evidence refs; retain deeper samples outside the model context. Expose histogram-compatible sufficient statistics rather than averaging local P95. When changing a statistic, document population, censoring, windows, reset scope and correctness tests in the same PR.
