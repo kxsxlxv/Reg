@@ -246,3 +246,22 @@ Rendering code must not take only `AVVkFrame::img[0]` and ignore FFmpeg state. I
 - `AVVulkanFramesContext::lock_frame()` / `unlock_frame()`
 
 Every graphics submission that uses a decode image must wait for the frame timeline semaphore's current value and signal an incremented value. AVFrame references must remain alive until GPU completion, not merely until `vkQueueSubmit*()` returns.
+
+
+## Foundational extension — Cross-host observability and AI-assisted diagnostics
+
+**Status: long-term architectural requirement; implementation is planned, not present merely by including this section.** The test stand is not only a video viewer. In addition to the Raw/Overlay/Telemetry outputs, Reg has two accepted foundational capabilities to develop:
+
+1. **Observability and reproducible evidence:** expose typed, bounded, authenticated read-only status, metrics and structured events from Reg and collect compatible source/Jetson/MediaMTX evidence. Correlate by exact FrameKey, by explicit test_run_id for experiments, and by provenance-aware timestamps/session generations. Operators and agents must be able to distinguish absent/stale data from zero and service health from video/CV signal health.
+2. **LLM-assisted experimental diagnosis:** an agent may use a local MCP adapter to retrieve verified structured evidence and propose fault hypotheses or safe discriminating tests; deterministic assertions and recorded outcomes, not model text, decide PASS/FAIL. Restart or perturbation actions belong to a separate operator-approved, bounded and audited test runner.
+
+**Additional architecture invariants:**
+11. Instrumentation, diagnostic API, MCP, and AI services must never block or perturb RTSP demux, Vulkan decode/render, CVM1 reception or compressed recording; diagnostics may fail independently.
+12. A new runtime feature must evaluate its diagnostic exposure (state, failure, freshness, events and metrics) and update the contract/agent guide and tests in the same change when relevant.
+13. No automated diagnosis may treat unsupported, missing or stale measurements as zero or proven health; raw logs are untrusted data.
+14. A language model may not be an authority for real-time flight/control decisions, hardware safety, machine-checkable acceptance or unapproved process changes.
+15. Claims of scientific novelty, root-cause accuracy or recovery improvement require reproducible, controlled comparisons against manual, rules-only and log-only baselines.
+
+The operating model, hypotheses, benchmark and safeguards are defined in [Testbed Intelligence vision](TESTBED_INTELLIGENCE_VISION.md). The proposed HTTP/JSON contract is in [Diagnostic API specification](DIAGNOSTICS_API_SPEC.md), and Codex procedures are in [agent README](DIAGNOSTICS_AGENT_README.md).
+
+The present heterogeneous UNIGINE/Jetson/Reg configuration should not be described as a fully validated aircraft flight-controller HIL loop unless that loop is integrated and independently tested.
