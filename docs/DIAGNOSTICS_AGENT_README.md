@@ -173,3 +173,12 @@ Cross-host diagnostic observability and AI-assisted experimental verification ar
 When presenting a diagnosis, distinguish (1) observed measurements, (2) deterministic contract violations, (3) LLM-generated hypotheses, and (4) tested/verified intervention outcomes. Attach direct evidence references and alternate explanations; report INCONCLUSIVE if observations are insufficient. An agent must not equate fluent root-cause stories with hardware-test proof.
 
 Research-grade evaluations must retain incident ground truth, common test windows, configuration and build fingerprints, missing-data cases, matched FrameKey evidence, model versions/cost, blind scenario splits and manual/rules-only/log-only comparison results. Test outcomes must remain reproducible with the model disconnected. A new scientific contribution cannot be asserted merely because an LLM is connected to MCP.
+
+
+## 12. Context-preserving analysis is mandatory
+
+Read [Telemetry Analytics Responsibilities](TELEMETRY_ANALYTICS_RESPONSIBILITIES.md). NEVER automatically subscribe to or paste unbounded logs into the model. A healthy five-minute run should require no continuous LLM context consumption. Query a compact overview, select a specific anomaly episode, retrieve per-stage server-calculated statistical distributions and only then request <=20 matching log lines or one retained FrameKey trace if warranted.
+
+Reg owns Reg video/Exact Sync statistical definitions; Jetson owns inference/queue/sender latency and CV rates; UNIGINE/MediaMTX own source/transport boundaries; the lab analyzer owns cross-host comparison and deterministic verification; the agent owns hypotheses and explanation. MCP is a thin wrapper over these functions, not a numerical computation engine.
+
+Do not calculate basic avg/min/max/P95 via one-off agent shell scripts against text logs. If a novel calculation is needed, operate offline against an evidence export, validate it and promote it into a reusable typed deterministic query. Never average P95 from separate windows. Preserve sample_count, population, reset scope and censored/timeout cases in conclusions.
