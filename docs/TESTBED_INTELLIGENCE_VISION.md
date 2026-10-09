@@ -238,3 +238,8 @@ Selected public references as of 2026-10-09:
 **Accepted as a long-term design goal:** cross-host evidence, agent-readable diagnostics and research-grade reproducibility are foundational Reg capabilities.
 
 **Not authorized by this document:** exposing diagnostic endpoints on untrusted networks, installing cloud AI agents, granting process-restart privileges, modifying existing RTSP/CV processing logic, automatic adaptive delay, or claiming scientific novelty/experimental results without evidence.
+
+
+## 12. Measurement-to-LLM delegation
+
+The accepted design is **measure locally -> summarize locally -> correlate/deterministically validate centrally -> inspect via bounded tools -> explain with LLM**. Ownership, per-host FPS/latency distributions, mergeable histograms, matched-only percentile bias, structured fault episodes, compact MCP responses, log retention and token budgets are specified in [Telemetry Analytics Responsibilities](TELEMETRY_ANALYTICS_RESPONSIBILITIES.md). Do not use an LLM or new ad hoc shell script as the default per-frame statistical calculator. Evaluation MUST track LLM context growth, tokens per incident and evidence retrieval accuracy, not simply diagnostic prose quality.
