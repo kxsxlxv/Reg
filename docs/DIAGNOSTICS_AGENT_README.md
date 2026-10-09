@@ -164,3 +164,12 @@ M0: existing MediaMTX API + Reg logs/CSV and Jetson sampler, one cross-host repo
 - https://mediamtx.org/docs/features/metrics
 - https://prometheus.io/docs/practices/naming/
 - https://developers.openai.com/learn/docs-mcp
+
+
+## 11. This API is a core project capability
+
+Cross-host diagnostic observability and AI-assisted experimental verification are long-term foundational Reg pillars, not an incidental interface. Read [Testbed Intelligence Vision](TESTBED_INTELLIGENCE_VISION.md) before expanding agent behaviour.
+
+When presenting a diagnosis, distinguish (1) observed measurements, (2) deterministic contract violations, (3) LLM-generated hypotheses, and (4) tested/verified intervention outcomes. Attach direct evidence references and alternate explanations; report INCONCLUSIVE if observations are insufficient. An agent must not equate fluent root-cause stories with hardware-test proof.
+
+Research-grade evaluations must retain incident ground truth, common test windows, configuration and build fingerprints, missing-data cases, matched FrameKey evidence, model versions/cost, blind scenario splits and manual/rules-only/log-only comparison results. Test outcomes must remain reproducible with the model disconnected. A new scientific contribution cannot be asserted merely because an LLM is connected to MCP.
