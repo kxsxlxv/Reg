@@ -44,30 +44,35 @@ void testHistogramPrecisionAndMerge() {
     }
     const auto a = one.snapshotBetween(0, 4, 4);
     const auto b = two.snapshotBetween(0, 4, 4);
-    auto merged = a.mergedWith(b);
-    require(merged.has_value(), "compatible histograms must merge");
+    require(!a.mergedWith(b), "unverified same-window shards cannot merge");
+    auto merged = a.mergedWith(b, Disjointness::VerifiedDisjoint);
+    require(merged.has_value(), "attested disjoint same-window histogram shards merge");
     require(merged->sampleCount == 10 && merged->minNs == 10 && merged->maxNs == 24,
             "merged distribution extrema/count");
     require(merged->sumNs == 170 && merged->meanNs() == 17, "merged mean is weighted");
+    require(!merged->rejectedInputs, "lifetime invalid-input counts must not be summed");
+    require(merged->percentilesAreUpperBoundEstimates &&
+            merged->quantileRelativeUpperErrorBound == 0.0625,
+            "percentile accuracy metadata must survive merge");
     require(merged->percentileUpper(50).has_value(), "merged quantile exists");
     auto incompatible = b;
     incompatible.metric.population = "all_eligible";
-    require(!a.mergedWith(incompatible), "population merge rejection");
+    require(!a.mergedWith(incompatible, Disjointness::VerifiedDisjoint), "population merge rejection");
     incompatible = b;
     incompatible.metric.sessionId = "restart";
-    require(!a.mergedWith(incompatible), "session merge rejection");
+    require(!a.mergedWith(incompatible, Disjointness::VerifiedDisjoint), "session merge rejection");
     incompatible = b;
     incompatible.metric.resetGeneration = 2;
-    require(!a.mergedWith(incompatible), "reset generation merge rejection");
+    require(!a.mergedWith(incompatible, Disjointness::VerifiedDisjoint), "reset generation merge rejection");
     incompatible = b;
     incompatible.metric.clockDomain = "jetson-steady";
-    require(!a.mergedWith(incompatible), "cross-host clock merge rejection");
+    require(!a.mergedWith(incompatible, Disjointness::VerifiedDisjoint), "cross-host clock merge rejection");
     incompatible = b;
     incompatible.windowEndNs = 3;
-    require(!a.mergedWith(incompatible), "window merge rejection");
+    require(!a.mergedWith(incompatible, Disjointness::VerifiedDisjoint), "window merge rejection");
     incompatible = b;
     incompatible.histogram[histogramBucket(10)] = UINT64_MAX;
-    require(!a.mergedWith(incompatible), "histogram overflow must reject merge");
+    require(!a.mergedWith(incompatible, Disjointness::VerifiedDisjoint), "histogram overflow must reject merge");
 }
 
 void testKnownLatenciesAndOutcomes() {
@@ -244,6 +249,142 @@ void testHardResetUnsupportedAndStress() {
             "zero coverage with known failures is not an unknown denominator");
 }
 
+
+void testWindowEvictionAndPartialStatistics() {
+    DurationWindow d(metric(MetricKind::Duration), 3, 100);
+    for (int t = 1; t <= 4; ++t)
+        require(d.recordDuration(t, static_cast<std::uint64_t>(t * 10)), "duration sample");
+    const auto incomplete = d.snapshotBetween(1, 4, 4);
+    require(incomplete.historyTruncated && !incomplete.windowComplete &&
+            incomplete.firstEvictedNs == 1 && incomplete.lastEvictedNs == 1,
+            "duration eviction is explicitly visible");
+    require(incomplete.sampleCount == 3 && !incomplete.meanNs() &&
+            !incomplete.percentileUpper(95) && !incomplete.coverage(),
+            "incomplete duration aggregate must not silently advertise valid tail");
+    require(incomplete.meanNs(true) == 30 && incomplete.percentileUpper(95, true).has_value(),
+            "explicitly requested partial descriptive aggregate is available");
+    const auto complete = d.snapshotBetween(2, 4, 4);
+    require(complete.windowComplete && complete.sampleCount == 3 &&
+            complete.meanNs() == 30, "later fully retained window is complete");
+    const auto deleted = d.snapshotBetween(1, 1, 4);
+    require(!deleted.windowComplete && deleted.sampleCount == 0,
+            "fully evicted historical window cannot be reported as empty healthy observation");
+    DurationWindow d2(metric(MetricKind::Duration), 3, 100);
+    for (int t = 1; t <= 4; ++t)
+        require(d2.recordDuration(t, static_cast<std::uint64_t>(100 + t)), "second shard");
+    const auto shard = d2.snapshotBetween(1, 4, 4);
+    require(!incomplete.mergedWith(shard, Disjointness::VerifiedDisjoint),
+            "known partial windows must refuse ordinary histogram merging");
+    auto partial = incomplete.mergedWith(shard, Disjointness::VerifiedDisjoint, true);
+    require(partial && !partial->windowComplete && partial->sampleCount == 6 &&
+            !partial->percentileUpper(95) && partial->percentileUpper(95, true),
+            "opt-in partial merge must still carry incomplete provenance");
+
+    FramePacingWindow frames(metric(MetricKind::FrameInterval), 3, 100);
+    for (int t = 1; t <= 4; ++t)
+        require(frames.recordFrame(t), "frame timestamp");
+    const auto frameLoss = frames.snapshotBetween(1, 4, 4);
+    require(!frameLoss.intervals.windowComplete && frameLoss.intervals.historyTruncated &&
+            frameLoss.intervals.firstEvictedNs == 1 && !frameLoss.fps &&
+            !frameLoss.intervals.percentileUpper(95),
+            "frame pacing refuses apparently correct truncated fps or percentile");
+    const auto validPacing = frames.snapshotBetween(2, 4, 4);
+    require(validPacing.intervals.windowComplete && validPacing.fps &&
+            validPacing.intervals.sampleCount == 2 && *validPacing.fps == 1e9,
+            "frame pacing has valid rate when window is wholly retained");
+
+    CounterRateWindow counter(metric(MetricKind::Counter), 3, 100);
+    for (int t = 1; t <= 4; ++t)
+        require(counter.observe(t, static_cast<std::uint64_t>(t * 7), 1),
+                "counter observation");
+    const auto counterLoss = counter.snapshotBetween(1, 4, 4);
+    require(counterLoss.historyTruncated && !counterLoss.windowComplete &&
+            counterLoss.firstEvictedNs == 1 && !counterLoss.ratePerSecond,
+            "truncated counter rates are unavailable by default");
+    const auto validRate = counter.snapshotBetween(2, 4, 4);
+    require(validRate.windowComplete && validRate.ratePerSecond &&
+            *validRate.ratePerSecond == 7e9, "nontruncated counter rate");
+
+    // Reset must invalidate a query crossing the previous counter session.
+    CounterRateWindow resets(metric(MetricKind::Counter), 4, 100);
+    require(resets.observe(1, 10, 1), "first generation");
+    require(resets.observe(2, 11, 1), "same generation");
+    require(resets.observe(3, 0, 2), "generation change");
+    require(resets.observe(4, 1, 2), "new generation");
+    const auto across = resets.snapshotBetween(1, 4, 4);
+    require(!across.windowComplete && !across.ratePerSecond &&
+            across.metric.resetGeneration == 2, "cross-reset window is partial");
+    const auto after = resets.snapshotBetween(3, 4, 4);
+    require(after.windowComplete && after.ratePerSecond &&
+            *after.ratePerSecond == 1e9, "post-reset window is valid");
+}
+
+void testFreshnessAndNegativeTimestamps() {
+    DurationWindow durations(metric(MetricKind::Duration), 16, 50);
+    require(!durations.recordDuration(-1, 1), "negative timestamp rejected on empty ring");
+    require(!durations.recordOutcome(-2, Outcome::Missing), "negative outcome timestamp rejected");
+    require(durations.recordDuration(10, 7), "historical sample");
+    require(durations.recordDuration(990, 8), "fresh stream sample");
+    const auto old = durations.snapshotBetween(0, 20, 1000);
+    require(old.lastObservationNs == 10 && old.lastSourceObservationNs == 990 &&
+            old.availability == Availability::Stale &&
+            old.sourceAvailability == Availability::Fresh,
+            "window and stream freshness must remain distinct");
+    const auto empty = durations.snapshotBetween(20, 30, 1000);
+    require(!empty.lastObservationNs && empty.lastSourceObservationNs == 990 &&
+            empty.availability == Availability::Unavailable &&
+            empty.sourceAvailability == Availability::Fresh,
+            "empty historical window may not borrow freshness from a later sample");
+    const auto latest = durations.snapshotBetween(900, 1000, 1000);
+    require(latest.availability == Availability::Fresh && latest.sourceAvailability == Availability::Fresh,
+            "fresh in-window sample");
+
+    FramePacingWindow frames(metric(MetricKind::FrameInterval), 16, 50);
+    require(!frames.recordFrame(-1), "negative first frame rejected");
+    require(frames.recordFrame(10) && frames.recordFrame(990), "frame observations");
+    const auto oldFrames = frames.snapshotBetween(0, 20, 1000);
+    require(oldFrames.intervals.availability == Availability::Stale &&
+            oldFrames.intervals.sourceAvailability == Availability::Fresh &&
+            oldFrames.intervals.lastObservationNs == 10, "historical frame freshness");
+    CounterRateWindow counters(metric(MetricKind::Counter), 16, 50);
+    require(!counters.observe(-1, 7, 2), "negative first counter rejected");
+    require(counters.observe(10, 10, 1) && counters.observe(990, 15, 1),
+            "counter observations");
+    const auto oldCounter = counters.snapshotBetween(0, 20, 1000);
+    require(oldCounter.availability == Availability::Stale &&
+            oldCounter.sourceAvailability == Availability::Fresh &&
+            oldCounter.lastObservationNs == 10, "historical counter freshness");
+}
+
+void testExplicitAdjacentMerge() {
+    DurationWindow first(metric(MetricKind::Duration), 32);
+    DurationWindow later(metric(MetricKind::Duration), 32);
+    require(first.recordDuration(2, 4) && first.recordDuration(5, 6), "first interval");
+    require(later.recordDuration(12, 8) && later.recordDuration(16, 10), "later interval");
+    const auto a = first.snapshotBetween(0, 9, 19);
+    const auto b = later.snapshotBetween(10, 19, 19);
+    require(!a.mergedWith(b, Disjointness::VerifiedDisjoint), "ordinary merge requires equal window bounds");
+    const auto combined = a.mergedAdjacentWith(b);
+    require(combined && combined->windowStartNs == 0 && combined->windowEndNs == 19 &&
+            combined->sampleCount == 4 && combined->sumNs == 28 &&
+            combined->minNs == 4 && combined->maxNs == 10 &&
+            combined->percentileUpper(95) == 10 && !combined->rejectedInputs,
+            "explicit adjacent merge recomputes distribution over union interval");
+    require(!b.mergedAdjacentWith(a), "adjacent merge must be ordered");
+    const auto overlap = later.snapshotBetween(9, 19, 19);
+    const auto gap = later.snapshotBetween(11, 19, 19);
+    require(!a.mergedAdjacentWith(overlap) && !a.mergedAdjacentWith(gap),
+            "overlap and uncovered time gaps cannot be silently concatenated");
+    const auto mismatchedTime = later.snapshotBetween(10, 19, 20);
+    require(!a.mergedAdjacentWith(mismatchedTime),
+            "merging snapshots queried at different current times is ambiguous");
+    auto incompatible = b;
+    incompatible.metric.population = "different";
+    require(!a.mergedAdjacentWith(incompatible), "adjacent merge must reject different populations");
+    auto unverifiedSame = a.mergedWith(a);
+    require(!unverifiedSame, "same-shard copy must not be counted twice implicitly");
+}
+
 void testCaptureBenchmark() {
     const auto identity = metric(MetricKind::FrameInterval);
     FramePacingWindow enabled(identity, 8192);
@@ -279,6 +420,9 @@ int main() {
         testCounters();
         testOverflowAndCapacity();
         testHardResetUnsupportedAndStress();
+        testWindowEvictionAndPartialStatistics();
+        testFreshnessAndNegativeTimestamps();
+        testExplicitAdjacentMerge();
         testCaptureBenchmark();
         std::cout << "diagnostic_statistics_tests: PASS\n";
         return EXIT_SUCCESS;

@@ -21,6 +21,9 @@ namespace reg::diagnostics::stats {
 enum class MetricKind { Duration, FrameInterval, Counter };
 enum class Availability { Unsupported, Unavailable, Fresh, Stale };
 enum class Outcome : std::uint8_t { Success, Timeout, Missing, Skipped, Cancelled, Late, Count };
+// Same-window shards cannot be deduplicated from their histogram alone.
+// Caller must independently establish non-overlapping sample identities.
+enum class Disjointness { Unverified, VerifiedDisjoint };
 
 struct MetricIdentity {
     std::string name;
@@ -32,6 +35,7 @@ struct MetricIdentity {
     std::uint64_t resetGeneration{};
     MetricKind kind{MetricKind::Duration};
     bool supported{true};
+    std::uint64_t inferredResetSequence{}; // increments after an unmarked counter decrease
     bool operator==(const MetricIdentity&) const = default;
 };
 
@@ -64,9 +68,19 @@ struct DistributionSnapshot {
     MetricIdentity metric;
     std::int64_t windowStartNs{}; // inclusive, owner-local monotonic domain
     std::int64_t windowEndNs{};   // inclusive
-    Availability availability{Availability::Unavailable};
-    std::optional<std::int64_t> lastObservationNs;
-    std::uint64_t rejectedInputs{}; // total over stream lifetime (not window-local)
+    Availability availability{Availability::Unavailable}; // most recent IN-WINDOW sample, measured at query time
+    Availability sourceAvailability{Availability::Unavailable}; // latest source sample, measured at query time
+    std::int64_t queriedAtNs{};
+    std::int64_t freshnessThresholdNs{};
+    std::optional<std::int64_t> lastObservationNs; // in requested window only
+    std::optional<std::int64_t> lastSourceObservationNs; // stream-wide
+    std::optional<std::int64_t> firstEvictedNs;
+    std::optional<std::int64_t> lastEvictedNs;
+    bool historyTruncated{}; // at least one observation evicted from this generation
+    bool windowComplete{true}; // no known evicted observations within window bounds
+    std::optional<std::uint64_t> rejectedInputs; // lifetime diagnostic, NOT additive/mergeable
+    bool percentilesAreUpperBoundEstimates{true};
+    double quantileRelativeUpperErrorBound{0.0625};
     std::array<std::uint64_t, kOutcomeCount> outcomes{};
     std::array<std::uint64_t, kHistogramBuckets> histogram{};
     std::uint64_t sampleCount{};
@@ -94,21 +108,23 @@ struct DistributionSnapshot {
         return n;
     }
 
-    [[nodiscard]] std::optional<long double> meanNs() const noexcept {
-        if (!sampleCount) return std::nullopt;
+    [[nodiscard]] std::optional<long double> meanNs(bool allowPartial = false) const noexcept {
+        if (!sampleCount || (!windowComplete && !allowPartial)) return std::nullopt;
         return sumNs / static_cast<long double>(sampleCount);
     }
 
-    [[nodiscard]] std::optional<double> coverage() const noexcept {
+    [[nodiscard]] std::optional<double> coverage(bool allowPartial = false) const noexcept {
         const auto n = observedCount();
-        if (!n) return std::nullopt;
+        if (!n || (!windowComplete && !allowPartial)) return std::nullopt;
         return static_cast<double>(sampleCount) / static_cast<double>(n);
     }
 
     // Nearest-rank percentile; conservative upper endpoint of logarithmic bin.
     // For 1-s windows P99 with ~60 samples is descriptive, not a stable tail.
-    [[nodiscard]] std::optional<std::uint64_t> percentileUpper(double percentile) const noexcept {
-        if (!sampleCount || !std::isfinite(percentile) || percentile < 0 || percentile > 100)
+    [[nodiscard]] std::optional<std::uint64_t> percentileUpper(
+        double percentile, bool allowPartial = false) const noexcept {
+        if (!sampleCount || (!windowComplete && !allowPartial) ||
+            !std::isfinite(percentile) || percentile < 0 || percentile > 100)
             return std::nullopt;
         const auto rank = std::max<std::uint64_t>(1,
             static_cast<std::uint64_t>(std::ceil(percentile / 100.0L * sampleCount)));
@@ -120,15 +136,42 @@ struct DistributionSnapshot {
         return std::nullopt;
     }
 
-    // Never merge unlike populations/clock/session/reset/metric/window domains.
-    // Caller guarantees disjoint observations (not two copies of one stream).
+    // Same-interval histogram shards have no per-sample IDs for deduplication.
+    // Explicit disjointness evidence is required. Incomplete inputs are refused
+    // unless the caller explicitly requests an incomplete merged view.
     [[nodiscard]] std::optional<DistributionSnapshot> mergedWith(
-        const DistributionSnapshot& other) const {
-        if (!(metric == other.metric) || windowStartNs != other.windowStartNs ||
-            windowEndNs != other.windowEndNs || availability == Availability::Unsupported ||
+        const DistributionSnapshot& other,
+        Disjointness evidence = Disjointness::Unverified,
+        bool allowPartial = false) const {
+        if (evidence != Disjointness::VerifiedDisjoint ||
+            windowStartNs != other.windowStartNs ||
+            windowEndNs != other.windowEndNs) return std::nullopt;
+        return mergeCompatible(other, allowPartial);
+    }
+
+    // Inclusive nanosecond bounds: [0, 9] and [10, 19] are adjacent;
+    // [0, 9] with [9, 19] overlaps and is rejected without deduplication.
+    // Unlike same-interval shard merging, ordered adjacent intervals are
+    // provably time-disjoint and need no external identity attestation.
+    [[nodiscard]] std::optional<DistributionSnapshot> mergedAdjacentWith(
+        const DistributionSnapshot& later, bool allowPartial = false) const {
+        if (windowEndNs == std::numeric_limits<std::int64_t>::max() ||
+            windowEndNs + 1 != later.windowStartNs ||
+            later.windowEndNs < later.windowStartNs) return std::nullopt;
+        auto combined = mergeCompatible(later, allowPartial);
+        if (combined) combined->windowEndNs = later.windowEndNs;
+        return combined;
+    }
+
+private:
+    [[nodiscard]] std::optional<DistributionSnapshot> mergeCompatible(
+        const DistributionSnapshot& other, bool allowPartial) const {
+        if (!(metric == other.metric) || queriedAtNs != other.queriedAtNs ||
+            freshnessThresholdNs != other.freshnessThresholdNs ||
+            (!allowPartial && (!windowComplete || !other.windowComplete)) ||
+            availability == Availability::Unsupported ||
             other.availability == Availability::Unsupported ||
-            sampleCount > UINT64_MAX - other.sampleCount ||
-            rejectedInputs > UINT64_MAX - other.rejectedInputs) return std::nullopt;
+            sampleCount > UINT64_MAX - other.sampleCount) return std::nullopt;
         for (std::size_t i = 0; i < kHistogramBuckets; ++i)
             if (histogram[i] > UINT64_MAX - other.histogram[i]) return std::nullopt;
         for (std::size_t i = 0; i < kOutcomeCount; ++i)
@@ -136,7 +179,7 @@ struct DistributionSnapshot {
         DistributionSnapshot merged = *this;
         merged.sampleCount += other.sampleCount;
         merged.sumNs += other.sumNs;
-        merged.rejectedInputs += other.rejectedInputs;
+        merged.rejectedInputs = std::nullopt; // unmergeable lifetime diagnostic
         for (std::size_t i = 0; i < kHistogramBuckets; ++i)
             merged.histogram[i] += other.histogram[i];
         for (std::size_t i = 0; i < kOutcomeCount; ++i)
@@ -148,10 +191,27 @@ struct DistributionSnapshot {
         if (other.lastObservationNs &&
             (!merged.lastObservationNs || *other.lastObservationNs > *merged.lastObservationNs))
             merged.lastObservationNs = other.lastObservationNs;
-        if (availability == Availability::Stale || other.availability == Availability::Stale)
-            merged.availability = Availability::Stale;
-        else if (availability == Availability::Fresh || other.availability == Availability::Fresh)
-            merged.availability = Availability::Fresh;
+        if (other.lastSourceObservationNs &&
+            (!merged.lastSourceObservationNs ||
+             *other.lastSourceObservationNs > *merged.lastSourceObservationNs))
+            merged.lastSourceObservationNs = other.lastSourceObservationNs;
+        if (other.firstEvictedNs &&
+            (!merged.firstEvictedNs || *other.firstEvictedNs < *merged.firstEvictedNs))
+            merged.firstEvictedNs = other.firstEvictedNs;
+        if (other.lastEvictedNs &&
+            (!merged.lastEvictedNs || *other.lastEvictedNs > *merged.lastEvictedNs))
+            merged.lastEvictedNs = other.lastEvictedNs;
+        merged.historyTruncated = historyTruncated || other.historyTruncated;
+        merged.windowComplete = windowComplete && other.windowComplete;
+        auto classify = [&](std::optional<std::int64_t> t) {
+            if (!t || *t > queriedAtNs) return Availability::Unavailable;
+            return static_cast<std::uint64_t>(queriedAtNs) -
+                   static_cast<std::uint64_t>(*t) >
+                   static_cast<std::uint64_t>(freshnessThresholdNs)
+                       ? Availability::Stale : Availability::Fresh;
+        };
+        merged.availability = classify(merged.lastObservationNs);
+        merged.sourceAvailability = classify(merged.lastSourceObservationNs);
         return merged;
     }
 };
@@ -181,12 +241,20 @@ public:
         return data_[(head_ + i) % data_.size()];
     }
     [[nodiscard]] const T& back() const noexcept { return at(size_ - 1); }
+    [[nodiscard]] const T& front() const noexcept { return at(0); }
+    [[nodiscard]] std::size_t capacity() const noexcept { return data_.size(); }
     [[nodiscard]] std::size_t memoryBoundBytes() const noexcept { return data_.size() * sizeof(T); }
 private:
     std::vector<T> data_;
     std::size_t head_{};
     std::size_t size_{};
 };
+
+inline bool evictedHistoryIntersects(std::optional<std::int64_t> firstEvicted,
+                                     std::optional<std::int64_t> lastEvicted,
+                                     std::int64_t start, std::int64_t end) noexcept {
+    return firstEvicted && lastEvicted && *firstEvicted <= end && *lastEvicted >= start;
+}
 
 inline Availability determineAvailability(std::optional<std::int64_t> last,
                                           std::int64_t now, std::int64_t freshnessNs) noexcept {
@@ -240,23 +308,38 @@ public:
         out.windowStartNs = startNs;
         out.windowEndNs = endNs;
         out.rejectedInputs = rejected_;
-        if (entries_.size()) out.lastObservationNs = entries_.back().time;
-        out.availability = identity_.supported ?
-            determineAvailability(out.lastObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
+        out.queriedAtNs = nowNs;
+        out.freshnessThresholdNs = freshnessNs_;
+        out.firstEvictedNs = firstEvictedNs_;
+        out.lastEvictedNs = lastEvictedNs_;
+        out.historyTruncated = firstEvictedNs_.has_value();
+        out.windowComplete = !evictedHistoryIntersects(firstEvictedNs_, lastEvictedNs_,
+                                                        startNs, endNs);
+        if (entries_.size()) out.lastSourceObservationNs = entries_.back().time;
+        out.sourceAvailability = identity_.supported ?
+            determineAvailability(out.lastSourceObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             const auto& e = entries_.at(i);
             if (e.time < startNs || e.time > endNs) continue;
+            out.lastObservationNs = e.time;
             if (e.outcome == Outcome::Success) out.addDuration(e.ns);
             else out.addOutcome(e.outcome);
         }
+        out.availability = identity_.supported ?
+            determineAvailability(out.lastObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
         return out;
     }
     [[nodiscard]] std::size_t memoryBoundBytes() const noexcept { return entries_.memoryBoundBytes(); }
 private:
     bool insert(Entry entry) noexcept {
-        if (entries_.size() && entry.time < entries_.back().time) {
+        if (entry.time < 0 || (entries_.size() && entry.time < entries_.back().time)) {
             ++rejected_;
             return false;
+        }
+        if (entries_.size() == entries_.capacity()) {
+            const auto evicted = entries_.front().time;
+            if (!firstEvictedNs_) firstEvictedNs_ = evicted;
+            lastEvictedNs_ = evicted;
         }
         entries_.push(entry);
         return true;
@@ -265,12 +348,13 @@ private:
     Ring<Entry> entries_;
     std::int64_t freshnessNs_;
     std::uint64_t rejected_{};
+    std::optional<std::int64_t> firstEvictedNs_, lastEvictedNs_;
 };
 
 struct FramePacingSnapshot {
     DistributionSnapshot intervals;
     std::uint64_t frameCount{};
-    std::optional<double> fps;
+    std::optional<double> fps; // unavailable for known-truncated window
     [[nodiscard]] std::optional<std::uint64_t> longestGapNs() const noexcept {
         return intervals.maxNs;
     }
@@ -286,8 +370,14 @@ public:
             throw std::invalid_argument("frame interval metric required");
     }
     [[nodiscard]] bool recordFrame(std::int64_t timeNs) noexcept {
-        if (!identity_.supported || (times_.size() && timeNs <= times_.back())) {
+        if (!identity_.supported || timeNs < 0 ||
+            (times_.size() && timeNs <= times_.back())) {
             ++rejected_; return false;
+        }
+        if (times_.size() == times_.capacity()) {
+            const auto evicted = times_.front();
+            if (!firstEvictedNs_) firstEvictedNs_ = evicted;
+            lastEvictedNs_ = evicted;
         }
         times_.push(timeNs);
         return true;
@@ -307,19 +397,29 @@ public:
         d.windowStartNs = startNs;
         d.windowEndNs = endNs;
         d.rejectedInputs = rejected_;
-        if (times_.size()) d.lastObservationNs = times_.back();
-        d.availability = identity_.supported ?
-            determineAvailability(d.lastObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
+        d.queriedAtNs = nowNs;
+        d.freshnessThresholdNs = freshnessNs_;
+        d.firstEvictedNs = firstEvictedNs_;
+        d.lastEvictedNs = lastEvictedNs_;
+        d.historyTruncated = firstEvictedNs_.has_value();
+        d.windowComplete = !evictedHistoryIntersects(firstEvictedNs_, lastEvictedNs_,
+                                                      startNs, endNs);
+        if (times_.size()) d.lastSourceObservationNs = times_.back();
+        d.sourceAvailability = identity_.supported ?
+            determineAvailability(d.lastSourceObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
         std::optional<std::int64_t> previous;
         for (std::size_t i = 0; i < times_.size(); ++i) {
             const auto t = times_.at(i);
             if (t < startNs || t > endNs) continue;
+            d.lastObservationNs = t;
             ++out.frameCount;
             if (previous) d.addDuration(static_cast<std::uint64_t>(t) -
                                         static_cast<std::uint64_t>(*previous));
             previous = t;
         }
-        if (d.sampleCount && d.sumNs > 0)
+        d.availability = identity_.supported ?
+            determineAvailability(d.lastObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
+        if (d.windowComplete && d.sampleCount && d.sumNs > 0)
             out.fps = static_cast<double>(static_cast<long double>(d.sampleCount) *
                                           kOneSecondNs / d.sumNs);
         return out;
@@ -330,6 +430,7 @@ private:
     Ring<std::int64_t> times_;
     std::int64_t freshnessNs_;
     std::uint64_t rejected_{};
+    std::optional<std::int64_t> firstEvictedNs_, lastEvictedNs_;
 };
 
 struct CounterRateSnapshot {
@@ -337,6 +438,12 @@ struct CounterRateSnapshot {
     std::int64_t windowStartNs{};
     std::int64_t windowEndNs{};
     Availability availability{Availability::Unavailable};
+    Availability sourceAvailability{Availability::Unavailable};
+    std::optional<std::int64_t> lastObservationNs;
+    std::optional<std::int64_t> lastSourceObservationNs;
+    std::optional<std::int64_t> firstEvictedNs, lastEvictedNs;
+    bool historyTruncated{};
+    bool windowComplete{true};
     std::uint64_t observations{};
     std::uint64_t pairCount{};
     long double delta{};
@@ -359,15 +466,23 @@ public:
     // explicitWrap must be provided by instrumented owner; never infer from decrease.
     [[nodiscard]] bool observe(std::int64_t timeNs, std::uint64_t value,
                                std::uint64_t generation, bool explicitWrap = false) noexcept {
-        if (!identity_.supported) { ++rejected_; return false; }
+        if (!identity_.supported || timeNs < 0) { ++rejected_; return false; }
         if (generation != identity_.resetGeneration) {
             identity_.resetGeneration = generation;
+            identity_.inferredResetSequence = 0;
             entries_.clear();
+            firstEvictedNs_.reset();
+            lastEvictedNs_.reset();
+            lastResetAtNs_ = timeNs;
             ++resets_;
         }
         if (entries_.size() && timeNs <= entries_.back().time) { ++rejected_; return false; }
         if (entries_.size() && value < entries_.back().value && !explicitWrap) {
             entries_.clear();
+            firstEvictedNs_.reset();
+            lastEvictedNs_.reset();
+            lastResetAtNs_ = timeNs;
+            ++identity_.inferredResetSequence;
             ++resets_;
         }
         if (entries_.size() && explicitWrap && value >= entries_.back().value) {
@@ -375,6 +490,11 @@ public:
             return false;
         }
         if (entries_.size() == 0 && explicitWrap) { ++rejected_; return false; }
+        if (entries_.size() == entries_.capacity()) {
+            const auto evicted = entries_.front().time;
+            if (!firstEvictedNs_) firstEvictedNs_ = evicted;
+            lastEvictedNs_ = evicted;
+        }
         entries_.push({timeNs, value, explicitWrap});
         return true;
     }
@@ -393,15 +513,23 @@ public:
         out.windowEndNs = endNs;
         out.resetEvents = resets_;
         out.rejectedInputs = rejected_;
-        if (!identity_.supported) out.availability = Availability::Unsupported;
-        else if (entries_.size())
-            out.availability = determineAvailability(entries_.back().time, nowNs, freshnessNs_);
+        out.firstEvictedNs = firstEvictedNs_;
+        out.lastEvictedNs = lastEvictedNs_;
+        out.historyTruncated = firstEvictedNs_.has_value();
+        out.windowComplete = !evictedHistoryIntersects(firstEvictedNs_, lastEvictedNs_,
+                                                       startNs, endNs) &&
+                             !(lastResetAtNs_ && startNs < *lastResetAtNs_ &&
+                               *lastResetAtNs_ <= endNs);
+        if (entries_.size()) out.lastSourceObservationNs = entries_.back().time;
+        out.sourceAvailability = identity_.supported ?
+            determineAvailability(out.lastSourceObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
         std::optional<Entry> previous;
         std::int64_t first{};
         std::int64_t last{};
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             const auto& e = entries_.at(i);
             if (e.time < startNs || e.time > endNs) continue;
+            out.lastObservationNs = e.time;
             ++out.observations;
             if (!previous) first = e.time;
             else {
@@ -413,7 +541,9 @@ public:
             previous = e;
             last = e.time;
         }
-        if (out.pairCount && last > first)
+        out.availability = identity_.supported ?
+            determineAvailability(out.lastObservationNs, nowNs, freshnessNs_) : Availability::Unsupported;
+        if (out.windowComplete && out.pairCount && last > first)
             out.ratePerSecond = static_cast<double>(out.delta * kOneSecondNs /
                                                     (static_cast<long double>(last) - static_cast<long double>(first)));
         return out;
@@ -425,6 +555,7 @@ private:
     std::int64_t freshnessNs_;
     std::uint64_t resets_{};
     std::uint64_t rejected_{};
+    std::optional<std::int64_t> firstEvictedNs_, lastEvictedNs_, lastResetAtNs_;
 };
 
 } // namespace reg::diagnostics::stats
