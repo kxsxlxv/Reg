@@ -12,6 +12,11 @@ option(REG_ENABLE_VALIDATION "Enable Vulkan validation-layer integration in deve
 option(REG_BUILD_TESTS "Build lightweight unit tests" ON)
 option(REG_ENABLE_NETIMGUI_REMOTE "Build the experimental NetImgui remote-UI integration" OFF)
 
+if(REG_BUILD_TESTS)
+    enable_testing()
+endif()
+add_subdirectory(src/diagnostics/stats)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(Vulkan 1.3 REQUIRED)
@@ -293,8 +298,6 @@ else()
 endif()
 
 if(REG_BUILD_TESTS)
-    enable_testing()
-
     add_executable(reg_source_frame_identity_injector_tests
         tests/source_frame_identity_injector_tests.cpp
     )
