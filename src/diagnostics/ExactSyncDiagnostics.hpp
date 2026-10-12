@@ -61,6 +61,12 @@ struct ExactSyncSnapshot {
     std::uint64_t validEmptyDetectionsTotal{};
     // Censored observations, NOT UDP loss or proof CV never ran.
     std::uint64_t metadataUnobservedAtExpiryTotal{};
+    // Decided Missing/Evicted with no accepted metadata: right-censored by
+    // history pressure BEFORE the full deadline+retention observation window.
+    // This is not proof of permanent packet loss, nor a completed 5 s wait.
+    std::uint64_t metadataUnobservedAtCapacityTotal{};
+    // The same incomplete follow-up caused by a runtime buffer/session flush.
+    std::uint64_t metadataUnobservedAtClearTotal{};
     std::uint64_t unknownAtExpiryTotal{};
     std::uint64_t unknownAtClearTotal{};
     std::uint64_t capacityCensoredTotal{}; // pending frames evicted from history
@@ -69,6 +75,15 @@ struct ExactSyncSnapshot {
     std::size_t retainedLifecycleCount{};
     std::size_t pendingFrameCount{};
     std::size_t orphanMetadataCount{};
+    // Retained decided Missing/Evicted frames not yet known to have metadata:
+    // even if expiry count is zero, these observations are still open.
+    std::size_t decidedAwaitingMetadataCount{};
+    // TRUE only if no retained/open, premature-capacity/clear, or unknown
+    // frame lifecycles remain in this session. True does NOT imply that
+    // metadata arrived: consult unobservedAtExpiry and drop denominators.
+    // False => Adaptive Delay must not infer packet-delivery completeness
+    // from metadataUnobservedAtExpiryTotal (including when it equals zero).
+    bool metadataObservationWindowComplete{true};
     std::uint64_t decidedFramesTotal{};
     std::optional<double> matchCoverage;
     // The legacy percentile sample is the last <=256 matched pairs ONLY;
@@ -219,9 +234,12 @@ public:
 
     // Invoke on a low-priority diagnostic thread with virtual/Reg time.
     // Frames retained past deadline + 5 seconds are right-censored. Capacity
-    // retirements before this boundary are separately counted and NOT called
-    // metadata unobserved at expiry. Events beyond the 256-key horizon cannot
-    // be correlated; no claim that a packet was lost on the network.
+    // retirements before this boundary are separately counted as right-censored
+    // (including already-dropped frames still lacking metadata), NOT called
+    // metadata unobserved at expiry. At 60 FPS, 5 s holds ~300 frames, more
+    // than the 256-key cap: a full follow-up horizon is NOT guaranteed.
+    // Late events after capacity eviction cannot be reliably correlated.
+    // Neither expiry nor capacity censoring proves UDP packet loss.
     // Mutable Overlay deadline changes require a future coordinator callback
     // and classification-revision policy; no such runtime hook exists yet.
     // Unknown pending frames are right-censored, never silently marked drops.
@@ -252,6 +270,9 @@ public:
         for (const auto& item : history_) {
             if (item.eligible && item.decision == Decision::None) {
                 ++state_.unknownAtClearTotal;
+            } else if (item.eligible && item.decision != Decision::Presented &&
+                       !item.metadataAt) {
+                ++state_.metadataUnobservedAtClearTotal;
             }
         }
         history_.clear();
@@ -279,12 +300,23 @@ public:
                     ++result.pendingFrameCount;
                 } else if (!entry.eligible && entry.metadataAt) {
                     ++result.orphanMetadataCount;
+                } else if (entry.eligible && entry.decision != Decision::Presented &&
+                           !entry.metadataAt) {
+                    ++result.decidedAwaitingMetadataCount;
                 }
             }
             sorted.assign(arrivalWaitMs_.begin(), arrivalWaitMs_.end());
         }
         result.decidedFramesTotal = result.presentedExactTotal +
             result.dropMissingTotal + result.evictedTotal;
+        result.metadataObservationWindowComplete =
+            result.metadataUnobservedAtCapacityTotal == 0 &&
+            result.metadataUnobservedAtClearTotal == 0 &&
+            result.capacityCensoredTotal == 0 &&
+            result.unknownAtExpiryTotal == 0 &&
+            result.unknownAtClearTotal == 0 &&
+            result.decidedAwaitingMetadataCount == 0 &&
+            result.pendingFrameCount == 0;
         if (result.decidedFramesTotal != 0U) {
             result.matchCoverage = static_cast<double>(result.presentedExactTotal) /
                 static_cast<double>(result.decidedFramesTotal);
@@ -322,6 +354,9 @@ private:
             const auto& victim = history_.front();
             if (victim.eligible && victim.decision == Decision::None) {
                 ++state_.capacityCensoredTotal;
+            } else if (victim.eligible && victim.decision != Decision::Presented &&
+                       !victim.metadataAt) {
+                ++state_.metadataUnobservedAtCapacityTotal;
             }
             history_.pop_front();
         }
