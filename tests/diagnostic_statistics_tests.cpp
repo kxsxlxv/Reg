@@ -169,8 +169,9 @@ void testWindowsAndFreshness() {
     s = d.snapshot(1040, 40);
     require(s.sampleCount == 4 && s.minNs == 10, "capacity evicts oldest, bounded ring");
     s = d.snapshot(1200, 30);
-    require(s.sampleCount == 0 && s.availability == Availability::Stale && !s.coverage(),
-            "expired window stale, no fabricated healthy zero");
+    require(s.sampleCount == 0 && s.availability == Availability::Unavailable &&
+            s.sourceAvailability == Availability::Stale && !s.coverage(),
+            "empty historical window unavailable, source stale, no fabricated healthy zero");
     s = d.snapshotBetween(1010, 1020, 1200);
     require(s.sampleCount == 2 && s.availability == Availability::Stale,
             "custom experiment boundaries inclusive");
@@ -208,8 +209,9 @@ void testCounters() {
     require(!wrapped.observe(2 * kOneSecondNs, 6, 1, true), "invalid wrap marker");
     require(wrapped.observe(2 * kOneSecondNs, 6, 1), "still accepts non-wrapped sample");
     r = wrapped.snapshot(5 * kOneSecondNs, kOneSecondNs);
-    require(r.availability == Availability::Stale && !r.ratePerSecond,
-            "stale rate not represented as zero");
+    require(r.availability == Availability::Unavailable &&
+            r.sourceAvailability == Availability::Stale && !r.ratePerSecond,
+            "empty historical counter window unavailable, source stale, rate not zero");
 }
 
 void testOverflowAndCapacity() {
