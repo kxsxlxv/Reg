@@ -198,6 +198,110 @@ void testReorderAndExpiryBoundary() {
     require(std::abs(tracker.snapshot().lastArrivalRelativeToDecodeMs - 40.0) < .001);
 }
 
+
+void testSustainedMissingCvAt60Fps() {
+    ExactSyncDiagnostics tracker;
+    constexpr std::uint64_t frameCount = 600;
+    const auto start = steady_clock::time_point{seconds{1200}};
+    const auto frameTime = [&](std::uint64_t i) {
+        return start + nanoseconds{
+            static_cast<std::int64_t>((i * 1'000'000'000ULL) / 60ULL)};
+    };
+
+    // 10 seconds at 60 FPS, 150 ms of Overlay buffering, no CV metadata.
+    // Drive expiry at EACH frame. The 256-key ring is smaller than the ~300
+    // records necessary to retain a full 5-second follow-up interval.
+    for (std::uint64_t i = 0; i < frameCount; ++i) {
+        const FrameKey key{60, i};
+        const auto decodedAt = frameTime(i);
+        const auto deadline = decodedAt + milliseconds{150};
+        tracker.videoDecoded(key);
+        tracker.overlayBuffered(key, decodedAt, deadline);
+        if (i >= 9) {
+            tracker.frameDueWithoutMetadata({60, i - 9},
+                frameTime(i - 9) + milliseconds{150});
+        }
+        tracker.expire(decodedAt); // periodic, virtual Reg steady-clock time
+    }
+    // Flush only normal due decisions, not diagnostic state.
+    for (std::uint64_t i = frameCount - 9; i < frameCount; ++i) {
+        tracker.frameDueWithoutMetadata({60, i}, frameTime(i) + milliseconds{150});
+    }
+    const auto lastDeadline = frameTime(frameCount - 1) + milliseconds{150};
+    tracker.expire(lastDeadline);
+
+    auto snap = tracker.snapshot();
+    require(snap.eligibleFramesTotal == frameCount &&
+            snap.dropMissingTotal == frameCount &&
+            snap.decidedFramesTotal == frameCount);
+    require(snap.matchCoverage && *snap.matchCoverage == 0);
+    require(snap.metadataObservedTotal == 0 && snap.presentedExactTotal == 0);
+    require(snap.metadataUnobservedAtExpiryTotal == 0);
+    // Without the regression fix the 344 early retirements would be invisible
+    // in metadataUnobservedAtExpiryTotal, making CV coverage look complete.
+    require(snap.metadataUnobservedAtCapacityTotal == frameCount -
+            ExactSyncDiagnostics::kHistoryCapacity);
+    require(snap.historyForcedRetirementTotal ==
+            snap.metadataUnobservedAtCapacityTotal);
+    require(snap.decidedAwaitingMetadataCount ==
+            ExactSyncDiagnostics::kHistoryCapacity);
+    require(!snap.metadataObservationWindowComplete);
+
+    tracker.expire(lastDeadline + ExactSyncDiagnostics::kRetentionAfterDeadline);
+    snap = tracker.snapshot();
+    require(snap.metadataUnobservedAtExpiryTotal ==
+            ExactSyncDiagnostics::kHistoryCapacity);
+    require(snap.metadataUnobservedAtCapacityTotal +
+            snap.metadataUnobservedAtExpiryTotal == frameCount);
+    require(snap.decidedAwaitingMetadataCount == 0 && snap.retainedLifecycleCount == 0);
+    // Even after expiry, early capacity retirements have NOT enjoyed 5 s of
+    // metadata follow-up: never equate them with proven delivery loss.
+    require(!snap.metadataObservationWindowComplete);
+    require(snap.metadataUnobservedAtClearTotal == 0);
+    tracker.resetSession();
+    snap = tracker.snapshot();
+    require(snap.sessionGeneration == 1 &&
+            snap.metadataUnobservedAtCapacityTotal == 0 &&
+            snap.metadataObservationWindowComplete);
+}
+
+void testFlushCensorsDroppedMetadataFollowup() {
+    ExactSyncDiagnostics tracker;
+    const auto start = steady_clock::time_point{seconds{1400}};
+    const FrameKey key{61, 1};
+    tracker.overlayBuffered(key, start, start + milliseconds{150});
+    tracker.frameDueWithoutMetadata(key, start + milliseconds{150});
+    auto snap = tracker.snapshot();
+    require(snap.decidedAwaitingMetadataCount == 1);
+    require(!snap.metadataObservationWindowComplete);
+    tracker.clearPending(); // e.g. decoder reconnect before metadata follow-up
+    snap = tracker.snapshot();
+    require(snap.dropMissingTotal == 1 &&
+            snap.metadataUnobservedAtClearTotal == 1 &&
+            snap.metadataUnobservedAtExpiryTotal == 0 &&
+            snap.decidedAwaitingMetadataCount == 0 &&
+            !snap.metadataObservationWindowComplete);
+}
+
+void testExactSelectionIsNotVulkanPresentation() {
+    ExactSyncDiagnostics tracker;
+    const auto now = steady_clock::time_point{seconds{1500}};
+    const FrameKey key{62, 1};
+    const auto value = meta(key, now + milliseconds{40});
+    tracker.overlayBuffered(key, now, now + milliseconds{150});
+    tracker.metadataAccepted(value);
+    require(tracker.exactPair(
+        key, value, now, now + milliseconds{150}, now + milliseconds{150}));
+    // The frame is selected for presentation, BEFORE any renderer call.
+    require(tracker.snapshot().presentedExactTotal == 1);
+    const bool mockedVulkanRenderSucceeded = false; // no actual presentation
+    require(!mockedVulkanRenderSucceeded);
+    // A failed/skipped Vulkan render cannot be observed by this diagnostic
+    // class: the counter measures selection, not a swapchain completion.
+    require(tracker.snapshot().presentedExactTotal == 1);
+    require(tracker.snapshot().matchedPairs == 1);
+}
+
 void testConcurrency() {
     ExactSyncDiagnostics tracker;
     const auto now = steady_clock::time_point{seconds{1000}};
@@ -233,5 +337,8 @@ int main() {
     testLegacyDropAndReset();
     testBoundedAndUnknown();
     testReorderAndExpiryBoundary();
+    testSustainedMissingCvAt60Fps();
+    testFlushCensorsDroppedMetadataFollowup();
+    testExactSelectionIsNotVulkanPresentation();
     testConcurrency();
 }
