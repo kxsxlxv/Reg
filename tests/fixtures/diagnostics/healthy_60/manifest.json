@@ -1,0 +1,75 @@
+{
+  "base_fps": 60,
+  "clock_specs": [
+    {
+      "clock_domain": "jetson-steady",
+      "drift_ppm": 86,
+      "host_role": "jetson",
+      "offset_ns": "4000000000",
+      "session_id": "jetson-s1",
+      "sync_state": "synthetic_known"
+    },
+    {
+      "clock_domain": "mediamtx-steady",
+      "drift_ppm": -33,
+      "host_role": "ubuntu-mediamtx",
+      "offset_ns": "7000000000",
+      "session_id": "mediamtx-s1",
+      "sync_state": "synthetic_known"
+    },
+    {
+      "clock_domain": "unigine-steady",
+      "drift_ppm": 55,
+      "host_role": "ubuntu-source",
+      "offset_ns": "1000000000",
+      "session_id": "source-s1",
+      "sync_state": "synthetic_known"
+    },
+    {
+      "clock_domain": "reg-steady",
+      "drift_ppm": -121,
+      "host_role": "windows-reg",
+      "offset_ns": "12000000000",
+      "session_id": "reg-s1",
+      "sync_state": "synthetic_known"
+    }
+  ],
+  "data_origin": "synthetic",
+  "duration_virtual_ns": "210000000",
+  "event_count": 44,
+  "events_sha256": "53d05464f92b207d47b038f8dd89c8e11bf516470b6a476c7370fb7882035c2e",
+  "expected_assertions": {
+    "event_counts": {
+      "cv.frame_input": 4,
+      "cv.inference_completed": 4,
+      "cv.inference_started": 4,
+      "cv.received": 4,
+      "cv.sent": 4,
+      "overlay.presented_exact": 4,
+      "source.frame": 4,
+      "transport.received": 4,
+      "transport.relayed": 4,
+      "video.decoded": 4,
+      "video.raw_presented": 4
+    },
+    "pacing": {
+      "max_ns": "16666667",
+      "min_ns": "16666666",
+      "population": "consecutive_source_frames_same_epoch",
+      "reset_scope": "source_session_and_stream_epoch",
+      "sample_count": "3",
+      "unit": "ns",
+      "window": "entire_synthetic_run"
+    }
+  },
+  "generator_version": "1.0.0",
+  "ground_truth": {
+    "injected_faults": [],
+    "test_only": true
+  },
+  "nominal_overlay_delay_ms": 150,
+  "requested_source_frames": 4,
+  "scenario_id": "healthy_60",
+  "schema_version": "diag-fixture/v1",
+  "seed": "20261012"
+}
