@@ -4,134 +4,234 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <thread>
+#include <vector>
 
 namespace {
+using namespace std::chrono;
+using reg::diagnostics::ExactSyncDiagnostics;
+using reg::media::FrameKey;
+using reg::metadata::FrameMetadata;
 
-void require(bool condition) {
-    if (!condition) {
-        throw std::runtime_error("Exact Sync diagnostics regression failed");
-    }
+void require(bool ok) {
+    if (!ok) throw std::runtime_error("Exact Sync lifecycle assertion failed");
+}
+FrameMetadata meta(FrameKey key, steady_clock::time_point time, unsigned targets = 0) {
+    FrameMetadata value;
+    value.key = key;
+    value.receivedAt = time;
+    value.targets.resize(targets);
+    return value;
 }
 
-void testExactKeysAndTiming() {
-    using namespace std::chrono;
-    reg::diagnostics::ExactSyncDiagnostics tracker;
-    const auto start = steady_clock::time_point{seconds{100}};
-    const reg::media::FrameKey videoKey{.streamEpoch = 12, .frameId = 56};
-    const reg::media::FrameKey wrongEpoch{.streamEpoch = 13, .frameId = 56};
-    reg::metadata::FrameMetadata metadata;
-    metadata.key = wrongEpoch;
-    metadata.receivedAt = start + milliseconds{15};
-
-    tracker.videoDecoded(videoKey);
-    tracker.metadataAccepted(metadata);
-    require(!tracker.exactPair(
-        videoKey, metadata, start,
-        start + milliseconds{130},
-        start + milliseconds{130}));
-    require(tracker.snapshot().rejectedKeyMismatches == 1U);
-    require(tracker.snapshot().matchedPairs == 0U);
-
-    metadata.key = videoKey;
-    metadata.receivedAt = start + milliseconds{40};
-    metadata.targets.resize(2);
-    tracker.metadataAccepted(metadata);
+void testLegacyAndHealthy() {
+    ExactSyncDiagnostics tracker;
+    const auto base = steady_clock::time_point{seconds{10}};
+    const FrameKey a{12, 1}, b{12, 2};
+    tracker.videoDecoded(a);
+    tracker.overlayBuffered(a, base, base + milliseconds{150});
+    auto value = meta(a, base + milliseconds{50}, 2);
+    tracker.metadataAccepted(value);
+    require(tracker.exactPair(a, value, base, base + milliseconds{150}, base + milliseconds{150}));
+    require(tracker.exactPair(a, value, base, base + milliseconds{150}, base + milliseconds{150}));
+    tracker.videoDecoded(b);
+    tracker.overlayBuffered(b, base + milliseconds{20}, base + milliseconds{170});
+    value = meta(b, base + milliseconds{120});
+    tracker.metadataAccepted(value);
     require(tracker.exactPair(
-        videoKey, metadata, start,
-        start + milliseconds{130},
-        start + milliseconds{135}));
-
-    const auto result = tracker.snapshot();
-    require(result.lastVideoKey == videoKey);
-    require(result.lastMetadataKey == videoKey);
-    require(result.lastMatchedKey == videoKey);
-    require(result.lastMatchedTargetCount == 2U);
-    require(result.matchedPairs == 1U);
-    require(result.matchedAfterDeadline == 0U);
-    require(result.hasTimingSample);
-    require(std::abs(result.lastArrivalRelativeToDecodeMs - 40.0) < 0.001);
-    require(std::abs(result.lastPlayoutWaitMs - 135.0) < 0.001);
-    require(std::abs(result.arrivalDelayP95Ms - 40.0) < 0.001);
+        b, value, base + milliseconds{20}, base + milliseconds{170}, base + milliseconds{180}));
+    const auto snap = tracker.snapshot();
+    require(snap.matchedPairs == 2 && snap.presentedExactTotal == 2 && snap.eligibleFramesTotal == 2);
+    require(snap.validEmptyDetectionsTotal == 1 && snap.metadataWithinDeadlineTotal == 2);
+    require(snap.matchCoverage && *snap.matchCoverage == 1.0 && snap.latencySampleCount == 2);
+    require(std::abs(snap.arrivalDelayP95Ms - 100.0) < .001);
+    require(snap.lastMatchedTargetCount == 0 && snap.lastMatchedKey == b);
+    require(snap.decidedFramesTotal == 2);
 }
 
-void testLateAndOutOfOrderMetadata() {
-    using namespace std::chrono;
-    reg::diagnostics::ExactSyncDiagnostics tracker;
-    const auto start = steady_clock::time_point{seconds{200}};
-    const reg::media::FrameKey lostKey{.streamEpoch = 8, .frameId = 70};
-    const reg::media::FrameKey otherKey{.streamEpoch = 8, .frameId = 71};
-    const auto deadline = start + milliseconds{130};
-
-    tracker.frameDueWithoutMetadata(lostKey, deadline);
-    reg::metadata::FrameMetadata unrelated;
-    unrelated.key = otherKey;
-    unrelated.receivedAt = deadline + milliseconds{50};
-    tracker.metadataAccepted(unrelated);
-    require(tracker.snapshot().metadataAfterDroppedFrame == 0U);
-
-    reg::metadata::FrameMetadata late;
-    late.key = lostKey;
-    late.receivedAt = deadline + milliseconds{20};
-    tracker.metadataAccepted(late);
-    tracker.metadataAccepted(late);
-    auto snapshot = tracker.snapshot();
-    require(snapshot.dueWithoutMetadata == 1U);
-    require(snapshot.metadataAfterDroppedFrame == 1U);
-    require(snapshot.metadataArrivedAfterDeadline == 1U);
-
-    // Valid packet after deadline can still be paired if the renderer has not
-    // consumed the frame yet. Report it separately from after-drop arrivals.
-    reg::metadata::FrameMetadata delayed;
-    delayed.key = otherKey;
-    delayed.receivedAt = deadline + milliseconds{10};
+void testEarlyAndLateAndCensor() {
+    ExactSyncDiagnostics tracker;
+    const auto base = steady_clock::time_point{seconds{100}};
+    const FrameKey early{2, 20}, afterDeadline{2, 21}, afterDrop{2, 22}, unobserved{2, 23};
+    auto value = meta(early, base - milliseconds{5});
+    tracker.metadataAccepted(value);
+    tracker.videoDecoded(early);
+    tracker.overlayBuffered(early, base, base + milliseconds{100});
+    require(tracker.exactPair(early, value, base, base + milliseconds{100}, base + milliseconds{100}));
+    require(tracker.snapshot().lastArrivalRelativeToDecodeMs == -5);
+    tracker.overlayBuffered(afterDeadline, base, base + milliseconds{100});
+    value = meta(afterDeadline, base + milliseconds{120});
+    tracker.metadataAccepted(value);
     require(tracker.exactPair(
-        otherKey, delayed, start, deadline,
-        deadline + milliseconds{15}));
-    snapshot = tracker.snapshot();
-    require(snapshot.matchedPairs == 1U);
-    require(snapshot.matchedAfterDeadline == 1U);
-    require(snapshot.metadataAfterDroppedFrame == 1U);
-    require(snapshot.lastArrivalRelativeToDecodeMs > 139.9);
+        afterDeadline, value, base, base + milliseconds{100}, base + milliseconds{130}));
+    tracker.overlayBuffered(afterDrop, base, base + milliseconds{100});
+    tracker.frameDueWithoutMetadata(afterDrop, base + milliseconds{100});
+    tracker.frameDueWithoutMetadata(afterDrop, base + milliseconds{100});
+    value = meta(afterDrop, base + milliseconds{140});
+    tracker.metadataAccepted(value);
+    tracker.metadataAccepted(value);
+    tracker.overlayBuffered(unobserved, base, base + milliseconds{100});
+    tracker.frameDueWithoutMetadata(unobserved, base + milliseconds{100});
+    const auto snap = tracker.snapshot();
+    require(snap.eligibleFramesTotal == 4 && snap.dropMissingTotal == 2);
+    require(snap.metadataBeforeDecodeTotal == 1 && snap.metadataLateObservedTotal == 2);
+    require(snap.metadataAfterDeadlineBeforeDecisionTotal == 1);
+    require(snap.metadataAfterDroppedFrame == 1 && snap.metadataArrivedAfterDeadline == 1);
+    require(snap.metadataDuplicateTotal == 1 && snap.matchedAfterDeadline == 1);
+    require(snap.matchCoverage && std::abs(*snap.matchCoverage - .5) < .001);
+    tracker.expire(base + seconds{6});
+    const auto expired = tracker.snapshot();
+    require(expired.metadataUnobservedAtExpiryTotal == 1);
+    require(expired.retainedLifecycleCount == 0);
+}
 
-    tracker.frameDueWithoutMetadata(
-        reg::media::FrameKey{.streamEpoch = 8, .frameId = 72},
-        deadline);
+void testEpochIdentityAndEviction() {
+    ExactSyncDiagnostics tracker;
+    const auto now = steady_clock::time_point{seconds{200}};
+    const FrameKey a{7, 42}, b{8, 42}, c{8, 41};
+    tracker.videoDecoded(a);
+    tracker.videoDecoded(a);
+    tracker.videoDecoded(b);
+    tracker.videoDecoded(c);
+    const auto value = meta(b, now + milliseconds{1});
+    tracker.metadataAccepted(value);
+    tracker.overlayBuffered(a, now, now + milliseconds{100});
+    tracker.overlayBuffered(b, now, now + milliseconds{100});
+    tracker.overlayBuffered(b, now, now + milliseconds{100});
+    require(!tracker.exactPair(a, value, now, now + milliseconds{100}, now + milliseconds{100}));
+    tracker.frameBufferEvicted(a, now + milliseconds{100});
+    tracker.frameBufferEvicted(a, now + milliseconds{100});
+    require(tracker.exactPair(b, value, now, now + milliseconds{100}, now + milliseconds{100}));
+    tracker.missingOverlayIdentity();
+    const auto snap = tracker.snapshot();
+    require(snap.videoEpochTransitionsTotal == 1 && snap.duplicateVideoKeysTotal == 1);
+    require(snap.nonmonotonicVideoKeysTotal == 1 && snap.rejectedKeyMismatches == 1);
+    require(snap.eligibleFramesTotal == 2 && snap.evictedTotal == 1);
+    require(snap.duplicateLifecycleKeysTotal == 1 && snap.missingIdentityTotal == 1);
+    require(snap.presentedExactTotal == 1 && snap.decidedFramesTotal == 2);
+}
+
+void testLegacyDropAndReset() {
+    ExactSyncDiagnostics tracker;
+    const auto now = steady_clock::time_point{seconds{500}};
+    const FrameKey key{4, 10};
+    tracker.frameDueWithoutMetadata(key, now);
+    const auto value = meta(key, now + milliseconds{20});
+    tracker.metadataAccepted(value);
+    tracker.metadataAccepted(value);
+    require(tracker.snapshot().metadataAfterDroppedFrame == 1);
+    require(tracker.snapshot().metadataArrivedAfterDeadline == 1);
     tracker.clearPending();
-    reg::metadata::FrameMetadata cleared;
-    cleared.key = reg::media::FrameKey{.streamEpoch = 8, .frameId = 72};
-    cleared.receivedAt = deadline + milliseconds{100};
-    tracker.metadataAccepted(cleared);
-    require(tracker.snapshot().metadataAfterDroppedFrame == 1U);
+    tracker.metadataAccepted(value);
+    require(tracker.snapshot().metadataAfterDroppedFrame == 1);
+    tracker.resetSession();
+    const auto snap = tracker.snapshot();
+    require(snap.sessionGeneration == 1 && snap.decidedFramesTotal == 0 &&
+            snap.matchedPairs == 0 && snap.latencySampleCount == 0 && !snap.matchCoverage);
 }
 
-void testBoundedSamplesAndEarlyMetadata() {
-    using namespace std::chrono;
-    reg::diagnostics::ExactSyncDiagnostics tracker;
-    const auto start = steady_clock::time_point{seconds{300}};
-    for (std::uint64_t i = 1; i <= 300; ++i) {
-        const auto decodedAt = start + milliseconds{static_cast<int>(i)};
-        const reg::media::FrameKey key{.streamEpoch = 20, .frameId = i};
-        reg::metadata::FrameMetadata metadata;
-        metadata.key = key;
-        metadata.receivedAt = decodedAt - milliseconds{5};
-        require(tracker.exactPair(
-            key, metadata, decodedAt,
-            decodedAt + milliseconds{130},
-            decodedAt + milliseconds{135}));
+void testBoundedAndUnknown() {
+    ExactSyncDiagnostics tracker;
+    const auto now = steady_clock::time_point{seconds{700}};
+    for (std::uint64_t i = 0; i < 400; ++i) {
+        const FrameKey key{10, i};
+        tracker.videoDecoded(key);
+        tracker.overlayBuffered(key, now + milliseconds{static_cast<int>(i)},
+            now + milliseconds{static_cast<int>(i) + 100});
     }
-    const auto snapshot = tracker.snapshot();
-    require(snapshot.matchedPairs == 300U);
-    require(snapshot.latencySampleCount == 256U);
-    require(snapshot.arrivalDelayP50Ms == 0.0);
-    require(snapshot.arrivalDelayP95Ms == 0.0);
-    require(snapshot.arrivalDelayP99Ms == 0.0);
-    require(snapshot.lastArrivalRelativeToDecodeMs == -5.0);
+    auto snap = tracker.snapshot();
+    require(snap.retainedLifecycleCount == ExactSyncDiagnostics::kHistoryCapacity);
+    require(snap.capacityCensoredTotal == 144 && snap.historyForcedRetirementTotal == 144 &&
+            snap.pendingFrameCount == 256);
+    tracker.expire(now + seconds{10});
+    snap = tracker.snapshot();
+    require(snap.unknownAtExpiryTotal == 256 && snap.pendingFrameCount == 0);
+    for (std::uint64_t i = 0; i < 300; ++i) {
+        const FrameKey key{12, i};
+        const auto value = meta(key,
+            now + milliseconds{static_cast<int>(i)} - milliseconds{5});
+        tracker.exactPair(key, value, now + milliseconds{static_cast<int>(i)},
+            now + seconds{1}, now + seconds{1});
+    }
+    snap = tracker.snapshot();
+    require(snap.latencySampleCount == 256 && snap.matchedPairs == 300);
+    require(snap.arrivalDelayP50Ms == 0 && snap.arrivalDelayP99Ms == 0);
+    tracker.overlayBuffered({13, 1}, now, now + seconds{1});
+    tracker.clearPending();
+    require(tracker.snapshot().unknownAtClearTotal == 1);
 }
 
+void testReorderAndExpiryBoundary() {
+    ExactSyncDiagnostics tracker;
+    const auto now = steady_clock::time_point{seconds{800}};
+    const FrameKey a{15, 1}, b{15, 2}, c{15, 3};
+    // Receive in reverse order; never match neighboring timestamps.
+    tracker.metadataAccepted(meta(c, now + milliseconds{30}));
+    tracker.metadataAccepted(meta(b, now + milliseconds{20}));
+    tracker.metadataAccepted(meta(a, now + milliseconds{10}));
+    tracker.overlayBuffered(a, now, now + milliseconds{100});
+    tracker.overlayBuffered(b, now, now + milliseconds{100});
+    tracker.overlayBuffered(c, now, now + milliseconds{100});
+    require(tracker.exactPair(a, meta(a, now + milliseconds{10}),
+        now, now + milliseconds{100}, now + milliseconds{100}));
+    require(tracker.exactPair(b, meta(b, now + milliseconds{20}),
+        now, now + milliseconds{100}, now + milliseconds{100}));
+    require(tracker.exactPair(c, meta(c, now + milliseconds{30}),
+        now, now + milliseconds{100}, now + milliseconds{100}));
+    require(tracker.snapshot().presentedExactTotal == 3);
+    const FrameKey missing{15, 4};
+    tracker.overlayBuffered(missing, now, now + milliseconds{100});
+    tracker.frameDueWithoutMetadata(missing, now + milliseconds{100});
+    tracker.expire(now + milliseconds{100} +
+        ExactSyncDiagnostics::kRetentionAfterDeadline - nanoseconds{1});
+    require(tracker.snapshot().metadataUnobservedAtExpiryTotal == 0);
+    tracker.expire(now + milliseconds{100} +
+        ExactSyncDiagnostics::kRetentionAfterDeadline);
+    require(tracker.snapshot().metadataUnobservedAtExpiryTotal == 1);
+    // Ignore uncalibrated Jetson monotonic times for all Reg-local durations.
+    auto value = meta({16, 1}, now + milliseconds{40});
+    value.cvBeginNs = 999999999999ULL;
+    value.cvEndNs = 9999999999999ULL;
+    tracker.overlayBuffered(value.key, now, now + milliseconds{100});
+    require(tracker.exactPair(
+        value.key, value, now, now + milliseconds{100}, now + milliseconds{100}));
+    require(std::abs(tracker.snapshot().lastArrivalRelativeToDecodeMs - 40.0) < .001);
+}
+
+void testConcurrency() {
+    ExactSyncDiagnostics tracker;
+    const auto now = steady_clock::time_point{seconds{1000}};
+    std::thread producer([&] {
+        for (std::uint64_t i = 1; i <= 1000; ++i) {
+            const FrameKey key{99, i};
+            tracker.videoDecoded(key);
+            tracker.overlayBuffered(key, now + milliseconds{static_cast<int>(i)},
+                now + seconds{1});
+            const auto value = meta(key, now + milliseconds{static_cast<int>(i) + 2});
+            tracker.metadataAccepted(value);
+            require(tracker.exactPair(key, value,
+                now + milliseconds{static_cast<int>(i)}, now + seconds{1}, now + seconds{1}));
+        }
+    });
+    std::thread observer([&] {
+        for (int i = 0; i < 1000; ++i) {
+            const auto snap = tracker.snapshot();
+            require(snap.retainedLifecycleCount <= ExactSyncDiagnostics::kHistoryCapacity);
+            require(snap.decidedFramesTotal <= snap.eligibleFramesTotal);
+        }
+    });
+    producer.join();
+    observer.join();
+    require(tracker.snapshot().matchedPairs == 1000);
+}
 } // namespace
 
 int main() {
-    testExactKeysAndTiming();
-    testLateAndOutOfOrderMetadata();
-    testBoundedSamplesAndEarlyMetadata();
+    testLegacyAndHealthy();
+    testEarlyAndLateAndCensor();
+    testEpochIdentityAndEviction();
+    testLegacyDropAndReset();
+    testBoundedAndUnknown();
+    testReorderAndExpiryBoundary();
+    testConcurrency();
 }
