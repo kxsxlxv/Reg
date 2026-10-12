@@ -32,6 +32,7 @@ Current components in active development branches include a GUI Launcher, multi-
 - [README for future Codex / diagnostic agents](docs/DIAGNOSTICS_AGENT_README.md)
 - [Telemetry analytics responsibility and context-budget model](docs/TELEMETRY_ANALYTICS_RESPONSIBILITIES.md)
 - [Ranked offline diagnostics implementation plan](docs/DIAGNOSTICS_OFFLINE_IMPLEMENTATION_PLAN.md)
+- [Parallel agent handoff index and branch coordination](docs/handoffs/README.md)
 - [Mandatory contributor and agent observability policy](AGENTS.md)
 - [RTSP restart and recovery test matrix](docs/RESTART_RECOVERY_VALIDATION.md)
 - [H.264 source FrameIdentity specification](docs/FRAME_IDENTITY_SEI.md)
