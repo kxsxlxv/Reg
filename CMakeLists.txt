@@ -693,3 +693,19 @@ if(REG_BUILD_TESTS)
         add_test(NAME updater_install COMMAND reg_updater --self-test)
     endif()
 endif()
+
+
+# Offline-safe, single-writer diagnostics statistics primitive (Agent A).
+# Independent standalone build is available under src/diagnostics/stats.
+add_library(reg_diagnostics_core INTERFACE)
+target_include_directories(reg_diagnostics_core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+if(REG_BUILD_TESTS)
+    add_executable(reg_diagnostic_statistics_tests tests/diagnostic_statistics_tests.cpp)
+    target_link_libraries(reg_diagnostic_statistics_tests PRIVATE reg_diagnostics_core)
+    if(MSVC)
+        target_compile_options(reg_diagnostic_statistics_tests PRIVATE /W4 /permissive- /EHsc /UNDEBUG)
+    else()
+        target_compile_options(reg_diagnostic_statistics_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -UNDEBUG)
+    endif()
+    add_test(NAME diagnostic_statistics COMMAND reg_diagnostic_statistics_tests)
+endif()
