@@ -64,12 +64,24 @@ public:
             const auto& cur = sample.counters;
             if (last_) {
                 const auto& prev = *last_;
-                if (cur.decoderSessions != prev.decoderSessions) decoderResets_ = 0;
-                else if (decoderDecreased(cur, prev)) ++decoderResets_;
-                if (cur.exactSync.sessionGeneration != prev.exactSync.sessionGeneration)
+                if (cur.decoderSessions != prev.decoderSessions) {
+                    decoderResets_ = 0;
+                    decoderResetAtNs_ = at;
+                } else if (decoderDecreased(cur, prev)) {
+                    ++decoderResets_;
+                    decoderResetAtNs_ = at;
+                }
+                if (cur.exactSync.sessionGeneration != prev.exactSync.sessionGeneration) {
                     exactResets_ = 0;
-                else if (exactDecreased(cur.exactSync, prev.exactSync)) ++exactResets_;
-                if (processDecreased(cur, prev)) ++processResets_;
+                    exactResetAtNs_ = at;
+                } else if (exactDecreased(cur.exactSync, prev.exactSync)) {
+                    ++exactResets_;
+                    exactResetAtNs_ = at;
+                }
+                if (processDecreased(cur, prev)) {
+                    ++processResets_;
+                    processResetAtNs_ = at;
+                }
             }
             last_ = cur;
             lastTime_ = at;
@@ -79,6 +91,15 @@ public:
     [[nodiscard]] std::uint64_t processResets() const noexcept { return processResets_; }
     [[nodiscard]] std::uint64_t decoderResets() const noexcept { return decoderResets_; }
     [[nodiscard]] std::uint64_t exactResets() const noexcept { return exactResets_; }
+    [[nodiscard]] std::optional<std::int64_t> processResetAtNs() const noexcept {
+        return processResetAtNs_;
+    }
+    [[nodiscard]] std::optional<std::int64_t> decoderResetAtNs() const noexcept {
+        return decoderResetAtNs_;
+    }
+    [[nodiscard]] std::optional<std::int64_t> exactResetAtNs() const noexcept {
+        return exactResetAtNs_;
+    }
 
 private:
     // Detect the observed decreases at the owner-domain level. A missed
@@ -126,6 +147,9 @@ private:
     std::uint64_t processResets_{};
     std::uint64_t decoderResets_{};
     std::uint64_t exactResets_{};
+    std::optional<std::int64_t> processResetAtNs_;
+    std::optional<std::int64_t> decoderResetAtNs_;
+    std::optional<std::int64_t> exactResetAtNs_;
 };
 
 namespace detail {
@@ -220,7 +244,8 @@ inline void numberStatus(api::Section& sec, std::string name, std::optional<std:
 template <typename Value, typename Generation>
 void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx,
            std::string name, std::string population, std::string scope, std::string resetId,
-           Value value, Generation generation, bool generationStable = true) {
+           Value value, Generation generation, bool generationStable = true,
+           std::optional<std::int64_t> lastDomainResetNs = std::nullopt) {
     constexpr std::array<std::pair<std::string_view, std::int64_t>, 3> windows{{
         {"1s", stats::kOneSecondNs}, {"10s", stats::kTenSecondsNs},
         {"60s", stats::kSixtySecondsNs}}};
@@ -250,7 +275,12 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
         if (name.find("fps") == std::string::npos) m.unit = "count/s";
         const auto start = now >= width ? now - width : std::int64_t{0};
         m.windowStartNs = start; m.windowEndNs = now; m.windowComplete = false;
-        if (now >= width && orderValid && generationStable) {
+        // A reset of a sibling counter in this owner domain changes the
+        // shared reset ID too. Never allow a rate to bridge that boundary
+        // just because this particular numerator remained monotonic.
+        const bool crossesReset = lastDomainResetNs && *lastDomainResetNs > start &&
+            *lastDomainResetNs <= now;
+        if (now >= width && orderValid && generationStable && !crossesReset) {
             const auto r = window.snapshotBetween(start, now, now);
             std::optional<std::int64_t> first, last;
             std::optional<std::int64_t> prev;
@@ -364,15 +394,15 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
           "ms", "overlay_configuration", "process", process, state);
     rates(video, input, ctx, "decoder.decoded_fps", "decoded_frames", "decoder_session", decoder,
           [](const auto& x) { return x.decodedFrames; },
-          [](const auto& x) { return x.decoderSessions; }, decoderStable);
+          [](const auto& x) { return x.decoderSessions; }, decoderStable, resets.decoderResetAtNs());
     rates(video, input, ctx, "raw.presented_fps", "raw_present_decisions_not_scanout",
           "decoder_session", decoder,
           [](const auto& x) { return x.rawPresentedFrames; },
-          [](const auto& x) { return x.decoderSessions; }, decoderStable);
+          [](const auto& x) { return x.decoderSessions; }, decoderStable, resets.decoderResetAtNs());
     rates(video, input, ctx, "overlay.presented_decisions_rate", "overlay_present_decisions_not_scanout",
           "decoder_session", decoder,
           [](const auto& x) { return x.overlayPresentedFrames; },
-          [](const auto& x) { return x.decoderSessions; }, decoderStable);
+          [](const auto& x) { return x.decoderSessions; }, decoderStable, resets.decoderResetAtNs());
     out.sections.push_back(std::move(video));
 
     auto cv = section("cv");
@@ -400,7 +430,7 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
         cv.lastFrameKey = key(*c.exactSync.lastMetadataKey);
     rates(cv, input, ctx, "cv.packets_rate", "received_cv_packets", "process", process,
           [](const auto& x) { return x.metadataPackets; },
-          [](const auto&) -> std::uint64_t { return 0; });
+          [](const auto&) -> std::uint64_t { return 0; }, true, resets.processResetAtNs());
     out.sections.push_back(std::move(cv));
 
     auto sync = section("exact_sync");
@@ -481,7 +511,7 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     rates(sync, input, ctx, "exact_sync.matched_pairs_rate", "exact_key_matched_pairs",
           "exact_sync_session", exact,
           [](const auto& x) { return x.exactSync.matchedPairs; },
-          [](const auto& x) { return x.exactSync.sessionGeneration; }, exactStable);
+          [](const auto& x) { return x.exactSync.sessionGeneration; }, exactStable, resets.exactResetAtNs());
     out.sections.push_back(std::move(sync));
 
     auto recorder = section("recorder");
@@ -498,7 +528,7 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     rates(recorder, input, ctx, "recorder.packets_written_rate", "written_compressed_packets",
           "process", process,
           [](const auto& x) { return x.recorderPacketsWritten; },
-          [](const auto&) -> std::uint64_t { return 0; });
+          [](const auto&) -> std::uint64_t { return 0; }, true, resets.processResetAtNs());
     out.sections.push_back(std::move(recorder));
 
     auto ui = section("ui"); // no NetImgui/client liveness hooks in TelemetryModel
