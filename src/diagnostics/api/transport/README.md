@@ -63,6 +63,13 @@ production integration are deliberately outside Agent C ownership.
 `, target <= 2048 bytes,
   read deadline 1.9 s with short socket timeouts; malformed headers are 400,
   long URI 414, oversized header 431 and incomplete/idle requests 408.
+- HTTP/1.1 `Host` is allowlisted as **only `127.0.0.1` or `localhost`**
+  (ASCII case-insensitive for `localhost`), optionally followed by a decimal
+  `:<actual_bound_port>` matching the value from `getsockname()` — including
+  when the configured port was 0. External DNS names, userinfo, IPv6 literals,
+  malformed/alternate ports and duplicate `Host` headers receive 400 before
+  any Handler invocation. This prevents ordinary Host-based DNS rebinding from
+  treating a third-party domain as this loopback API.
 - To eliminate request-smuggling framing ambiguities, **all**
   `Content-Length` and `Transfer-Encoding` headers are rejected (including
   `Content-Length: 0`). Conflicting/repeated `Host`, obsolete folded headers,
@@ -78,7 +85,13 @@ production integration are deliberately outside Agent C ownership.
 
 ## Security boundary
 
-Loopback is **not authentication**. Other local applications/users, browser
+Loopback is **not authentication**. An explicit Host allowlist mitigates
+Host-based DNS rebinding, but it does not authenticate a local process or provide
+an authorization boundary. **CORS is not enabled**: the server never emits
+`Access-Control-Allow-Origin`, especially not `*`; coordinator must not add
+permissive CORS response headers. Any future browser UI, non-loopback support
+or proxying requires a separate origin/authentication threat-model review.
+Other local applications/users, browser
 pages through requests to localhost, and local malware may be able to call an
 opted-in API. Diagnostics data must therefore be treated as accessible to
 local callers, with all payload contents sanitized by the coordinator/Agent B.
