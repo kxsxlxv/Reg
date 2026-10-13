@@ -1,0 +1,48 @@
+{
+  "base_fps": 60,
+  "clock_specs": [
+    {
+      "clock_domain": "jetson-steady",
+      "drift_ppm": 86,
+      "host_role": "jetson",
+      "offset_ns": "4000000000",
+      "session_id": "jetson-s1",
+      "sync_state": "synthetic_known"
+    },
+    {
+      "clock_domain": "mediamtx-steady",
+      "drift_ppm": -33,
+      "host_role": "ubuntu-mediamtx",
+      "offset_ns": "7000000000",
+      "session_id": "mediamtx-s1",
+      "sync_state": "synthetic_known"
+    },
+    {
+      "clock_domain": "unigine-steady",
+      "drift_ppm": 55,
+      "host_role": "ubuntu-source",
+      "offset_ns": "1000000000",
+      "session_id": "source-s1",
+      "sync_state": "synthetic_known"
+    },
+    {
+      "clock_domain": "reg-steady",
+      "drift_ppm": -121,
+      "host_role": "windows-reg",
+      "offset_ns": "12000000000",
+      "session_id": "reg-s1",
+      "sync_state": "synthetic_known"
+    }
+  ],
+  "data_origin": "synthetic",
+  "duration_virtual_ns": "276666666",
+  "event_count": 89,
+  "events_sha256": "e6af7906949ff08a8826f2b2b839927db297c7b1746a66c8db581578597ad909",
+  "fixture_id": "blind-0a58d63bde6f27af",
+  "generator_version": "1.0.0",
+  "nominal_overlay_delay_ms": 150,
+  "public_observations_only": true,
+  "requested_source_frames": 8,
+  "schema_version": "diag-fixture/v1",
+  "seed": "20261012"
+}
