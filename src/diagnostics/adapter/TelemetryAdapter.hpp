@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -22,6 +23,8 @@
 
 namespace reg::diagnostics::adapter {
 
+class ResetIdentityState;
+
 struct Context {
     std::string hostId;
     std::string processSessionId;
@@ -32,6 +35,97 @@ struct Context {
     std::optional<std::uint64_t> monotonicUptimeMs;
     std::chrono::steady_clock::time_point now{};
     std::chrono::milliseconds freshness{2000};
+    // Optional persistent owner-local identity tracker, owned by the
+    // coordinator's single low-priority sampler thread, never shared with
+    // decoder/render callbacks. The stateless fallback uses intentionally
+    // short-lived IDs so it cannot alias reset populations after eviction.
+    ResetIdentityState* resetIdentityState{};
+};
+
+// Reset identity belongs to the measurement owner, not to the JSON codec.
+// The retained TelemetryModel sample ring is insufficient to reconstruct
+// a stable implicit-reset sequence after old observations have been pruned.
+// Keep this state with the *one* background sampler for the whole process.
+// The current counters are not time-stamped: only consume timed samples.
+class ResetIdentityState final {
+public:
+    void observe(const telemetry::Snapshot& input, const Context& ctx) {
+        if (processSession_ != ctx.processSessionId) {
+            *this = ResetIdentityState{};
+            processSession_ = ctx.processSessionId;
+        }
+        for (const auto& sample : input.samples) {
+            const auto at = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                sample.time.time_since_epoch()).count();
+            const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                ctx.now.time_since_epoch()).count();
+            if (at < 0 || at > now) continue;
+            if (lastTime_ && at <= *lastTime_) continue; // already ingested
+            const auto& cur = sample.counters;
+            if (last_) {
+                const auto& prev = *last_;
+                if (cur.decoderSessions != prev.decoderSessions) decoderResets_ = 0;
+                else if (decoderDecreased(cur, prev)) ++decoderResets_;
+                if (cur.exactSync.sessionGeneration != prev.exactSync.sessionGeneration)
+                    exactResets_ = 0;
+                else if (exactDecreased(cur.exactSync, prev.exactSync)) ++exactResets_;
+                if (processDecreased(cur, prev)) ++processResets_;
+            }
+            last_ = cur;
+            lastTime_ = at;
+        }
+    }
+
+    [[nodiscard]] std::uint64_t processResets() const noexcept { return processResets_; }
+    [[nodiscard]] std::uint64_t decoderResets() const noexcept { return decoderResets_; }
+    [[nodiscard]] std::uint64_t exactResets() const noexcept { return exactResets_; }
+
+private:
+    // Detect the observed decreases at the owner-domain level. A missed
+    // decrease/recovery between periodic samples cannot be inferred and needs
+    // future producer instrumentation; a process restart requires a new ID.
+    static bool processDecreased(const telemetry::Counters& a, const telemetry::Counters& b) {
+        return a.decoderSessions < b.decoderSessions || a.reconnects < b.reconnects ||
+            a.metadataPackets < b.metadataPackets || a.metadataInvalid < b.metadataInvalid ||
+            a.metadataDuplicates < b.metadataDuplicates ||
+            a.metadataSequenceGaps < b.metadataSequenceGaps ||
+            a.metadataOutOfOrder < b.metadataOutOfOrder ||
+            a.metadataStoreEvictions < b.metadataStoreEvictions ||
+            a.recorderPacketsWritten < b.recorderPacketsWritten ||
+            a.recorderQueueDrops < b.recorderQueueDrops ||
+            a.recorderMetadataWritten < b.recorderMetadataWritten ||
+            a.recorderMetadataQueueDrops < b.recorderMetadataQueueDrops ||
+            a.recorderFailures < b.recorderFailures;
+    }
+    static bool decoderDecreased(const telemetry::Counters& a, const telemetry::Counters& b) {
+        return a.decodedFrames < b.decodedFrames ||
+            a.rawPresentedFrames < b.rawPresentedFrames ||
+            a.overlayPresentedFrames < b.overlayPresentedFrames ||
+            a.overlayMissingMetadataDrops < b.overlayMissingMetadataDrops ||
+            a.overlayBufferEvictions < b.overlayBufferEvictions ||
+            a.overlayMissingIdentity < b.overlayMissingIdentity;
+    }
+    static bool exactDecreased(const diagnostics::ExactSyncSnapshot& a,
+                               const diagnostics::ExactSyncSnapshot& b) {
+        return a.matchedPairs < b.matchedPairs ||
+            a.eligibleFramesTotal < b.eligibleFramesTotal ||
+            a.presentedExactTotal < b.presentedExactTotal ||
+            a.dropMissingTotal < b.dropMissingTotal ||
+            a.evictedTotal < b.evictedTotal ||
+            a.metadataObservedTotal < b.metadataObservedTotal ||
+            a.validEmptyDetectionsTotal < b.validEmptyDetectionsTotal ||
+            a.metadataUnobservedAtExpiryTotal < b.metadataUnobservedAtExpiryTotal ||
+            a.metadataUnobservedAtCapacityTotal < b.metadataUnobservedAtCapacityTotal ||
+            a.metadataUnobservedAtClearTotal < b.metadataUnobservedAtClearTotal ||
+            a.unknownAtExpiryTotal < b.unknownAtExpiryTotal ||
+            a.unknownAtClearTotal < b.unknownAtClearTotal;
+    }
+    std::string processSession_;
+    std::optional<std::int64_t> lastTime_;
+    std::optional<telemetry::Counters> last_;
+    std::uint64_t processResets_{};
+    std::uint64_t decoderResets_{};
+    std::uint64_t exactResets_{};
 };
 
 namespace detail {
@@ -51,6 +145,32 @@ inline std::optional<std::uint64_t> ageMs(std::int64_t now, std::optional<std::i
             static_cast<std::uint64_t>(*last)) / 1'000'000ULL;
 }
 inline api::FrameKey key(media::FrameKey k) { return {k.streamEpoch, k.frameId}; }
+// Match Agent B's ASCII label whitelist. Raw paths, URLs, whitespace or
+// user-controlled process identifiers must never leak into reset IDs.
+inline bool asciiToken(std::string_view id) {
+    if (id.empty() || id.size() > 30) return false;
+    for (const unsigned char ch : id) {
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+            (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' ||
+            ch == '.' || ch == ':') continue;
+        return false;
+    }
+    return true;
+}
+inline std::string safeProcessId(std::string_view id) {
+    if (asciiToken(id)) return std::string(id);
+    // Bounded deterministic opaque surrogate; never embed an arbitrary path.
+    std::uint64_t digest = 14695981039346656037ULL;
+    for (const unsigned char ch : id) {
+        digest ^= ch;
+        digest *= 1099511628211ULL;
+    }
+    return "opaque:" + std::to_string(digest);
+}
+inline std::string withResets(std::string id, std::uint64_t resets) {
+    if (resets) id += ".inferred:" + std::to_string(resets);
+    return id;
+}
 inline bool finite(double x) { return std::isfinite(x); }
 inline api::Metric makeMetric(std::string name, std::string unit, std::string population,
                               std::string resetScope, std::string resetId,
@@ -99,7 +219,7 @@ inline void numberStatus(api::Section& sec, std::string name, std::optional<std:
 // history. Never interpret one periodic counter sample as a frame timestamp.
 template <typename Value, typename Generation>
 void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx,
-           std::string name, std::string population, std::string scope, std::string resetBase,
+           std::string name, std::string population, std::string scope, std::string resetId,
            Value value, Generation generation, bool generationStable = true) {
     constexpr std::array<std::pair<std::string_view, std::int64_t>, 3> windows{{
         {"1s", stats::kOneSecondNs}, {"10s", stats::kTenSecondsNs},
@@ -107,7 +227,6 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     const auto now = ns(ctx.now);
     const auto freshness = std::chrono::duration_cast<std::chrono::nanoseconds>(ctx.freshness).count();
     const auto generationNow = src.samples.empty() ? 0 : generation(src.samples.back().counters);
-    const auto resetId = resetBase + std::to_string(generationNow);
     stats::MetricIdentity identity{std::string(name), "count/s", "reg", population,
                                    "reg-steady", ctx.processSessionId, generationNow,
                                    stats::MetricKind::Counter};
@@ -184,9 +303,22 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     // a trustworthy time: never mix an un-timed newer Counters generation with
     // a previous Sample when reporting snapshot freshness/reset identity.
     const auto& c = input.samples.empty() ? input.counters : input.samples.back().counters;
-    const auto process = ctx.processSessionId;
-    const auto decoder = process + "/decoder:" + std::to_string(c.decoderSessions);
-    const auto exact = process + "/exact:" + std::to_string(c.exactSync.sessionGeneration);
+    // For a long-running live sampler, pass persistent ResetIdentityState in
+    // Context. Without it, incorporate the oldest retained observation into
+    // every reset identity, making the ID explicitly short-lived rather than
+    // silently aliasing distinct populations after a historical reset falls
+    // outside TelemetryModel retention.
+    ResetIdentityState temporaryState;
+    auto& resets = ctx.resetIdentityState ? *ctx.resetIdentityState : temporaryState;
+    resets.observe(input, ctx);
+    const auto prefix = safeProcessId(ctx.processSessionId);
+    const auto ephemeral = ctx.resetIdentityState || input.samples.empty()
+        ? std::string{} : ".history:" + std::to_string(ns(input.samples.front().time));
+    const auto process = withResets(prefix + ephemeral, resets.processResets());
+    const auto decoder = withResets(prefix + ".decoder:" +
+        std::to_string(c.decoderSessions) + ephemeral, resets.decoderResets());
+    const auto exact = withResets(prefix + ".exact:" +
+        std::to_string(c.exactSync.sessionGeneration) + ephemeral, resets.exactResets());
     const auto age = ageMs(now, last);
     auto section = [&](std::string name) {
         api::Section s{}; s.name = std::move(name); s.availability = state;
@@ -230,15 +362,15 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
           "overlay_buffer", "decoder_session", decoder, state);
     gauge(video, "overlay.configured_delay_ms", static_cast<double>(c.configuredOverlayDelayMs),
           "ms", "overlay_configuration", "process", process, state);
-    rates(video, input, ctx, "decoder.decoded_fps", "decoded_frames", "decoder_session", process + "/decoder:",
+    rates(video, input, ctx, "decoder.decoded_fps", "decoded_frames", "decoder_session", decoder,
           [](const auto& x) { return x.decodedFrames; },
           [](const auto& x) { return x.decoderSessions; }, decoderStable);
     rates(video, input, ctx, "raw.presented_fps", "raw_present_decisions_not_scanout",
-          "decoder_session", process + "/decoder:",
+          "decoder_session", decoder,
           [](const auto& x) { return x.rawPresentedFrames; },
           [](const auto& x) { return x.decoderSessions; }, decoderStable);
     rates(video, input, ctx, "overlay.presented_decisions_rate", "overlay_present_decisions_not_scanout",
-          "decoder_session", process + "/decoder:",
+          "decoder_session", decoder,
           [](const auto& x) { return x.overlayPresentedFrames; },
           [](const auto& x) { return x.decoderSessions; }, decoderStable);
     out.sections.push_back(std::move(video));
@@ -266,7 +398,7 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
           "metadata_store", "process", process, state);
     if (c.exactSync.lastMetadataKey && state != api::Availability::Unavailable)
         cv.lastFrameKey = key(*c.exactSync.lastMetadataKey);
-    rates(cv, input, ctx, "cv.packets_rate", "received_cv_packets", "process", process + "/process:",
+    rates(cv, input, ctx, "cv.packets_rate", "received_cv_packets", "process", process,
           [](const auto& x) { return x.metadataPackets; },
           [](const auto&) -> std::uint64_t { return 0; });
     out.sections.push_back(std::move(cv));
@@ -347,7 +479,7 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
                  e.lastMatchedKey ? std::optional<std::uint64_t>(e.lastMatchedTargetCount) : std::nullopt,
                  e.lastMatchedKey ? state : api::Availability::Unavailable);
     rates(sync, input, ctx, "exact_sync.matched_pairs_rate", "exact_key_matched_pairs",
-          "exact_sync_session", process + "/exact:",
+          "exact_sync_session", exact,
           [](const auto& x) { return x.exactSync.matchedPairs; },
           [](const auto& x) { return x.exactSync.sessionGeneration; }, exactStable);
     out.sections.push_back(std::move(sync));
@@ -364,7 +496,7 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     gauge(recorder, "recorder.queue_depth", static_cast<double>(c.recorderQueueDepth),
           "packets", "recorder_queue", "process", process, state);
     rates(recorder, input, ctx, "recorder.packets_written_rate", "written_compressed_packets",
-          "process", process + "/process:",
+          "process", process,
           [](const auto& x) { return x.recorderPacketsWritten; },
           [](const auto&) -> std::uint64_t { return 0; });
     out.sections.push_back(std::move(recorder));
