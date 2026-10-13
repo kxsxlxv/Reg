@@ -8,12 +8,14 @@
 #include <limits>
 #include <stdexcept>
 #include <string_view>
+#include <string>
 
 using namespace std::chrono_literals;
 using reg::diagnostics::api::Availability;
 using reg::diagnostics::api::Provenance;
 using reg::diagnostics::adapter::Context;
 using reg::diagnostics::adapter::makeSnapshot;
+using reg::diagnostics::adapter::ResetIdentityState;
 using reg::telemetry::Counters;
 using reg::telemetry::Snapshot;
 
@@ -62,7 +64,7 @@ void unknownAndZero() {
     in.counters.decodedFrames = 100000;
     out = makeSnapshot(in, context(100));
     require(metric(section(out, "video"), "decoder.decoded_frames_total").counter == 0 &&
-            metric(section(out, "video"), "decoder.decoded_frames_total").resetId == "p-1/decoder:1",
+            metric(section(out, "video"), "decoder.decoded_frames_total").resetId == "p-1.decoder:1.history:100000000000",
             "do not time-stamp a newer unsampled Counters generation");
     c.metadataPackets = 1; c.exactSync.validEmptyDetectionsTotal = 1;
     sample(in, 101, c);
@@ -116,7 +118,7 @@ void insufficientAndResets() {
     c.decoderSessions=2;c.decodedFrames=3;sample(s,21,c);
     out=makeSnapshot(s,context(21));
     require(!metric(section(out,"video"),"decoder.decoded_fps_1s").value,"session reset not bridged");
-    require(metric(section(out,"video"),"decoder.decoded_frames_total").resetId=="p-1/decoder:2",
+    require(metric(section(out,"video"),"decoder.decoded_frames_total").resetId=="p-1.decoder:2.history:10000000000",
             "decoder session reset id");
     c.decodedFrames=63;sample(s,22,c);
     out=makeSnapshot(s,context(22));
@@ -182,6 +184,97 @@ void exactPopulationAndIdentity() {
     require(!metric(section(out,"exact_sync"),"exact_sync.match_coverage").value,
             "zero denominator unavailable not zero");
 }
+void resetIdentityCodecAndRetention() {
+    ResetIdentityState tracker;
+    Snapshot s;
+    auto ctx = context(10);
+    ctx.resetIdentityState = &tracker;
+    Counters c;
+    c.decoderSessions = 4;
+    c.exactSync.sessionGeneration = 7;
+    c.decodedFrames = 1000;
+    c.rawPresentedFrames = 900;
+    c.exactSync.matchedPairs = 100;
+    c.metadataPackets = 100;
+    sample(s, 10, c);
+    auto out = makeSnapshot(s, ctx);
+    const auto decoderBefore = metric(section(out, "video"), "decoder.decoded_frames_total").resetId;
+    const auto exactBefore = metric(section(out, "exact_sync"), "exact_sync.matched_pairs_total").resetId;
+    const auto processBefore = metric(section(out, "cv"), "cv.packets_total").resetId;
+    require(decoderBefore == "p-1.decoder:4" && exactBefore == "p-1.exact:7" &&
+            processBefore == "p-1", "canonical path-safe reset IDs");
+    auto isToken = [](std::string_view v) {
+        if (v.empty() || v.size() > 128) return false;
+        for (const unsigned char ch : v) {
+            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' ||
+                ch == '.' || ch == ':') continue;
+            return false;
+        }
+        return true;
+    };
+    auto validate = [&](const reg::diagnostics::api::Snapshot& v) {
+        for (const auto& sec : v.sections)
+            for (const auto& m : sec.metrics)
+                require(isToken(m.resetId), "reset ID rejected by Agent B codec token policy");
+    };
+    validate(out);
+    // No explicit session generation changes: all three owner domains have
+    // independently observed unmarked resets.
+    c.decodedFrames = 5; c.rawPresentedFrames = 6;
+    c.exactSync.matchedPairs = 2;
+    c.metadataPackets = 1;
+    sample(s, 11, c); ctx.now = std::chrono::steady_clock::time_point{11s};
+    out = makeSnapshot(s, ctx);
+    const auto decoderAfter = metric(section(out, "video"), "decoder.decoded_frames_total").resetId;
+    const auto exactAfter = metric(section(out, "exact_sync"), "exact_sync.matched_pairs_total").resetId;
+    const auto processAfter = metric(section(out, "cv"), "cv.packets_total").resetId;
+    require(decoderAfter == "p-1.decoder:4.inferred:1" &&
+            exactAfter == "p-1.exact:7.inferred:1" &&
+            processAfter == "p-1.inferred:1", "implicit reset requires a new emitted identity");
+    require(metric(section(out, "video"), "decoder.decoded_fps_1s").resetId == decoderAfter &&
+            metric(section(out, "exact_sync"), "exact_sync.matched_pairs_rate_1s").resetId == exactAfter &&
+            metric(section(out, "cv"), "cv.packets_rate_1s").resetId == processAfter,
+            "rates and cumulative counters agree on reset identity");
+    require(!metric(section(out, "video"), "decoder.decoded_fps_1s").value,
+            "counter decrease must not manufacture a rate");
+    validate(out);
+    // Once the pre-reset sample has been evicted, the owner state must STILL
+    // emit the new identity. Retained history alone cannot prove the reset.
+    s.samples.erase(s.samples.begin());
+    c.decodedFrames = 65; c.exactSync.matchedPairs = 20; c.metadataPackets = 21;
+    sample(s, 12, c); ctx.now = std::chrono::steady_clock::time_point{12s};
+    out = makeSnapshot(s, ctx);
+    require(metric(section(out, "video"), "decoder.decoded_frames_total").resetId == decoderAfter &&
+            metric(section(out, "exact_sync"), "exact_sync.matched_pairs_total").resetId == exactAfter &&
+            metric(section(out, "cv"), "cv.packets_total").resetId == processAfter,
+            "identity must survive pre-reset history eviction");
+    require(metric(section(out, "video"), "decoder.decoded_fps_1s").value == 60,
+            "rate resumes on post-reset segment");
+    // An untracked one-shot call intentionally gets a time-bound history ID,
+    // not the long-lived owner-reset identity after ring rotation.
+    auto fallback = makeSnapshot(s, context(12));
+    require(metric(section(fallback, "video"), "decoder.decoded_frames_total").resetId != decoderBefore,
+            "stateless fallback may not alias a previous session population");
+    validate(fallback);
+    // Explicit generations have disjoint canonical IDs and clear inferred seq.
+    c.decoderSessions = 5; c.exactSync.sessionGeneration = 8;
+    c.decodedFrames = 1; c.rawPresentedFrames = 1; c.exactSync.matchedPairs = 0;
+    sample(s, 13, c); ctx.now = std::chrono::steady_clock::time_point{13s};
+    out = makeSnapshot(s, ctx);
+    require(metric(section(out, "video"), "decoder.decoded_frames_total").resetId == "p-1.decoder:5" &&
+            metric(section(out, "exact_sync"), "exact_sync.matched_pairs_total").resetId == "p-1.exact:8",
+            "explicit generation change must reset implicit sequence");
+    validate(out);
+    // Arbitrary process names can contain paths: reset labels must never
+    // expose paths or be converted to JSON null by the codec.
+    auto unsafeCtx = context(13);
+    unsafeCtx.processSessionId = "C:/private/session\\secret";
+    out = makeSnapshot(s, unsafeCtx);
+    validate(out);
+    require(metric(section(out, "video"), "decoder.decoded_frames_total").resetId.find("private") == std::string::npos,
+            "raw process path leaked through reset identity");
+}
 void uint64AndIsolation() {
     Snapshot s;Counters c;c.decoderSessions=1;c.reconnects=UINT64_MAX;
     c.recorderPacketsWritten=UINT64_MAX;c.metadataPackets=UINT64_MAX;
@@ -198,7 +291,7 @@ void uint64AndIsolation() {
 }
 int main(){
  try {unknownAndZero();measuredRates();insufficientAndResets();staleAndSparse();
-      exactPopulationAndIdentity();uint64AndIsolation();
+      exactPopulationAndIdentity();uint64AndIsolation();resetIdentityCodecAndRetention();
       std::cout<<"diagnostic_telemetry_adapter_tests: PASS\n";return 0;}
  catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}
 }
