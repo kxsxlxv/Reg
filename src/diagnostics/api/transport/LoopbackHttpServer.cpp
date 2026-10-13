@@ -213,7 +213,7 @@ bool validTarget(std::string_view target) noexcept {
 // Parse only the request line + headers. No request bodies, chunking or
 // persistent connections are supported: reject *any* framing header, even
 // Content-Length: 0, rather than risk ambiguous interpretation by peers.
-int parseRequest(std::string_view header, HttpRequest& request) noexcept {
+int parseRequest(std::string_view header, HttpRequest& request) {
     if (header.size() < 4 || header.substr(header.size() - 4) != "\r\n\r\n") return 400;
     for (std::size_t i = 0; i < header.size(); ++i) {
         const unsigned char ch = static_cast<unsigned char>(header[i]);
@@ -249,7 +249,8 @@ int parseRequest(std::string_view header, HttpRequest& request) noexcept {
         if (!std::all_of(name.begin(), name.end(),
               [](unsigned char ch) { return isTokenChar(ch); })) return 400;
         const auto value = field.substr(colon + 1);
-        for (unsigned char ch : value) {
+        for (char raw : value) {
+            const auto ch = static_cast<unsigned char>(raw);
             if (ch != '\t' && (ch < 0x20 || ch > 0x7e)) return 400;
         }
         if (equalsAsciiIgnoreCase(name, "host")) {
