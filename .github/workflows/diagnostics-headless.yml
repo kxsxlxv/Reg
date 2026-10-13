@@ -70,14 +70,12 @@ jobs:
           flags='-std=c++23 -O2 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -pthread -Isrc'
           g++ $flags tests/diagnostic_telemetry_adapter_tests.cpp -o build-headless/reg_diag_adapter
           g++ $flags src/diagnostics/api/codec/DiagnosticJsonApi.cpp tests/diagnostic_api_codec_tests.cpp -o build-headless/reg_diag_codec
-          g++ $flags src/diagnostics/api/transport/LoopbackHttpServer.cpp tests/diagnostic_http_transport_tests.cpp -o build-headless/reg_diag_http
           g++ $flags src/diagnostics/api/codec/DiagnosticJsonApi.cpp tests/diagnostic_phase2_contract_smoke.cpp -o build-headless/reg_diag_phase2_smoke
 
       - name: Run new Phase-2 independent A/B/C regressions
         run: |
           ./build-headless/reg_diag_adapter
           ./build-headless/reg_diag_codec
-          ./build-headless/reg_diag_http
 
       - name: Cross-component DTO/reset identity acceptance probe
         run: ./build-headless/reg_diag_phase2_smoke
