@@ -56,6 +56,14 @@ void unknownAndZero() {
     require(status(section(out, "rtsp"), "rtspConnected").booleanValue == false, "observed disconnected false");
     require(!status(section(out, "cv"), "cvSignalPresent").booleanValue, "no CV ever observed");
     require(metric(section(out, "video"), "decoder.decoded_frames_total").counter == 0, "observed zero exists");
+    // An untimed Counters update may belong to a newer decoder generation;
+    // the snapshot is timed only through the last periodic Sample.
+    in.counters.decoderSessions = 2;
+    in.counters.decodedFrames = 100000;
+    out = makeSnapshot(in, context(100));
+    require(metric(section(out, "video"), "decoder.decoded_frames_total").counter == 0 &&
+            metric(section(out, "video"), "decoder.decoded_frames_total").resetId == "p-1/decoder:1",
+            "do not time-stamp a newer unsampled Counters generation");
     c.metadataPackets = 1; c.exactSync.validEmptyDetectionsTotal = 1;
     sample(in, 101, c);
     out = makeSnapshot(in, context(101));
@@ -160,6 +168,9 @@ void exactPopulationAndIdentity() {
             "decided-only denominator");
     require(!status(ex,"metadataObservationWindowComplete").booleanValue.value(),
             "pending censored followup not assumed complete");
+    require(metric(ex,"exact_sync.pending_frame_count").kind ==
+            reg::diagnostics::api::MetricKind::Gauge,
+            "pending exact sync lifecycle count is a gauge, not a monotone counter");
     const auto& delay=metric(ex,"exact_sync.arrival_delay_matched_only_ms");
     require(delay.population=="matched_pairs_only_last_256" && delay.sampleCount==4 &&
             delay.p95==22 && delay.windowComplete==false,"matched-only exact sync delay");
