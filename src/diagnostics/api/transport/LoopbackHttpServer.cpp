@@ -186,6 +186,28 @@ bool equalsAsciiIgnoreCase(std::string_view a, std::string_view b) noexcept {
     return true;
 }
 
+// Host is an HTTP/1.1 authority, not a routing hint. Verify it before
+// forwarding even a read-only GET: a remote DNS-rebinding page can otherwise
+// connect to 127.0.0.1 while presenting Host: attacker.example.
+// Only a numeric IPv4 loopback authority (or localhost) is supported.
+// An explicitly supplied port must match the actual OS-assigned listener port.
+bool allowedHost(std::string_view value, std::uint16_t boundPort) noexcept {
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.remove_prefix(1);
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) value.remove_suffix(1);
+    const auto delimiter = value.find(':');
+    const auto hostname = value.substr(0, delimiter);
+    if (hostname != "127.0.0.1" && !equalsAsciiIgnoreCase(hostname, "localhost")) return false;
+    if (delimiter == std::string_view::npos) return true;
+    const auto digits = value.substr(delimiter + 1);
+    if (digits.empty() || digits.size() > 5 || (digits.size() > 1 && digits.front() == '0')) return false;
+    std::uint32_t parsedPort = 0;
+    for (const char digit : digits) {
+        if (digit < '0' || digit > '9') return false;
+        parsedPort = parsedPort * 10U + static_cast<unsigned>(digit - '0');
+    }
+    return parsedPort != 0 && parsedPort == boundPort;
+}
+
 bool validTarget(std::string_view target) noexcept {
     if (target.empty() || target[0] != '/' || target.find('#') != std::string_view::npos ||
         target.find('\\') != std::string_view::npos) return false;
@@ -213,7 +235,7 @@ bool validTarget(std::string_view target) noexcept {
 // Parse only the request line + headers. No request bodies, chunking or
 // persistent connections are supported: reject *any* framing header, even
 // Content-Length: 0, rather than risk ambiguous interpretation by peers.
-int parseRequest(std::string_view header, HttpRequest& request) {
+int parseRequest(std::string_view header, HttpRequest& request, std::uint16_t boundPort) {
     if (header.size() < 4 || header.substr(header.size() - 4) != "\r\n\r\n") return 400;
     for (std::size_t i = 0; i < header.size(); ++i) {
         const unsigned char ch = static_cast<unsigned char>(header[i]);
@@ -254,7 +276,7 @@ int parseRequest(std::string_view header, HttpRequest& request) {
             if (ch != '\t' && (ch < 0x20 || ch > 0x7e)) return 400;
         }
         if (equalsAsciiIgnoreCase(name, "host")) {
-            if (hostSeen || value.find_first_not_of(" \t") == std::string_view::npos) return 400;
+            if (hostSeen || !allowedHost(value, boundPort)) return 400;
             hostSeen = true;
         }
         if (equalsAsciiIgnoreCase(name, "content-length") ||
@@ -437,7 +459,7 @@ void LoopbackHttpServer::handleClient(std::uintptr_t handle) noexcept {
                 // A pipelined message or body delivered in the same read is
                 // rejected, never forwarded to the handler.
                 const int status = end + 4 == header.size()
-                    ? parseRequest(header, request) : 400;
+                    ? parseRequest(header, request, boundPort_.load()) : 400;
                 if (status != 200) { sendResponse(client, failure(status)); return; }
                 try {
                     sendResponse(client, handler_(request));
