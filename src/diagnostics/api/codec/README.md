@@ -76,7 +76,6 @@ carry the same canonical reset identity as their originating population; a
 `null` reset ID makes cross-snapshot counter/rate comparison unsafe.
 
 Status `text_value` accepts only a closed, documented-in-source vocabulary of ordinary
-`text_value` accepts only a closed, documented-in-source vocabulary of ordinary
 state tokens, otherwise `null` (the adapter should use typed boolean/count
 and `availability` for the remaining states). UTC timestamps accept only
 `YYYY-MM-DDTHH:MM:SS[.digits]Z` format (1–9 fractional digits); invalid ones
