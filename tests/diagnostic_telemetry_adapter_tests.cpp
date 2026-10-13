@@ -275,6 +275,50 @@ void resetIdentityCodecAndRetention() {
     require(metric(section(out, "video"), "decoder.decoded_frames_total").resetId.find("private") == std::string::npos,
             "raw process path leaked through reset identity");
 }
+void siblingDomainResetDoesNotBridgeRate() {
+    Snapshot s;
+    ResetIdentityState tracker;
+    auto ctx = context(10);
+    ctx.resetIdentityState = &tracker;
+    Counters c;
+    c.decoderSessions = 1;
+    c.metadataInvalid = 50;
+    for (int t = 0; t <= 10; ++t) {
+        c.decodedFrames = 100 + 60 * t;
+        c.rawPresentedFrames = 50 + 50 * t;
+        c.metadataPackets = 20 + 20 * t;
+        sample(s, t, c);
+    }
+    auto out = makeSnapshot(s, ctx);
+    require(metric(section(out, "video"), "decoder.decoded_fps_10s").value == 60,
+            "pre-reset decoder FPS baseline");
+    require(metric(section(out, "cv"), "cv.packets_rate_10s").value == 20,
+            "pre-reset CV rate baseline");
+    // Two different counters reset: decodedFrames and metadataPackets
+    // themselves remain strictly increasing.
+    c.decodedFrames += 60;
+    c.rawPresentedFrames = 1;
+    c.metadataPackets += 20;
+    c.metadataInvalid = 0;
+    sample(s, 11, c);
+    ctx.now = std::chrono::steady_clock::time_point{11s};
+    out = makeSnapshot(s, ctx);
+    require(!metric(section(out, "video"), "decoder.decoded_fps_10s").value &&
+            !metric(section(out, "cv"), "cv.packets_rate_10s").value,
+            "a rate cannot cross another counter's reset in same owner domain");
+    require(metric(section(out, "video"), "decoder.decoded_fps_10s").resetId ==
+            metric(section(out, "video"), "decoder.decoded_frames_total").resetId,
+            "rate and counter share post-reset decoder identity");
+    c.decodedFrames += 60;
+    c.rawPresentedFrames += 50;
+    c.metadataPackets += 20;
+    sample(s, 12, c);
+    ctx.now = std::chrono::steady_clock::time_point{12s};
+    out = makeSnapshot(s, ctx);
+    require(metric(section(out, "video"), "decoder.decoded_fps_1s").value == 60 &&
+            metric(section(out, "cv"), "cv.packets_rate_1s").value == 20,
+            "single-second rates become measurable after reset boundary");
+}
 void uint64AndIsolation() {
     Snapshot s;Counters c;c.decoderSessions=1;c.reconnects=UINT64_MAX;
     c.recorderPacketsWritten=UINT64_MAX;c.metadataPackets=UINT64_MAX;
@@ -291,7 +335,7 @@ void uint64AndIsolation() {
 }
 int main(){
  try {unknownAndZero();measuredRates();insufficientAndResets();staleAndSparse();
-      exactPopulationAndIdentity();uint64AndIsolation();resetIdentityCodecAndRetention();
+      exactPopulationAndIdentity();uint64AndIsolation();resetIdentityCodecAndRetention();siblingDomainResetDoesNotBridgeRate();
       std::cout<<"diagnostic_telemetry_adapter_tests: PASS\n";return 0;}
  catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}
 }
