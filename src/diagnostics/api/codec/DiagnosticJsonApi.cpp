@@ -216,6 +216,8 @@ void metric(Writer& w, const Metric& v) {
     w.raw(","); w.field("population"); label(w, v.population);
     w.raw(","); w.field("clock_domain"); label(w, v.clockDomain);
     w.raw(","); w.field("reset_scope"); label(w, v.resetScope);
+    // Preserve only canonical, path-safe generation identities. Never rewrite
+    // a slash-delimited ID: normalization would risk false reset equivalence.
     w.raw(","); w.field("reset_id"); label(w, v.resetId);
     w.raw(","); w.field("kind"); w.quoted(kind(v.kind));
     w.raw(","); w.field("provenance"); w.quoted(provenance(v.provenance));
