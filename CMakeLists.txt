@@ -742,3 +742,33 @@ if(REG_BUILD_TESTS)
     endif()
     add_test(NAME diagnostic_api_contract COMMAND reg_diagnostic_api_contract_tests)
 endif()
+
+
+# Review-only Phase-2 integration harness, isolated from production Reg targets.
+if(REG_BUILD_TESTS)
+    add_executable(reg_diag_adapter_v1_tests tests/diagnostic_telemetry_adapter_tests.cpp)
+    target_include_directories(reg_diag_adapter_v1_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    add_test(NAME diagnostic_telemetry_adapter_v1 COMMAND reg_diag_adapter_v1_tests)
+
+    add_executable(reg_diag_codec_v1_tests
+        src/diagnostics/api/codec/DiagnosticJsonApi.cpp
+        tests/diagnostic_api_codec_tests.cpp)
+    target_include_directories(reg_diag_codec_v1_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    add_test(NAME diagnostic_api_codec_v1 COMMAND reg_diag_codec_v1_tests)
+
+    add_executable(reg_diag_http_v1_tests
+        src/diagnostics/api/transport/LoopbackHttpServer.cpp
+        tests/diagnostic_http_transport_tests.cpp)
+    target_include_directories(reg_diag_http_v1_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(WIN32)
+        target_link_libraries(reg_diag_http_v1_tests PRIVATE ws2_32)
+    endif()
+    add_test(NAME diagnostic_http_transport_v1 COMMAND reg_diag_http_v1_tests)
+    set_tests_properties(diagnostic_http_transport_v1 PROPERTIES TIMEOUT 30)
+
+    add_executable(reg_diag_phase2_contract_smoke
+        src/diagnostics/api/codec/DiagnosticJsonApi.cpp
+        tests/diagnostic_phase2_contract_smoke.cpp)
+    target_include_directories(reg_diag_phase2_contract_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    add_test(NAME diagnostic_phase2_contract_smoke COMMAND reg_diag_phase2_contract_smoke)
+endif()
