@@ -100,7 +100,7 @@ private:
     bool connected_{false};
 };
 
-std::string exchange(std::uint16_t port, std::string_view request, bool split = false) {
+std::string tcpExchange(std::uint16_t port, std::string_view request, bool split = false) {
     TcpClient client(port);
     require(client.connected(), "connect to loopback server");
     if (split) {
@@ -118,8 +118,12 @@ std::string request(std::string_view target = "/healthz") {
     return "GET " + std::string(target) + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
 }
 
+std::string hostRequest(std::string_view host) {
+    return "GET /v1/snapshot HTTP/1.1\r\nHost: " + std::string(host) + "\r\n\r\n";
+}
+
 void expectStatus(std::uint16_t port, std::string_view raw, int status) {
-    const std::string response = exchange(port, raw);
+    const std::string response = tcpExchange(port, raw);
     if (response.find("HTTP/1.1 " + std::to_string(status) + " ") != 0) {
         std::cerr << "expected=" << status << " got=" << response.substr(0, 60)
                   << " request=" << std::string(raw).substr(0, 90) << "\n";
@@ -162,12 +166,40 @@ void testServer() {
     const auto port = server.boundPort();
     require(port != 0 && server.isRunning(), "port 0 must allocate nonzero port");
 
-    const auto good = exchange(port, request());
+    const auto good = tcpExchange(port, request());
     require(good.starts_with("HTTP/1.1 200 OK\r\n"), "healthy status");
     verifyLengths(good, "{\"ok\":true}");
     require(good.find("X-Content-Type-Options: nosniff") != std::string::npos,
             "response must disable sniffing");
-    verifyLengths(exchange(port, request(), true), "{\"ok\":true}");
+    verifyLengths(tcpExchange(port, request(), true), "{\"ok\":true}");
+
+    // A browser-origin DNS rebinding attempt reaches 127.0.0.1 with an
+    // attacker-controlled Host. Never forward it to the diagnostic Handler.
+    verifyLengths(tcpExchange(port, hostRequest("127.0.0.1:" + std::to_string(port))),
+                  "{\"ok\":true}");
+    verifyLengths(tcpExchange(port, hostRequest("LOCALHOST")),
+                  "{\"ok\":true}");
+    verifyLengths(tcpExchange(port, hostRequest("localhost:" + std::to_string(port))),
+                  "{\"ok\":true}");
+    const auto handledBeforeInvalidHosts = handled.load();
+    expectStatus(port, hostRequest("attacker.example"), 400);
+    expectStatus(port, hostRequest("example.org:8765"), 400);
+    expectStatus(port, hostRequest("127.0.0.1@attacker.example"), 400);
+    expectStatus(port, hostRequest("127.0.0.1:0"), 400);
+    expectStatus(port, hostRequest("127.0.0.1:65536"), 400);
+    expectStatus(port, hostRequest("127.0.0.1:xyz"), 400);
+    expectStatus(port, hostRequest("127.0.0.1:"), 400);
+    expectStatus(port, hostRequest("127.0.0.1:00080"), 400);
+    expectStatus(port, hostRequest("[::1]"), 400);
+    expectStatus(port, hostRequest("localhost."), 400);
+    expectStatus(port, hostRequest("127.0.0.1,attacker.example"), 400);
+    expectStatus(port, hostRequest("127.0.0.1:" +
+                 std::to_string(port == 65535 ? 65534 : port + 1)), 400);
+    expectStatus(port, "GET /v1/snapshot HTTP/1.1\r\nHost: localhost\r\nHost: 127.0.0.1\r\n\r\n", 400);
+    require(handled.load() == handledBeforeInvalidHosts,
+            "invalid Host requests must not be forwarded to Handler");
+    require(good.find("Access-Control-Allow-Origin") == std::string::npos,
+            "diagnostic responses must not enable cross-origin reads");
 
     expectStatus(port, "POST /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", 405);
     expectStatus(port, "DELETE /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", 405);
@@ -187,10 +219,10 @@ void testServer() {
     expectStatus(port, request(std::string(2050, 'x').insert(0,"/")), 414);
     expectStatus(port, "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Large: " + std::string(8192, 'A') + "\r\n\r\n", 431);
     expectStatus(port, request("/throw"), 500);
-    const auto thrown = exchange(port, request("/throw"));
+    const auto thrown = tcpExchange(port, request("/throw"));
     require(thrown.find("confidential-token") == std::string::npos, "handler error leaked secret");
     expectStatus(port, request("/huge"), 500);
-    const auto maximumBody = exchange(port, request("/exact-limit"));
+    const auto maximumBody = tcpExchange(port, request("/exact-limit"));
     require(maximumBody.find("Content-Length: 1048576\r\n") != std::string::npos,
             "exact 1 MiB permitted and length correct");
     require(maximumBody.size() >= 1048576, "maximum body transmitted");
@@ -205,13 +237,13 @@ void testServer() {
     bool rejected = false;
     try { conflict.start(); } catch (const std::runtime_error&) { rejected = true; }
     require(rejected, "occupied port must fail");
-    require(exchange(port, request()).starts_with("HTTP/1.1 200"), "existing listener intact");
+    require(tcpExchange(port, request()).starts_with("HTTP/1.1 200"), "existing listener intact");
 
     std::vector<std::thread> threads;
     std::atomic<unsigned> successful{0};
     for (int i = 0; i < 8; ++i) {
         threads.emplace_back([&] {
-            if (exchange(port, request("/slow")).starts_with("HTTP/1.1 200")) ++successful;
+            if (tcpExchange(port, request("/slow")).starts_with("HTTP/1.1 200")) ++successful;
         });
     }
     for (auto& thread : threads) thread.join();
