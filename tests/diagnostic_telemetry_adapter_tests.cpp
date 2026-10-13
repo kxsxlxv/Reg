@@ -269,7 +269,7 @@ void resetIdentityCodecAndRetention() {
     // Arbitrary process names can contain paths: reset labels must never
     // expose paths or be converted to JSON null by the codec.
     auto unsafeCtx = context(13);
-    unsafeCtx.processSessionId = "C:/private/session\\secret";
+    unsafeCtx.processSessionId = "C:/private/session/secret";
     out = makeSnapshot(s, unsafeCtx);
     validate(out);
     require(metric(section(out, "video"), "decoder.decoded_frames_total").resetId.find("private") == std::string::npos,
