@@ -11,6 +11,7 @@ on:
       - 'tests/diagnostic_statistics_tests.cpp'
       - 'tests/exact_sync_diagnostics_tests.cpp'
       - 'tests/diagnostic_fixture_bridge.cpp'
+      - 'tests/diagnostic_api_contract_tests.cpp'
       - 'tests/fixtures/diagnostics/**'
       - 'CMakeLists.txt'
   push:
@@ -52,11 +53,13 @@ jobs:
           g++ $flags tests/diagnostic_statistics_tests.cpp -o build-headless/reg_diag_stats
           g++ $flags tests/exact_sync_diagnostics_tests.cpp -o build-headless/reg_diag_sync
           g++ $flags tests/diagnostic_fixture_bridge.cpp -o build-headless/reg_diag_bridge
+          g++ $flags tests/diagnostic_api_contract_tests.cpp -o build-headless/reg_diag_api_contract
 
       - name: Execute C++ statistical and Exact Sync regressions
         run: |
           ./build-headless/reg_diag_stats
           ./build-headless/reg_diag_sync
+          ./build-headless/reg_diag_api_contract
 
       - name: Verify B fixture oracle through A and C C++ implementations
         run: python3 -m tools.diagnostic_scenarios.test_cpp_integration ./build-headless/reg_diag_bridge
