@@ -1,0 +1,5 @@
+# Diagnostic golden fixtures must remain byte-for-byte identical across hosts.
+# Their canonical JSONL encoding and SHA-256 checks require LF, including
+# on Windows Git checkouts with core.autocrlf=true.
+tests/fixtures/diagnostics/**/*.jsonl text eol=lf
+tests/fixtures/diagnostics/**/*.json text eol=lf
