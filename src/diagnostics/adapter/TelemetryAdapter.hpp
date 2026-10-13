@@ -180,8 +180,10 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     const auto state = ageAvailability(now, last, freshness);
     // No timestamp accompanies Counters; avoid presenting the untimed latest
     // Counters as fresh if the last observable history sample is stale.
-    const auto& c = (state == api::Availability::Fresh ? input.counters :
-                     input.samples.empty() ? input.counters : input.samples.back().counters);
+    // Counters has no measurement timestamp. Only the periodic Sample carries
+    // a trustworthy time: never mix an un-timed newer Counters generation with
+    // a previous Sample when reporting snapshot freshness/reset identity.
+    const auto& c = input.samples.empty() ? input.counters : input.samples.back().counters;
     const auto process = ctx.processSessionId;
     const auto decoder = process + "/decoder:" + std::to_string(c.decoderSessions);
     const auto exact = process + "/exact:" + std::to_string(c.exactSync.sessionGeneration);
@@ -297,10 +299,18 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     syncCounter("exact_sync.capacity_censored_total", e.capacityCensoredTotal, "capacity_censored_pending");
     syncCounter("exact_sync.unknown_at_expiry_total", e.unknownAtExpiryTotal, "unknown_pending_on_expiry");
     syncCounter("exact_sync.unknown_at_clear_total", e.unknownAtClearTotal, "unknown_pending_on_clear");
-    syncCounter("exact_sync.pending_frame_count", e.pendingFrameCount, "pending_frames");
-    syncCounter("exact_sync.decided_awaiting_metadata_count", e.decidedAwaitingMetadataCount,
-                "retained_decisions_without_cv");
-    status(sync, "metadataObservationWindowComplete", e.metadataObservationWindowComplete, state);
+    // These are instantaneous bounded queue/dependency depths, not monotone
+    // cumulative counters. Never publish them as MetricKind::Counter.
+    gauge(sync, "exact_sync.pending_frame_count", static_cast<double>(e.pendingFrameCount),
+          "frames", "pending_frames", "exact_sync_session", exact, state);
+    gauge(sync, "exact_sync.decided_awaiting_metadata_count",
+          static_cast<double>(e.decidedAwaitingMetadataCount), "frames",
+          "retained_decisions_without_cv", "exact_sync_session", exact, state);
+    const bool syncObserved = e.sessionGeneration != 0 || e.eligibleFramesTotal != 0 ||
+        e.decidedFramesTotal != 0 || e.metadataObservedTotal != 0 || e.matchedPairs != 0;
+    status(sync, "metadataObservationWindowComplete",
+           syncObserved ? std::optional<bool>(e.metadataObservationWindowComplete) : std::nullopt,
+           syncObserved ? state : api::Availability::Unavailable);
     const bool hasDenom = e.decidedFramesTotal != 0;
     gauge(sync, "exact_sync.match_coverage", hasDenom && e.presentedExactTotal <= e.decidedFramesTotal
           ? std::optional<double>(static_cast<double>(e.presentedExactTotal) /
