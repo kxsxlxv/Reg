@@ -201,7 +201,82 @@ Snapshot fixture(bool synthetic = false) {
     return snapshot;
 }
 
+// Agent A -> B reset provenance seam: a decoder/exact-sync generation (and
+// the rates derived from it) must survive JSON without becoming null.
+// Path-like identifiers remain rejected, even though they might contain an
+// otherwise-valid generation suffix.
+void verify_reset_id_contract() {
+    Snapshot snap = fixture();
+    auto& videoMetrics = snap.sections.at(1).metrics;
+    videoMetrics.resize(1);
+    videoMetrics.front().name = "decoder.decoded_frames_total";
+    videoMetrics.front().resetId = "p-1.decoder:2";
+
+    Metric rate = videoMetrics.front();
+    rate.name = "decoder.decoded_fps";
+    rate.kind = MetricKind::Rate;
+    rate.counter.reset();
+    rate.value = 59.5;
+    videoMetrics.push_back(rate);
+
+    Metric exact = videoMetrics.front();
+    exact.name = "exact_sync.matched_pairs_total";
+    exact.resetScope = "exact_sync_session";
+    exact.resetId = "p-1.exact:7";
+    snap.sections.at(3).availability = Availability::Fresh;
+    snap.sections.at(3).metrics.push_back(exact);
+
+    const auto response = respond({"GET", "/v1/snapshot?sections=video,exact_sync"}, snap);
+    ok(response);
+    contains(response.body, "\"name\":\"decoder.decoded_frames_total\"");
+    contains(response.body, "\"name\":\"decoder.decoded_fps\"");
+    contains(response.body, "\"name\":\"exact_sync.matched_pairs_total\"");
+    const auto occurrences = [](std::string_view haystack, std::string_view needle) {
+        std::size_t count = 0, pos = 0;
+        while ((pos = haystack.find(needle, pos)) != std::string_view::npos) {
+            ++count;
+            pos += needle.size();
+        }
+        return count;
+    };
+    assert(occurrences(response.body, "\"reset_id\":\"p-1.decoder:2\"") == 2);
+    assert(occurrences(response.body, "\"reset_id\":\"p-1.exact:7\"") == 1);
+    excludes(response.body, "\"reset_id\":null");
+    assert(response.body == respond({"GET", "/v1/snapshot?sections=video,exact_sync"}, snap).body);
+
+    // Canonical identifiers are exactly 1..128 ASCII [A-Za-z0-9_.:-].
+    videoMetrics.at(0).resetId = "AZaz09_.:-";
+    videoMetrics.at(1).resetId = std::string(128, 'X');
+    snap.sections.at(3).metrics.at(0).resetId = "0";
+    const auto boundary = respond({"GET", "/v1/snapshot?sections=video,exact_sync"}, snap);
+    ok(boundary);
+    contains(boundary.body, "\"reset_id\":\"AZaz09_.:-\"");
+    contains(boundary.body, "\"reset_id\":\"" + std::string(128, 'X') + "\"");
+    contains(boundary.body, "\"reset_id\":\"0\"");
+    excludes(boundary.body, "\"reset_id\":null");
+
+    // Reject slash-delimited pre-fix Agent A IDs and path/credential strings;
+    // never sanitize them into potentially colliding reset identities.
+    videoMetrics.at(0).resetId = "p-1/decoder:2";
+    videoMetrics.at(1).resetId = "C:\\private\\config";
+    snap.sections.at(3).metrics.at(0).resetId = "rtsp://user:password@host/exact:7";
+    const auto rejected = respond({"GET", "/v1/snapshot?sections=video,exact_sync"}, snap);
+    ok(rejected);
+    assert(occurrences(rejected.body, "\"reset_id\":null") == 3);
+    excludes(rejected.body, "p-1/decoder");
+    excludes(rejected.body, "private");
+    excludes(rejected.body, "password");
+
+    videoMetrics.at(0).resetId = std::string(129, 'X');
+    videoMetrics.at(1).resetId.clear();
+    snap.sections.at(3).metrics.at(0).resetId = "p-1\nexact:7";
+    const auto invalid = respond({"GET", "/v1/snapshot?sections=video,exact_sync"}, snap);
+    ok(invalid);
+    assert(occurrences(invalid.body, "\"reset_id\":null") == 3);
+}
+
 void verify() {
+    verify_reset_id_contract();
     auto live = fixture();
     auto snapshot = respond({"GET", "/v1/snapshot"}, live);
     ok(snapshot);
@@ -323,13 +398,16 @@ void verify() {
     for (auto path : {"/healthz", "/v1/capabilities", "/v1/status", "/v1/snapshot", "/openapi.json"}) contains(openapi.body, path);
     contains(openapi.body, "\"UInt64String\"");
     contains(openapi.body, "\"Metric\"");
+    contains(openapi.body, "\"CanonicalResetId\"");
+    contains(openapi.body, "^[A-Za-z0-9_.:-]{1,128}$");
+    contains(openapi.body, "\"reset_id\": {\"$ref\": \"#/components/schemas/CanonicalResetId\"}");
     contains(openapi.body, "\"Provenance\"");
     contains(openapi.body, "\"400\"");
     contains(openapi.body, "\"405\"");
     contains(openapi.body, "\"413\"");
     contains(openapi.body, "\"503\"");
 
-    std::cout << "diagnostic_api_codec_tests: PASS (routes, statuses, uint64, FrameKey, null, NaN, UTF-8, redaction, max body, OpenAPI)\n";
+    std::cout << "diagnostic_api_codec_tests: PASS (routes, reset identity, statuses, uint64, FrameKey, null, NaN, UTF-8, redaction, max body, OpenAPI)\n";
 }
 
 void emit(const std::filesystem::path& root) {
