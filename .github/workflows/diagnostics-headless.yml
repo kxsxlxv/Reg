@@ -1,0 +1,62 @@
+name: Diagnostics headless
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diagnostics-headless.yml'
+      - 'src/diagnostics/**'
+      - 'src/media/FrameIdentity.hpp'
+      - 'src/metadata/FrameMetadata.hpp'
+      - 'tools/diagnostic_scenarios/**'
+      - 'tests/diagnostic_statistics_tests.cpp'
+      - 'tests/exact_sync_diagnostics_tests.cpp'
+      - 'tests/diagnostic_fixture_bridge.cpp'
+      - 'tests/fixtures/diagnostics/**'
+      - 'CMakeLists.txt'
+  push:
+    branches:
+      - 'feat/**'
+      - 'test/**'
+    paths:
+      - '.github/workflows/diagnostics-headless.yml'
+      - 'src/diagnostics/**'
+      - 'src/media/FrameIdentity.hpp'
+      - 'src/metadata/FrameMetadata.hpp'
+      - 'tools/diagnostic_scenarios/**'
+      - 'tests/diagnostic_statistics_tests.cpp'
+      - 'tests/exact_sync_diagnostics_tests.cpp'
+      - 'tests/diagnostic_fixture_bridge.cpp'
+      - 'tests/fixtures/diagnostics/**'
+      - 'CMakeLists.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  pure-diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Reg sources without media submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Run Python fixture generator and oracle unit tests
+        run: python3 -m unittest discover -s tools/diagnostic_scenarios -p 'test_lab.py' -v
+
+      - name: Build headless C++ test programs
+        run: |
+          mkdir -p build-headless
+          flags='-std=c++23 -O2 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -pthread -Isrc'
+          g++ $flags tests/diagnostic_statistics_tests.cpp -o build-headless/reg_diag_stats
+          g++ $flags tests/exact_sync_diagnostics_tests.cpp -o build-headless/reg_diag_sync
+          g++ $flags tests/diagnostic_fixture_bridge.cpp -o build-headless/reg_diag_bridge
+
+      - name: Execute C++ statistical and Exact Sync regressions
+        run: |
+          ./build-headless/reg_diag_stats
+          ./build-headless/reg_diag_sync
+
+      - name: Verify B fixture oracle through A and C C++ implementations
+        run: python3 -m tools.diagnostic_scenarios.test_cpp_integration ./build-headless/reg_diag_bridge
