@@ -730,4 +730,15 @@ if(REG_BUILD_TESTS)
     set_tests_properties(diagnostic_scenarios_python diagnostic_fixture_bridge
         PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 90)
     add_test(NAME diagnostic_statistics COMMAND reg_diagnostic_statistics_tests)
+
+    # Minimal API v1 DTO boundary contract, no network/GPU/RTSP dependencies.
+    add_executable(reg_diagnostic_api_contract_tests tests/diagnostic_api_contract_tests.cpp)
+    target_link_libraries(reg_diagnostic_api_contract_tests PRIVATE reg_diagnostics_core)
+    if(MSVC)
+        target_compile_options(reg_diagnostic_api_contract_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_diagnostic_api_contract_tests
+            PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME diagnostic_api_contract COMMAND reg_diagnostic_api_contract_tests)
 endif()
