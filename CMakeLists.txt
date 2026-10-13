@@ -707,5 +707,27 @@ if(REG_BUILD_TESTS)
     else()
         target_compile_options(reg_diagnostic_statistics_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -UNDEBUG)
     endif()
+
+    # Deterministic offline cross-module integration: B fixtures -> A Stats + C Exact Sync.
+    # CTest invokes Python from the repository root; no live RTSP, Jetson, GPU, or display.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+    add_executable(reg_diagnostic_fixture_bridge tests/diagnostic_fixture_bridge.cpp)
+    target_link_libraries(reg_diagnostic_fixture_bridge PRIVATE reg_diagnostics_core)
+    if(MSVC)
+        target_compile_options(reg_diagnostic_fixture_bridge PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_diagnostic_fixture_bridge
+            PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+
+    add_test(NAME diagnostic_scenarios_python
+        COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+            -s tools/diagnostic_scenarios -p test_lab.py -q)
+    add_test(NAME diagnostic_fixture_bridge
+        COMMAND "${Python3_EXECUTABLE}" -m tools.diagnostic_scenarios.test_cpp_integration
+            "$<TARGET_FILE:reg_diagnostic_fixture_bridge>")
+    set_tests_properties(diagnostic_scenarios_python diagnostic_fixture_bridge
+        PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 90)
     add_test(NAME diagnostic_statistics COMMAND reg_diagnostic_statistics_tests)
 endif()
