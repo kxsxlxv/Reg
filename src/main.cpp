@@ -805,6 +805,8 @@ int runApplication(
         bool previousCvSignalPresent{false};
         auto nextTelemetryRenderAt =
             std::chrono::steady_clock::now();
+        auto nextDiagnosticCountersAt =
+            std::chrono::steady_clock::now();
         auto nextNoSignalRenderAt =
             std::chrono::steady_clock::now();
 
@@ -1389,8 +1391,16 @@ int runApplication(
                     telemetryWindow &&
                     telemetryWindow->available() &&
                     telemetryRenderer;
-                if ((telemetryWindowReady || diagnosticRuntime) &&
-                    telemetryNow >= nextTelemetryRenderAt) {
+                const bool renderTelemetryNow =
+                    telemetryWindowReady &&
+                    telemetryNow >= nextTelemetryRenderAt;
+                // Without a visible Telemetry window, sample the existing
+                // counters at 4 Hz rather than doing the expensive observer
+                // snapshot at the 60 Hz telemetry render cadence.
+                const bool sampleApiNow =
+                    diagnosticRuntime &&
+                    telemetryNow >= nextDiagnosticCountersAt;
+                if (renderTelemetryNow || sampleApiNow) {
                     reg::metadata::MetadataReceiverStats
                         receiverStats{};
 
@@ -1477,7 +1487,7 @@ int runApplication(
                         },
                         telemetryNow);
 
-                    if (telemetryWindowReady) {
+                    if (renderTelemetryNow) {
                         const auto telemetrySnapshot =
                             telemetryModel.snapshot();
                         try {
@@ -1497,9 +1507,14 @@ int runApplication(
                         }
                     }
 
-                    nextTelemetryRenderAt =
-                        telemetryNow +
-                        kTelemetryRenderInterval;
+                    if (renderTelemetryNow) {
+                        nextTelemetryRenderAt =
+                            telemetryNow + kTelemetryRenderInterval;
+                    }
+                    if (sampleApiNow) {
+                        nextDiagnosticCountersAt =
+                            telemetryNow + std::chrono::milliseconds{250};
+                    }
                 }
 
                 if (!didWork) {
