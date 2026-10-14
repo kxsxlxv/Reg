@@ -67,6 +67,15 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
             options.netImguiPort = static_cast<std::uint16_t>(port);
         } else if (arg == "--disable-netimgui") {
             options.netImguiEnabled = false;
+        } else if (arg == "--enable-diagnostic-api") {
+            options.diagnosticApiEnabled = true;
+        } else if (arg == "--diagnostic-api-port") {
+            const auto port = parseInteger<unsigned>(
+                requireValue(i, argc, argv, "--diagnostic-api-port"), "--diagnostic-api-port");
+            if (port == 0 || port > 65535U) {
+                throw std::runtime_error("--diagnostic-api-port must be in [1,65535]");
+            }
+            options.diagnosticApiPort = static_cast<std::uint16_t>(port);
         } else if (arg == "--require-frame-identity") {
             options.requireFrameIdentity = true;
         } else if (arg == "--identity-probe-frames") {
@@ -183,6 +192,8 @@ void printUsage(const char* executableName) {
         << "  --telemetry-display N    Telemetry monitor, 0=automatic (Windows default 1)\n"
         << "  --netimgui-port N        NetImgui TCP port (default: 8888)\n"
         << "  --disable-netimgui       Do not start embedded NetImgui listener\n"
+        << "  --enable-diagnostic-api  Enable read-only HTTP at 127.0.0.1 (default: disabled)\n"
+        << "  --diagnostic-api-port N  Diagnostic loopback port (default: 8765)\n"
         << "  --require-frame-identity Fail if a decoded frame lacks/duplicates/regresses FrameIdentity\n"
         << "  --identity-probe-frames N Validate N decoded frames then exit (implies --require-frame-identity)\n"
         << "  --metadata-bind ADDR     UDP metadata bind IPv4 address (default: 0.0.0.0)\n"
