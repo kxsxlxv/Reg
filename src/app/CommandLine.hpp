@@ -17,6 +17,9 @@ struct CommandLineOptions {
     int telemetryDisplay{0};
     std::uint16_t netImguiPort{8888};
     bool netImguiEnabled{true};
+    // Read-only Diagnostic API listener is opt-in and loopback-only.
+    bool diagnosticApiEnabled{false};
+    std::uint16_t diagnosticApiPort{8765};
     bool requireFrameIdentity{false};
     std::uint64_t identityProbeFrames{0};
 
