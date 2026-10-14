@@ -33,6 +33,7 @@ Current components in active development branches include a GUI Launcher, multi-
 - [Telemetry analytics responsibility and context-budget model](docs/TELEMETRY_ANALYTICS_RESPONSIBILITIES.md)
 - [Ranked offline diagnostics implementation plan](docs/DIAGNOSTICS_OFFLINE_IMPLEMENTATION_PLAN.md)
 - [Parallel agent handoff index and branch coordination](docs/handoffs/README.md)
+- [Phase 2 Diagnostic API v1 contract and parallel-agent handoffs](docs/handoffs/PHASE2_README.md)
 - [Mandatory contributor and agent observability policy](AGENTS.md)
 - [RTSP restart and recovery test matrix](docs/RESTART_RECOVERY_VALIDATION.md)
 - [H.264 source FrameIdentity specification](docs/FRAME_IDENTITY_SEI.md)

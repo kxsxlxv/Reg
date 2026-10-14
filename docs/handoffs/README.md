@@ -1,5 +1,8 @@
 # Reg Diagnostics — Parallel Agent Coordination
 
+> **Phase 2 (current):** [Telemetry Adapter + Diagnostic API v1 parallel handoffs](PHASE2_README.md). The remaining text below documents **Phase 1 (completed via PRs #35, #36, #37, #38)** and is retained for historical context.
+
+
 **Status:** WORK ALLOCATION / HANDOFF; no implementation is implied.
 **Last checked:** 2026-10-12.
 **Repository:** kxsxlxv/Reg
