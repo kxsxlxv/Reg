@@ -169,6 +169,23 @@ endforeach()
 
 add_custom_target(reg_shaders DEPENDS ${REG_SHADER_OUTPUTS})
 
+find_package(Threads REQUIRED)
+add_library(reg_diagnostic_api_v1 STATIC
+    src/diagnostics/api/codec/DiagnosticJsonApi.cpp
+    src/diagnostics/api/transport/LoopbackHttpServer.cpp
+    src/diagnostics/api/runtime/DiagnosticRuntime.cpp
+)
+target_include_directories(reg_diagnostic_api_v1 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(reg_diagnostic_api_v1 PUBLIC Threads::Threads)
+if(WIN32)
+    target_link_libraries(reg_diagnostic_api_v1 PUBLIC ws2_32)
+endif()
+if(MSVC)
+    target_compile_options(reg_diagnostic_api_v1 PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(reg_diagnostic_api_v1 PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
+
 add_executable(reg_probe
     src/main.cpp
     src/diagnostics/FrameTimingLogger.cpp
@@ -218,6 +235,7 @@ target_link_libraries(reg_probe PRIVATE
     FFmpeg::avutil
     reg_imgui
     reg_implot
+    reg_diagnostic_api_v1
 )
 
 if(WIN32)
@@ -741,4 +759,26 @@ if(REG_BUILD_TESTS)
             PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
     endif()
     add_test(NAME diagnostic_api_contract COMMAND reg_diagnostic_api_contract_tests)
+endif()
+
+if(REG_BUILD_TESTS)
+    add_executable(reg_diag_adapter_v1_tests tests/diagnostic_telemetry_adapter_tests.cpp)
+    target_link_libraries(reg_diag_adapter_v1_tests PRIVATE reg_diagnostic_api_v1)
+    add_test(NAME diagnostic_telemetry_adapter_v1 COMMAND reg_diag_adapter_v1_tests)
+
+    add_executable(reg_diag_codec_v1_tests tests/diagnostic_api_codec_tests.cpp)
+    target_link_libraries(reg_diag_codec_v1_tests PRIVATE reg_diagnostic_api_v1)
+    add_test(NAME diagnostic_api_codec_v1 COMMAND reg_diag_codec_v1_tests)
+
+    add_executable(reg_diag_http_v1_tests tests/diagnostic_http_transport_tests.cpp)
+    target_link_libraries(reg_diag_http_v1_tests PRIVATE reg_diagnostic_api_v1)
+    add_test(NAME diagnostic_http_transport_v1 COMMAND reg_diag_http_v1_tests)
+    set_tests_properties(diagnostic_http_transport_v1 PROPERTIES TIMEOUT 30)
+
+    add_executable(reg_diag_runtime_v1_tests
+        tests/diagnostic_runtime_v1_tests.cpp
+        src/telemetry/TelemetryModel.cpp)
+    target_link_libraries(reg_diag_runtime_v1_tests PRIVATE reg_diagnostic_api_v1)
+    add_test(NAME diagnostic_runtime_v1 COMMAND reg_diag_runtime_v1_tests)
+    set_tests_properties(diagnostic_runtime_v1 PROPERTIES TIMEOUT 20)
 endif()
