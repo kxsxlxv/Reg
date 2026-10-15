@@ -1,6 +1,7 @@
 #include "app/CommandLine.hpp"
 #include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "diagnostics/FrameTimingLogger.hpp"
+#include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
 #include "media/RtspDecoder.hpp"
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
@@ -272,6 +273,29 @@ int runApplication(
         telemetryModel.log(
             reg::telemetry::Severity::Info,
             "Application started");
+
+        // This service is opt-in and never reads the Vulkan/decoder/CV
+        // hot path. Its own sampler copies only previously published Reg
+        // counters, while the HTTP workers read an immutable cached DTO.
+        std::unique_ptr<reg::diagnostics::api::runtime::DiagnosticRuntime>
+            diagnosticRuntime;
+        if (options.diagnosticApiEnabled) {
+            try {
+                diagnosticRuntime = std::make_unique<
+                    reg::diagnostics::api::runtime::DiagnosticRuntime>(
+                        telemetryModel, options.diagnosticApiPort);
+                diagnosticRuntime->start();
+                std::cout << "[diagnostic-api] listening on 127.0.0.1:"
+                          << diagnosticRuntime->boundPort() << '\n';
+            } catch (const std::exception& error) {
+                std::cerr << "[diagnostic-api] disabled after startup error: "
+                          << error.what() << '\n';
+                telemetryModel.log(
+                    reg::telemetry::Severity::Warning,
+                    "Diagnostic API listener unavailable");
+                diagnosticRuntime.reset();
+            }
+        }
 
         reg::metadata::TrackHistory trackHistory(
             std::chrono::seconds{5},
@@ -742,6 +766,9 @@ int runApplication(
         }
 
         const auto stopAndJoin = [&] {
+            if (diagnosticRuntime) {
+                diagnosticRuntime->stop();
+            }
             shutdownRequested.store(
                 true,
                 std::memory_order_release);
@@ -777,6 +804,8 @@ int runApplication(
         bool cvSignalStateInitialized{false};
         bool previousCvSignalPresent{false};
         auto nextTelemetryRenderAt =
+            std::chrono::steady_clock::now();
+        auto nextDiagnosticCountersAt =
             std::chrono::steady_clock::now();
         auto nextNoSignalRenderAt =
             std::chrono::steady_clock::now();
@@ -1354,11 +1383,24 @@ int runApplication(
                 const auto telemetryNow =
                     std::chrono::steady_clock::now();
 
-                if (options.telemetryEnabled &&
+                // Continue publishing source-owned telemetry when the
+                // optional read-only API is on, even if the Telemetry
+                // window has been disabled or its surface is unavailable.
+                const bool telemetryWindowReady =
+                    options.telemetryEnabled &&
                     telemetryWindow &&
                     telemetryWindow->available() &&
-                    telemetryRenderer &&
-                    telemetryNow >= nextTelemetryRenderAt) {
+                    telemetryRenderer;
+                const bool renderTelemetryNow =
+                    telemetryWindowReady &&
+                    telemetryNow >= nextTelemetryRenderAt;
+                // Without a visible Telemetry window, sample the existing
+                // counters at 4 Hz rather than doing the expensive observer
+                // snapshot at the 60 Hz telemetry render cadence.
+                const bool sampleApiNow =
+                    diagnosticRuntime &&
+                    telemetryNow >= nextDiagnosticCountersAt;
+                if (renderTelemetryNow || sampleApiNow) {
                     reg::metadata::MetadataReceiverStats
                         receiverStats{};
 
@@ -1445,28 +1487,34 @@ int runApplication(
                         },
                         telemetryNow);
 
-                    const auto telemetrySnapshot =
-                        telemetryModel.snapshot();
+                    if (renderTelemetryNow) {
+                        const auto telemetrySnapshot =
+                            telemetryModel.snapshot();
+                        try {
+                            if (telemetryRenderer->render(
+                                    telemetrySnapshot,
+                                    telemetryWindow->swapchain())) {
+                                didWork = true;
+                            }
+                        } catch (const reg::vulkan::SurfaceLostError& error) {
+                            telemetrySurfaceRecoveryPending = true;
+                            nextTelemetrySurfaceRecovery = loopNow;
 
-                    try {
-                        if (telemetryRenderer->render(
-                                telemetrySnapshot,
-                                telemetryWindow->swapchain())) {
-                            didWork = true;
+                            telemetryModel.log(
+                                reg::telemetry::Severity::Warning,
+                                std::string("Telemetry surface lost: ") +
+                                    error.what());
                         }
-                    } catch (const reg::vulkan::SurfaceLostError& error) {
-                        telemetrySurfaceRecoveryPending = true;
-                        nextTelemetrySurfaceRecovery = loopNow;
-
-                        telemetryModel.log(
-                            reg::telemetry::Severity::Warning,
-                            std::string("Telemetry surface lost: ") +
-                                error.what());
                     }
 
-                    nextTelemetryRenderAt =
-                        telemetryNow +
-                        kTelemetryRenderInterval;
+                    if (renderTelemetryNow) {
+                        nextTelemetryRenderAt =
+                            telemetryNow + kTelemetryRenderInterval;
+                    }
+                    if (sampleApiNow) {
+                        nextDiagnosticCountersAt =
+                            telemetryNow + std::chrono::milliseconds{250};
+                    }
                 }
 
                 if (!didWork) {

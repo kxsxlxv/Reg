@@ -12,6 +12,10 @@ on:
       - 'tests/exact_sync_diagnostics_tests.cpp'
       - 'tests/diagnostic_fixture_bridge.cpp'
       - 'tests/diagnostic_api_contract_tests.cpp'
+      - 'tests/diagnostic_runtime_v1_tests.cpp'
+      - 'tests/diagnostic_telemetry_adapter_tests.cpp'
+      - 'tests/diagnostic_api_codec_tests.cpp'
+      - 'tests/diagnostic_http_transport_tests.cpp'
       - 'tests/fixtures/diagnostics/**'
       - 'CMakeLists.txt'
   push:
@@ -63,3 +67,23 @@ jobs:
 
       - name: Verify B fixture oracle through A and C C++ implementations
         run: python3 -m tools.diagnostic_scenarios.test_cpp_integration ./build-headless/reg_diag_bridge
+
+
+      - name: Compile Phase-2 Reg Diagnostic API without FFmpeg/Vulkan
+        run: |
+          flags='-std=c++23 -O2 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -pthread -Isrc'
+          g++ $flags tests/diagnostic_telemetry_adapter_tests.cpp -o build-headless/reg_diag_adapter
+          g++ $flags src/diagnostics/api/codec/DiagnosticJsonApi.cpp tests/diagnostic_api_codec_tests.cpp -o build-headless/reg_diag_codec
+          g++ $flags src/diagnostics/api/transport/LoopbackHttpServer.cpp tests/diagnostic_http_transport_tests.cpp -o build-headless/reg_diag_http
+          g++ $flags src/telemetry/TelemetryModel.cpp \
+            src/diagnostics/api/codec/DiagnosticJsonApi.cpp \
+            src/diagnostics/api/transport/LoopbackHttpServer.cpp \
+            src/diagnostics/api/runtime/DiagnosticRuntime.cpp \
+            tests/diagnostic_runtime_v1_tests.cpp -o build-headless/reg_diag_runtime
+
+      - name: Test standalone and full real-counter HTTP pipeline
+        run: |
+          ./build-headless/reg_diag_adapter
+          ./build-headless/reg_diag_codec
+          ./build-headless/reg_diag_http
+          ./build-headless/reg_diag_runtime
