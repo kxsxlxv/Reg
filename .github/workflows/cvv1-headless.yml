@@ -1,0 +1,42 @@
+name: CVV1 headless tests
+on:
+  push:
+    paths:
+      - "src/cvv1/**"
+      - "src/platform/UdpSocket.*"
+      - "src/video/VideoTransform.*"
+      - "src/metadata/Protocol.*"
+      - "tests/cvv1_tests.cpp"
+      - ".github/workflows/cvv1-headless.yml"
+  pull_request:
+    paths:
+      - "src/cvv1/**"
+      - "src/platform/UdpSocket.*"
+      - "src/video/VideoTransform.*"
+      - "src/metadata/Protocol.*"
+      - "tests/cvv1_tests.cpp"
+      - ".github/workflows/cvv1-headless.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cvv1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Install header-only JSON dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nlohmann-json3-dev
+      - name: Compile CVV1 independently of Vulkan/FFmpeg/RTSP
+        run: |
+          c++ -std=c++23 -O2 -Wall -Wextra -Wpedantic -pthread -Isrc \
+            tests/cvv1_tests.cpp \
+            src/cvv1/Cvv1.cpp src/cvv1/Receiver.cpp \
+            src/cvv1/OverlayBuilder.cpp src/platform/UdpSocket.cpp \
+            src/metadata/Protocol.cpp src/video/VideoTransform.cpp \
+            -o /tmp/reg-cvv1-tests
+      - name: Offline parser, reassembly and renderer tests
+        run: /tmp/reg-cvv1-tests

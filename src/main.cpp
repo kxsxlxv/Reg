@@ -1,4 +1,6 @@
 #include "app/CommandLine.hpp"
+#include "cvv1/OverlayBuilder.hpp"
+#include "cvv1/Receiver.hpp"
 #include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "diagnostics/FrameTimingLogger.hpp"
 #include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
@@ -33,6 +35,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -251,6 +254,14 @@ int runApplication(
             std::chrono::milliseconds{options.overlayDelayMs},
             64);
         reg::metadata::MetadataStore metadataStore(512);
+        reg::cvv1::Store cvv1Store(512);
+        reg::cvv1::OverlayBuilder cvv1Builder;
+        const reg::cvv1::Layers cvv1Layers{
+            .observations = options.cvv1Observations,
+            .candidates = options.cvv1Candidates,
+            .selectedTarget = options.cvv1SelectedTarget,
+            .status = options.cvv1Status,
+        };
         reg::video::FrameSynchronizer synchronizer(
             overlayFrames,
             metadataStore);
@@ -353,6 +364,16 @@ int runApplication(
                     });
         }
 
+        std::unique_ptr<reg::cvv1::Receiver> cvv1Receiver;
+        if (options.overlayEnabled && options.cvv1Enabled) {
+            cvv1Receiver = std::make_unique<reg::cvv1::Receiver>(
+                cvv1Store, reg::cvv1::ReceiverConfig{
+                    .bindAddress = options.metadataBindAddress,
+                    .port = options.cvv1Port,
+                    .timeoutMs = 100,
+                });
+        }
+
         std::atomic_uint64_t decodedFrames{0};
         std::atomic_uint64_t identityPresentFrames{0};
         std::atomic_uint64_t identityMissingFrames{0};
@@ -404,6 +425,7 @@ int runApplication(
                                     rawMailbox.clear();
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    cvv1Store.clear();
                                     exactSyncDiagnostics.clearPending();
                                     lastDecodedFrameNs.store(
                                         0,
@@ -765,6 +787,19 @@ int runApplication(
             });
         }
 
+        std::jthread cvv1Thread;
+        if (cvv1Receiver) {
+            cvv1Thread = std::jthread([&] {
+                try {
+                    cvv1Receiver->run();
+                } catch (const std::exception& error) {
+                    telemetryModel.log(
+                        reg::telemetry::Severity::Warning,
+                        std::string("CVV1 UDP receiver unavailable: ") + error.what());
+                }
+            });
+        }
+
         const auto stopAndJoin = [&] {
             if (diagnosticRuntime) {
                 diagnosticRuntime->stop();
@@ -779,6 +814,7 @@ int runApplication(
             if (metadataReceiver) {
                 metadataReceiver->requestStop();
             }
+            if (cvv1Receiver) cvv1Receiver->stop();
 
             if (decodeThread.joinable()) {
                 decodeThread.join();
@@ -786,6 +822,7 @@ int runApplication(
             if (metadataThread.joinable()) {
                 metadataThread.join();
             }
+            if (cvv1Thread.joinable()) cvv1Thread.join();
 
             if (blackboxRecorder) {
                 blackboxRecorder->stop();
@@ -978,6 +1015,7 @@ int runApplication(
                     rawMailbox.clear();
                     overlayFrames.clear();
                     metadataStore.clear();
+                    cvv1Store.clear();
                     exactSyncDiagnostics.clearPending();
                     lastAcceptedMetadataNs.store(
                         0,
@@ -1053,6 +1091,7 @@ int runApplication(
                         rawMailbox.clear();
                         overlayFrames.clear();
                         metadataStore.clear();
+                        cvv1Store.clear();
                         exactSyncDiagnostics.clearPending();
                         pendingOverlayFrame.reset();
                         lastRawPresented.reset();
@@ -1075,7 +1114,7 @@ int runApplication(
                         telemetryModel.log(
                             reg::telemetry::Severity::Info,
                             "CVM1 / Jetson signal restored");
-                    } else if (signalPresent) {
+                    } else if (signalPresent && !options.cvv1Enabled) {
                         overlayFrames.clear();
                         metadataStore.clear();
                         exactSyncDiagnostics.clearPending();
@@ -1116,7 +1155,9 @@ int runApplication(
                             overlaySceneRenderer) {
                             try {
                                 overlaySceneRenderer->prepareNoSignal(
-                                    overlayWindow->swapchain());
+                                    overlayWindow->swapchain(),
+                                    options.cvv1Enabled
+                                        ? "CVV1 STALE: video unavailable" : nullptr);
                                 if (overlayRenderer->renderBlank(
                                         overlayWindow->swapchain(),
                                         overlaySceneRenderer.get())) {
@@ -1221,7 +1262,7 @@ int runApplication(
                         overlayWindow->available() &&
                         overlayRenderer &&
                         overlaySceneRenderer) {
-                        if (!cvSignalPresent) {
+                        if (!(options.cvv1Enabled ? signalPresent : cvSignalPresent)) {
                             if (loopNow >= nextNoSignalRenderAt) {
                                 try {
                                     overlaySceneRenderer->prepareNoSignal(
@@ -1249,8 +1290,11 @@ int runApplication(
                                 // Missing metadata is an intentional drop, not a reason
                                 // to stall all later exact pairs.
                                 for (int attempt = 0; attempt < 8; ++attempt) {
-                                    auto decision = synchronizer.next(
-                                        std::chrono::steady_clock::now());
+                                    auto decision = options.cvv1Enabled
+                                        ? synchronizer.nextAllowMissingMetadata(
+                                            std::chrono::steady_clock::now())
+                                        : synchronizer.next(
+                                            std::chrono::steady_clock::now());
 
                                     if (decision.type ==
                                         reg::video::SyncDecisionType::None) {
@@ -1276,7 +1320,7 @@ int runApplication(
                                             reg::video::SyncDecisionType::Present &&
                                         decision.frame) {
                                         const auto& pair = *decision.frame;
-                                        if (!exactSyncDiagnostics.exactPair(
+                                        if (pair.metadata && !exactSyncDiagnostics.exactPair(
                                                 pair.buffered.key,
                                                 *pair.metadata,
                                                 pair.buffered.decodedAt,
@@ -1288,12 +1332,16 @@ int runApplication(
                                             didWork = true;
                                             continue;
                                         }
-                                        trackHistory.update(
-                                            *decision.frame->metadata,
-                                            std::chrono::steady_clock::now());
-
-                                        telemetryModel.setTargets(
-                                            *decision.frame->metadata);
+                                        if (pair.metadata) {
+                                            trackHistory.update(
+                                                *pair.metadata,
+                                                std::chrono::steady_clock::now());
+                                            telemetryModel.setTargets(*pair.metadata);
+                                        } else {
+                                            // CVV1-only video must never leave an old
+                                            // CVM1-selected rectangle in the HUD.
+                                            telemetryModel.clearTargets();
+                                        }
 
                                         pendingOverlayFrame =
                                             std::move(*decision.frame);
@@ -1317,11 +1365,40 @@ int runApplication(
                                     extent.width,
                                     extent.height);
 
-                                const reg::render::OverlayScene scene =
-                                    overlayBuilder.build(
-                                        *synchronized.metadata,
-                                        trackHistory,
-                                        transform);
+                                reg::render::OverlayScene scene;
+                                if (options.cvv1Enabled) {
+                                    auto snapshot = cvv1Store.find(synchronized.buffered.key);
+                                    if (snapshot &&
+                                        snapshot->sourceWidth ==
+                                            static_cast<std::uint32_t>(synchronized.buffered.video->width()) &&
+                                        snapshot->sourceHeight ==
+                                            static_cast<std::uint32_t>(synchronized.buffered.video->height())) {
+                                        const bool stale =
+                                            loopNow - snapshot->receivedAt > kCvSignalStaleAfter;
+                                        scene = cvv1Builder.build(
+                                            *snapshot, transform, cvv1Layers, stale);
+                                    } else {
+                                        if (synchronized.metadata) {
+                                            scene = overlayBuilder.build(
+                                                *synchronized.metadata, trackHistory, transform);
+                                        }
+                                        const auto lastCvv1 = cvv1Receiver
+                                            ? cvv1Receiver->lastValidReceiveNs() : 0;
+                                        const bool stale =
+                                            lastCvv1 == 0 ||
+                                            signalAgeMs(lastCvv1, steadyNowNs()) >
+                                                static_cast<std::uint64_t>(kCvSignalStaleAfter.count());
+                                        auto status = cvv1Builder.noSnapshot(
+                                            transform, cvv1Layers, stale);
+                                        scene.primitives.insert(
+                                            scene.primitives.end(),
+                                            std::make_move_iterator(status.primitives.begin()),
+                                            std::make_move_iterator(status.primitives.end()));
+                                    }
+                                } else {
+                                    scene = overlayBuilder.build(
+                                        *synchronized.metadata, trackHistory, transform);
+                                }
 
                                 overlaySceneRenderer->prepare(
                                     scene,
@@ -1342,6 +1419,7 @@ int runApplication(
                                     pendingOverlayFrame.reset();
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    cvv1Store.clear();
                                     exactSyncDiagnostics.clearPending();
                                     trackHistory.clear();
                                     telemetryModel.clearTargets();
@@ -1368,10 +1446,17 @@ int runApplication(
                                             << " frame="
                                             << synchronized.buffered.key.frameId
                                             << " metadata_sequence="
-                                            << synchronized.metadata->sequence
+                                            << (synchronized.metadata
+                                                ? synchronized.metadata->sequence : 0U)
                                             << '\n';
                                     }
 
+                                    if (options.cvv1Enabled) {
+                                        // Drop only AFTER successful presentation.
+                                        // A Vulkan retry must not lose the authoritative
+                                        // CVV1 null-target snapshot and revive CVM1.
+                                        cvv1Store.take(synchronized.buffered.key);
+                                    }
                                     pendingOverlayFrame.reset();
                                     didWork = true;
                                 }
@@ -1600,6 +1685,13 @@ int runApplication(
                     << blackboxRecorder->lastError()
                     << '\n';
             }
+        }
+
+        if (options.cvv1Enabled && cvv1Receiver) {
+            const auto stats = cvv1Receiver->stats();
+            std::cout << "[cvv1] datagrams=" << stats.datagrams
+                      << " invalid=" << stats.invalid
+                      << " snapshots=" << stats.completed << '\n';
         }
 
         if (options.overlayEnabled) {

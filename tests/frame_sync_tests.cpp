@@ -222,6 +222,35 @@ void synchronizerPresentsOnlyExactFrameKey() {
         "unexpected exact pair was presented");
 }
 
+void cvv1OptionalMetadataDoesNotChangeLegacyPolicy() {
+    const auto t0 = std::chrono::steady_clock::time_point{20s};
+    reg::video::OverlayFrameBuffer frames(100ms, 8);
+    reg::metadata::MetadataStore metadata(8);
+    reg::video::FrameSynchronizer synchronizer(frames, metadata);
+
+    // The legacy method must continue dropping a frame without CVM1.
+    frames.push({31, 100}, {}, t0);
+    require(
+        synchronizer.next(t0 + 100ms).type ==
+            reg::video::SyncDecisionType::DropMissingMetadata,
+        "CVM1-only policy changed unexpectedly");
+
+    // Opt-in CVV1 mode can show the frame even before CVM1 exists.
+    frames.push({31, 101}, {}, t0 + 200ms);
+    const auto videoOnly = synchronizer.nextAllowMissingMetadata(t0 + 300ms);
+    require(videoOnly.type == reg::video::SyncDecisionType::Present,
+            "CVV1 video-only playout was dropped");
+    require(videoOnly.frame && !videoOnly.frame->metadata,
+            "CVM1 absence must remain explicit");
+
+    frames.push({31, 102}, {}, t0 + 400ms);
+    metadata.insert(makeMetadata(31, 102, 3));
+    const auto exact = synchronizer.nextAllowMissingMetadata(t0 + 500ms);
+    require(exact.frame && exact.frame->metadata &&
+            exact.frame->buffered.key == exact.frame->metadata->key,
+            "CVV1 opt-in path lost a valid CVM1 fallback pair");
+}
+
 void packetSequenceTrackerHandlesLossReorderAndWrap() {
     reg::metadata::PacketSequenceTracker tracker;
 
@@ -279,6 +308,7 @@ int main() {
         metadataStoreUpgradesExactKeyAndStaysBounded();
         overlayBufferHonorsDeadlineAndCapacity();
         synchronizerPresentsOnlyExactFrameKey();
+        cvv1OptionalMetadataDoesNotChangeLegacyPolicy();
         packetSequenceTrackerHandlesLossReorderAndWrap();
         changingDelayRecomputesBufferedDeadlines();
 

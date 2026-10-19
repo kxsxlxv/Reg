@@ -93,6 +93,23 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
                 throw std::runtime_error("--metadata-port must be <= 65535");
             }
             options.metadataPort = static_cast<std::uint16_t>(port);
+        } else if (arg == "--enable-cvv1") {
+            options.cvv1Enabled = true;
+        } else if (arg == "--cvv1-port") {
+            const auto port = parseInteger<unsigned>(
+                requireValue(i, argc, argv, "--cvv1-port"), "--cvv1-port");
+            if (port == 0 || port > 65535) {
+                throw std::runtime_error("--cvv1-port must be in [1,65535]");
+            }
+            options.cvv1Port = static_cast<std::uint16_t>(port);
+        } else if (arg == "--cvv1-hide-yolo") {
+            options.cvv1Observations = false;
+        } else if (arg == "--cvv1-hide-candidates") {
+            options.cvv1Candidates = false;
+        } else if (arg == "--cvv1-hide-target") {
+            options.cvv1SelectedTarget = false;
+        } else if (arg == "--cvv1-hide-status") {
+            options.cvv1Status = false;
         } else if (arg == "--overlay-delay-ms") {
             options.overlayDelayMs = parseInteger<int>(
                 requireValue(i, argc, argv, "--overlay-delay-ms"), "--overlay-delay-ms");
@@ -150,6 +167,9 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.metadataPort == 0) {
         throw std::runtime_error("--metadata-port must be in [1,65535]");
     }
+    if (options.cvv1Enabled && options.cvv1Port == options.metadataPort) {
+        throw std::runtime_error("CVV1 and CVM1 UDP ports must differ");
+    }
     if (options.overlayDelayMs < 0) {
         throw std::runtime_error("--overlay-delay-ms must be >= 0");
     }
@@ -198,6 +218,12 @@ void printUsage(const char* executableName) {
         << "  --identity-probe-frames N Validate N decoded frames then exit (implies --require-frame-identity)\n"
         << "  --metadata-bind ADDR     UDP metadata bind IPv4 address (default: 0.0.0.0)\n"
         << "  --metadata-port N        UDP metadata port (default: 50010)\n"
+        << "  --enable-cvv1           Enable independent FastVision UDP receiver (default: off)\n"
+        << "  --cvv1-port N           CVV1 UDP receive port (default: 50011)\n"
+        << "  --cvv1-hide-yolo        Hide raw YOLO observations\n"
+        << "  --cvv1-hide-candidates  Hide confirmation candidates\n"
+        << "  --cvv1-hide-target      Hide selected LoRAT target\n"
+        << "  --cvv1-hide-status      Hide algorithm status\n"
         << "  --overlay-delay-ms N     Exact-overlay playout delay (default: 150)\n"
         << "  --disable-overlay        Disable metadata receiver and overlay window\n"
         << "  --record-dir PATH        Rolling MKV directory (default: blackbox)\n"

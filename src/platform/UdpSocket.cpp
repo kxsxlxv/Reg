@@ -180,6 +180,37 @@ std::uint16_t UdpSocket::localPort() const {
     return ntohs(address.sin_port);
 }
 
+std::size_t UdpSocket::receiveFrom(std::span<std::uint8_t> buffer, UdpEndpoint& peer) {
+    if (buffer.empty()) {
+        throw std::invalid_argument("UDP receive buffer must not be empty");
+    }
+    sockaddr_in source{};
+#ifdef _WIN32
+    int size = static_cast<int>(sizeof(source));
+    const int received = recvfrom(
+        static_cast<SOCKET>(handle_), reinterpret_cast<char*>(buffer.data()),
+        static_cast<int>(buffer.size()), 0,
+        reinterpret_cast<sockaddr*>(&source), &size);
+    if (received == SOCKET_ERROR) {
+        const int error = WSAGetLastError();
+        if (error == WSAETIMEDOUT || error == WSAEWOULDBLOCK) return 0;
+        throw socketError("recvfrom(UDP)");
+    }
+#else
+    socklen_t size = sizeof(source);
+    const ssize_t received = recvfrom(
+        static_cast<int>(handle_), buffer.data(), buffer.size(), 0,
+        reinterpret_cast<sockaddr*>(&source), &size);
+    if (received < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return 0;
+        throw socketError("recvfrom(UDP)");
+    }
+#endif
+    if (received <= 0) return 0;
+    peer = {ntohl(source.sin_addr.s_addr), ntohs(source.sin_port)};
+    return static_cast<std::size_t>(received);
+}
+
 std::size_t UdpSocket::receive(std::span<std::uint8_t> buffer) {
     if (buffer.empty()) {
         throw std::invalid_argument("UDP receive buffer must not be empty");
