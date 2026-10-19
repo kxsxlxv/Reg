@@ -9,6 +9,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 
 namespace reg::cvv1 {
