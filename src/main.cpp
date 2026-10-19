@@ -1365,7 +1365,7 @@ int runApplication(
 
                                 reg::render::OverlayScene scene;
                                 if (options.cvv1Enabled) {
-                                    auto snapshot = cvv1Store.take(synchronized.buffered.key);
+                                    auto snapshot = cvv1Store.find(synchronized.buffered.key);
                                     if (snapshot &&
                                         snapshot->sourceWidth ==
                                             static_cast<std::uint32_t>(synchronized.buffered.video->width()) &&
@@ -1449,6 +1449,12 @@ int runApplication(
                                             << '\n';
                                     }
 
+                                    if (options.cvv1Enabled) {
+                                        // Drop only AFTER successful presentation.
+                                        // A Vulkan retry must not lose the authoritative
+                                        // CVV1 null-target snapshot and revive CVM1.
+                                        cvv1Store.take(synchronized.buffered.key);
+                                    }
                                     pendingOverlayFrame.reset();
                                     didWork = true;
                                 }
