@@ -15,7 +15,10 @@ void Receiver::run() {
     while (!stopRequested_.load(std::memory_order_acquire)) {
         platform::UdpEndpoint peer{};
         const std::size_t received = socket.receiveFrom(buffer, peer);
-        if (!received) continue;
+        if (!received) {
+            fragments.prune(Clock::now());
+            continue;
+        }
         datagrams_.fetch_add(1, std::memory_order_relaxed);
         try {
             auto snapshot = fragments.accept(
