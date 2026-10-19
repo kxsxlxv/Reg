@@ -1155,7 +1155,9 @@ int runApplication(
                             overlaySceneRenderer) {
                             try {
                                 overlaySceneRenderer->prepareNoSignal(
-                                    overlayWindow->swapchain());
+                                    overlayWindow->swapchain(),
+                                    options.cvv1Enabled
+                                        ? "CVV1 STALE: video unavailable" : nullptr);
                                 if (overlayRenderer->renderBlank(
                                         overlayWindow->swapchain(),
                                         overlaySceneRenderer.get())) {
