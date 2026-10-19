@@ -742,7 +742,17 @@ struct Ui {
     void drawNetwork() {
         if (card("##network-card", ImVec4(0.124f, 0.143f, 0.197f, 1),
                  Symbols::network, "Сеть и удалённый UI", ImVec4(0.52f, 0.69f, 1, 1))) {
-            integer("Порт UDP метаданных", "##metadata-port", profile.metadataPort);
+            integer("CVM1 UDP", "##metadata-port", profile.metadataPort);
+            ImGui::Checkbox("FastVision CVV1", &profile.cvv1Enabled);
+            if (profile.cvv1Enabled) {
+                integer("CVV1 UDP", "##cvv1-port", profile.cvv1Port);
+                ImGui::Checkbox("YOLO##cvv1-obs", &profile.cvv1Observations);
+                ImGui::SameLine();
+                ImGui::Checkbox("Candidates##cvv1-cand", &profile.cvv1Candidates);
+                ImGui::Checkbox("Target##cvv1-target", &profile.cvv1SelectedTarget);
+                ImGui::SameLine();
+                ImGui::Checkbox("Status##cvv1-status", &profile.cvv1Status);
+            }
             ImGui::Checkbox("Приём NetImgui", &profile.netImguiEnabled);
             ImGui::BeginDisabled(!profile.netImguiEnabled);
             integer("Порт TCP NetImgui", "##netimgui-port", profile.netImguiPort);
