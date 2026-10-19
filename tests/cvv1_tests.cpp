@@ -179,6 +179,8 @@ void testReassembly() {
     check(a.pendingCount()==0 && a.bufferedBytes()==0);
     for(const auto& c:chunks) check(!a.accept(c,peer,t)); // Rejected ID.
     a.clear();check(!a.accept(chunks[0],peer,t));
+    a.prune(t+std::chrono::milliseconds(1100));
+    check(a.pendingCount()==0 && a.bufferedBytes()==0);
     a.accept(chunks[1],peer,t+std::chrono::milliseconds(1100));
     check(a.pendingCount()==1 && a.bufferedBytes()==kChunkBytes);
     a.clear();
