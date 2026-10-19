@@ -96,6 +96,9 @@ public:
                                    platform::UdpEndpoint endpoint,
                                    Clock::time_point now = Clock::now());
     void clear();
+    // Called on UDP receive timeouts too; partial snapshots expire even
+    // when the sender stops transmitting.
+    void prune(Clock::time_point now = Clock::now()) { expire(now); }
     std::size_t pendingCount() const noexcept { return pending_.size(); }
     std::size_t bufferedBytes() const noexcept { return bufferedBytes_; }
 
