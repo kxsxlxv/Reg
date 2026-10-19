@@ -25,6 +25,13 @@ struct CommandLineOptions {
 
     std::string metadataBindAddress{"0.0.0.0"};
     std::uint16_t metadataPort{50010};
+    // CVV1 is strictly optional; disabled means the original CVM1 path is untouched.
+    bool cvv1Enabled{false};
+    std::uint16_t cvv1Port{50011};
+    bool cvv1Observations{true};
+    bool cvv1Candidates{true};
+    bool cvv1SelectedTarget{true};
+    bool cvv1Status{true};
     int overlayDelayMs{150};
     bool overlayEnabled{true};
 
