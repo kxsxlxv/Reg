@@ -26,6 +26,12 @@ struct Profile {
     int netImguiPort{8888};
     std::string metadataBind{"0.0.0.0"};
     int metadataPort{50010};
+    bool cvv1Enabled{false};
+    int cvv1Port{50011};
+    bool cvv1Observations{true};
+    bool cvv1Candidates{true};
+    bool cvv1SelectedTarget{true};
+    bool cvv1Status{true};
     int overlayDelayMs{150};
     int recordSegmentMs{5000};
     int recordRetentionSec{300};
