@@ -88,6 +88,12 @@ json toJson(const Profile& p) {
         {"netimgui_port", p.netImguiPort},
         {"metadata_bind", p.metadataBind},
         {"metadata_port", p.metadataPort},
+        {"cvv1_enabled", p.cvv1Enabled},
+        {"cvv1_port", p.cvv1Port},
+        {"cvv1_observations", p.cvv1Observations},
+        {"cvv1_candidates", p.cvv1Candidates},
+        {"cvv1_selected_target", p.cvv1SelectedTarget},
+        {"cvv1_status", p.cvv1Status},
         {"overlay_delay_ms", p.overlayDelayMs},
         {"record_segment_ms", p.recordSegmentMs},
         {"record_retention_sec", p.recordRetentionSec},
@@ -119,6 +125,12 @@ Profile fromJson(const json& j) {
     p.netImguiPort = j.value("netimgui_port", p.netImguiPort);
     p.metadataBind = j.value("metadata_bind", p.metadataBind);
     p.metadataPort = j.value("metadata_port", p.metadataPort);
+    p.cvv1Enabled = j.value("cvv1_enabled", p.cvv1Enabled);
+    p.cvv1Port = j.value("cvv1_port", p.cvv1Port);
+    p.cvv1Observations = j.value("cvv1_observations", p.cvv1Observations);
+    p.cvv1Candidates = j.value("cvv1_candidates", p.cvv1Candidates);
+    p.cvv1SelectedTarget = j.value("cvv1_selected_target", p.cvv1SelectedTarget);
+    p.cvv1Status = j.value("cvv1_status", p.cvv1Status);
     p.overlayDelayMs = j.value("overlay_delay_ms", p.overlayDelayMs);
     p.recordSegmentMs = j.value("record_segment_ms", p.recordSegmentMs);
     p.recordRetentionSec = j.value("record_retention_sec", p.recordRetentionSec);
@@ -302,6 +314,10 @@ std::string validate(const Profile& p) {
     if (p.metadataPort < 1 || p.metadataPort > 65535 || p.metadataBind.empty()) {
         return "Invalid metadata bind address/port";
     }
+    if (p.cvv1Port < 1 || p.cvv1Port > 65535 ||
+        (p.cvv1Enabled && p.cvv1Port == p.metadataPort)) {
+        return "CVV1 UDP port must be valid and separate from CVM1";
+    }
     if (p.recordSegmentMs <= 0 || p.recordRetentionSec <= 0 ||
         static_cast<std::int64_t>(p.recordRetentionSec) * 1000 < p.recordSegmentMs ||
         p.recordQueueCapacity <= 0) {
@@ -339,6 +355,15 @@ std::vector<std::string> arguments(
         "--reconnect-initial-ms", asText(p.reconnectInitialMs),
         "--reconnect-max-ms", asText(p.reconnectMaxMs)
     };
+    if (p.cvv1Enabled) {
+        result.push_back("--enable-cvv1");
+        result.push_back("--cvv1-port");
+        result.push_back(asText(p.cvv1Port));
+        if (!p.cvv1Observations) result.push_back("--cvv1-hide-yolo");
+        if (!p.cvv1Candidates) result.push_back("--cvv1-hide-candidates");
+        if (!p.cvv1SelectedTarget) result.push_back("--cvv1-hide-target");
+        if (!p.cvv1Status) result.push_back("--cvv1-hide-status");
+    }
     if (!p.netImguiEnabled) result.push_back("--disable-netimgui");
     if (!p.overlayEnabled) result.push_back("--disable-overlay");
     if (!p.telemetryEnabled) result.push_back("--disable-telemetry");
