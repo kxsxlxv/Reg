@@ -24,6 +24,7 @@
 #include <limits>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <stdexcept>
 #include <cstdint>
@@ -263,6 +264,38 @@ struct Ui {
             message = error;
             return;
         }
+        // Query the actual topology immediately before creating Reg windows.
+        // A disconnected monitor or a monitor reserved for Jetson must not
+        // silently become an invisible/incorrectly placed output.
+        const auto active = reg::launcher::launcherDisplays();
+        const auto present = [&](int number) {
+            return std::any_of(active.begin(), active.end(),
+                [number](const reg::launcher::LauncherDisplay& display) {
+                    return display.number == number;
+                });
+        };
+        if (active.empty()) {
+            message = "Не удалось получить список мониторов Windows";
+            return;
+        }
+        const auto safe = std::find_if(active.begin(), active.end(),
+            [&](const reg::launcher::LauncherDisplay& display) {
+                return display.number != profile.reservedJetsonDisplay;
+            });
+        if (safe == active.end()) {
+            message = "Нет доступного монитора Windows: снимите резервирование Jetson";
+            return;
+        }
+        const auto validTarget = [&](int number) {
+            return number == 0 ||
+                (number != profile.reservedJetsonDisplay && present(number));
+        };
+        if (!validTarget(profile.rawDisplay) ||
+            (profile.overlayEnabled && !validTarget(profile.overlayDisplay)) ||
+            (profile.telemetryEnabled && !validTarget(profile.telemetryDisplay))) {
+            message = "Выбранный экран отключён или занят Jetson. Укажите другой монитор.";
+            return;
+        }
         reg::launcher::saveProfile(profileName, profile);
         sessionDirectory = reg::launcher::newSessionDirectory();
         reg::launcher::saveSessionManifest(sessionDirectory, profileName, profile);
@@ -487,20 +520,125 @@ struct Ui {
     }
 
     void displaySelector(const char* id, const char* label,
-                         int& selection, const char* defaultLabel) {
+                         int& selection, const char* defaultLabel,
+                         bool* enabled = nullptr) {
         rowControl(label, 168.0f);
-        const std::string preview = selection == 0
-            ? std::string("Авто (") + defaultLabel + ")"
-            : "Монитор " + std::to_string(selection);
+        const bool visible = enabled == nullptr || *enabled;
+        std::string preview;
+        if (!visible) {
+            preview = "Не выводить";
+        } else if (selection == 0) {
+            preview = std::string("Авто (") + defaultLabel + ")";
+        } else {
+            preview = "Монитор " + std::to_string(selection);
+            if (selection == profile.reservedJetsonDisplay) {
+                preview += " (Jetson)";
+            } else if (std::none_of(availableDisplays.begin(), availableDisplays.end(),
+                [&](const reg::launcher::LauncherDisplay& display) {
+                    return display.number == selection;
+                })) {
+                preview += " (отключён)";
+            }
+        }
         if (ImGui::BeginCombo(id, preview.c_str())) {
-            if (ImGui::Selectable("Автоматически##default", selection == 0))
+            if (enabled && ImGui::Selectable("Не выводить", !visible)) {
+                *enabled = false;
+            }
+            if (ImGui::Selectable("Автоматически##default",
+                                  visible && selection == 0)) {
                 selection = 0;
+                if (enabled) *enabled = true;
+            }
             for (const auto& display : availableDisplays) {
-                const std::string item = "Монитор " + std::to_string(display.number);
-                if (ImGui::Selectable(item.c_str(), selection == display.number))
+                const bool reserved = display.number == profile.reservedJetsonDisplay;
+                const std::string option = "Монитор " + std::to_string(display.number) +
+                    " (" + std::to_string(display.width) + "x" +
+                    std::to_string(display.height) + ")" +
+                    (reserved ? " — Jetson" : "");
+                ImGui::BeginDisabled(reserved);
+                if (ImGui::Selectable(option.c_str(),
+                                      visible && selection == display.number)) {
                     selection = display.number;
+                    if (enabled) *enabled = true;
+                }
+                ImGui::EndDisabled();
+            }
+            if (selection > 0 && std::none_of(availableDisplays.begin(),
+                    availableDisplays.end(),
+                    [&](const reg::launcher::LauncherDisplay& display) {
+                        return display.number == selection;
+                    })) {
+                ImGui::TextDisabled("Монитор %d сейчас не подключён", selection);
             }
             ImGui::EndCombo();
+        }
+    }
+
+    void jetsonDisplaySelector() {
+        rowControl("Монитор Jetson", 168.0f);
+        const std::string preview = profile.reservedJetsonDisplay == 0
+            ? "Не резервировать"
+            : "Монитор " + std::to_string(profile.reservedJetsonDisplay);
+        if (ImGui::BeginCombo("##jetson-display", preview.c_str())) {
+            if (ImGui::Selectable("Нет — все мониторы Windows",
+                                  profile.reservedJetsonDisplay == 0)) {
+                profile.reservedJetsonDisplay = 0;
+            }
+            for (const auto& display : availableDisplays) {
+                const std::string option = "Монитор " + std::to_string(display.number) +
+                    " — переключаю на Jetson";
+                if (ImGui::Selectable(option.c_str(),
+                            profile.reservedJetsonDisplay == display.number)) {
+                    profile.reservedJetsonDisplay = display.number;
+                }
+            }
+            // Allow remembering monitor 4 even when switching its input has
+            // already removed it from the Windows desktop topology.
+            if (std::none_of(availableDisplays.begin(), availableDisplays.end(),
+                    [](const reg::launcher::LauncherDisplay& display) {
+                        return display.number == 4;
+                    })) {
+                if (ImGui::Selectable("Монитор 4 (сейчас не виден Windows)",
+                                      profile.reservedJetsonDisplay == 4)) {
+                    profile.reservedJetsonDisplay = 4;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Исключить монитор из окон Reg, если его видеовход переключён на Jetson.\n"
+                "Физический HDMI/DisplayPort вход Launcher не переключает.");
+        }
+        if (profile.reservedJetsonDisplay != 0) {
+            const int reserved = profile.reservedJetsonDisplay;
+            bool changed = false;
+            for (int* chosen : {&profile.rawDisplay, &profile.overlayDisplay,
+                                &profile.telemetryDisplay}) {
+                if (*chosen == reserved) {
+                    *chosen = 0;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                message = "Экран Jetson исключён. Конфликтующие окна переведены в Авто.";
+            }
+            if (launcherDisplay == reserved || launcherDisplay == 0) {
+                const auto next = std::find_if(
+                    availableDisplays.begin(), availableDisplays.end(),
+                    [&](const reg::launcher::LauncherDisplay& display) {
+                        return display.number != reserved;
+                    });
+                if (next != availableDisplays.end()) {
+                    launcherDisplay = next->number;
+                    try {
+                        writeLauncherDisplay(launcherDisplay);
+                        reg::launcher::moveLauncherToDisplay(window, launcherDisplay);
+                    } catch (const std::exception& error) {
+                        message = error.what();
+                    }
+                }
+            }
         }
     }
 
@@ -512,6 +650,9 @@ struct Ui {
         const std::string label = launcherDisplay == 0
             ? "Системный" : "Монитор " + std::to_string(launcherDisplay);
         if (ImGui::BeginCombo("##launcher-display", label.c_str())) {
+            // The Windows primary monitor may itself be switched to Jetson.
+            // Use an explicit non-reserved screen while reservation is active.
+            ImGui::BeginDisabled(profile.reservedJetsonDisplay > 0);
             if (ImGui::Selectable("Системный монитор", launcherDisplay == 0)) {
                 launcherDisplay = 0;
                 writeLauncherDisplay(0);
@@ -520,8 +661,10 @@ struct Ui {
                 tiledThisSession = !windowLayout.autoLayout;
 #endif
             }
+            ImGui::EndDisabled();
             for (const auto& display : availableDisplays) {
                 const std::string option = "Монитор " + std::to_string(display.number);
+                ImGui::BeginDisabled(display.number == profile.reservedJetsonDisplay);
                 if (ImGui::Selectable(option.c_str(), launcherDisplay == display.number)) {
                     launcherDisplay = display.number;
                     writeLauncherDisplay(launcherDisplay);
@@ -530,6 +673,7 @@ struct Ui {
                     tiledThisSession = !windowLayout.autoLayout;
 #endif
                 }
+                ImGui::EndDisabled();
             }
             ImGui::EndCombo();
         }
@@ -696,9 +840,6 @@ struct Ui {
     void drawDisplays() {
         if (card("##display-card", ImVec4(0.109f, 0.157f, 0.163f, 1),
                  Symbols::displays, "Экраны и наложения", ImVec4(0.34f, 0.84f, 0.71f, 1))) {
-            ImGui::Checkbox("CV Overlay", &profile.overlayEnabled);
-            ImGui::SameLine();
-            ImGui::Checkbox("Телеметрия", &profile.telemetryEnabled);
 #ifdef _WIN32
             const char* defaultRaw = "3";
             const char* defaultOverlay = "2";
@@ -708,15 +849,21 @@ struct Ui {
             const char* defaultOverlay = "2";
             const char* defaultTelemetry = "3";
 #endif
-            displaySelector("##monitor-raw", "Raw / исходное видео",
+            displaySelector("##monitor-raw", "Видео / Raw",
                             profile.rawDisplay, defaultRaw);
-            if (profile.overlayEnabled) {
-                displaySelector("##monitor-overlay", "CV Overlay",
-                                profile.overlayDisplay, defaultOverlay);
-            }
-            if (profile.telemetryEnabled) {
-                displaySelector("##monitor-telemetry", "Telemetry",
-                                profile.telemetryDisplay, defaultTelemetry);
+            displaySelector("##monitor-overlay", "CV Overlay",
+                            profile.overlayDisplay, defaultOverlay,
+                            &profile.overlayEnabled);
+            displaySelector("##monitor-telemetry", "Телеметрия",
+                            profile.telemetryDisplay, defaultTelemetry,
+                            &profile.telemetryEnabled);
+            ImGui::Spacing();
+            ImGui::Separator();
+            jetsonDisplaySelector();
+            if (profile.reservedJetsonDisplay > 0) {
+                ImGui::TextWrapped("Экран %d закреплён за Jetson. Для Windows "
+                    "будут выбраны только остальные мониторы.",
+                    profile.reservedJetsonDisplay);
             }
         }
         finishCard();

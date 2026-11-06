@@ -15,6 +15,8 @@ struct CommandLineOptions {
     int rawDisplay{0};
     int overlayDisplay{0};
     int telemetryDisplay{0};
+    // Prevent Reg windows from appearing on an output switched to Jetson.
+    int reservedDisplay{0};
     std::uint16_t netImguiPort{8888};
     bool netImguiEnabled{true};
     // Read-only Diagnostic API listener is opt-in and loopback-only.

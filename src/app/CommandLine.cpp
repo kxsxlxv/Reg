@@ -58,6 +58,9 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
         } else if (arg == "--telemetry-display") {
             options.telemetryDisplay = parseInteger<int>(
                 requireValue(i, argc, argv, "--telemetry-display"), "--telemetry-display");
+        } else if (arg == "--reserved-display") {
+            options.reservedDisplay = parseInteger<int>(
+                requireValue(i, argc, argv, "--reserved-display"), "--reserved-display");
         } else if (arg == "--netimgui-port") {
             const auto port = parseInteger<unsigned>(
                 requireValue(i, argc, argv, "--netimgui-port"), "--netimgui-port");
@@ -135,7 +138,8 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     }
     if (options.rawDisplay < 0 || options.rawDisplay > 16 ||
         options.overlayDisplay < 0 || options.overlayDisplay > 16 ||
-        options.telemetryDisplay < 0 || options.telemetryDisplay > 16) {
+        options.telemetryDisplay < 0 || options.telemetryDisplay > 16 ||
+        options.reservedDisplay < 0 || options.reservedDisplay > 16) {
         throw std::runtime_error("Display number must be in [0,16] (0 = automatic)");
     }
     if (options.maxDelayUs < 0) {
@@ -190,6 +194,7 @@ void printUsage(const char* executableName) {
         << "  --raw-display N          Raw monitor, 0=automatic (Windows default 3)\n"
         << "  --overlay-display N      Overlay monitor, 0=automatic (Windows default 2)\n"
         << "  --telemetry-display N    Telemetry monitor, 0=automatic (Windows default 1)\n"
+        << "  --reserved-display N     Monitor temporarily used by Jetson; 0=none\n"
         << "  --netimgui-port N        NetImgui TCP port (default: 8888)\n"
         << "  --disable-netimgui       Do not start embedded NetImgui listener\n"
         << "  --enable-diagnostic-api  Enable read-only HTTP at 127.0.0.1 (default: disabled)\n"
