@@ -87,7 +87,11 @@ The per-profile monitor selection is stored alongside the RTSP source:
   Display Settings -> Identify.
 - **Monitor 1..N:** explicitly choose the monitor number shown by Windows
   Display Settings. On Linux this is a one-based SDL display index.
-- Topology changes reapply the selected mapping without restarting the viewer.
+- When the topology changes, the viewer re-evaluates the requested monitor.
+  If it is unavailable or reserved for Jetson, the viewer uses the first
+  active, non-reserved Windows monitor instead. This avoids placing Reg on
+  the Jetson output, but can temporarily stack multiple Reg windows on the
+  same fallback monitor.
 
 NetImgui can be disabled independently or configured to listen on a profile
 specific TCP port (default 8888). The listener starts after command-line
@@ -98,6 +102,44 @@ open a remote listener.
 The new flags accepted by reg_probe are --raw-display, --overlay-display,
 --telemetry-display, --netimgui-port and --disable-netimgui. Profiles saved by
 earlier versions are upgraded on read with compatible defaults.
+
+## Shared monitor: Windows / Jetson
+
+The **Экраны и наложения** card now provides a single placement selector
+for each Reg output:
+
+- **Видео / Raw**: Windows monitor 1..N or **Авто** (always enabled).
+- **CV Overlay**: **Не выводить**, **Авто**, or Windows monitor 1..N.
+- **Телеметрия**: **Не выводить**, **Авто**, or Windows monitor 1..N.
+  Disabling this window does not disable receiving CVM1 packets for Overlay.
+- **Монитор Jetson**: **Не резервировать** or a Windows monitor number.
+  For example, reserve **Монитор 4** while its physical input is being
+  used by Jetson. Reg will not route its windows to that monitor.
+
+Each setting is persisted in the current profile JSON under
+`%LOCALAPPDATA%/Reg/profiles/`. The new optional
+`reserved_jetson_display` field defaults to 0, preserving all existing
+profiles and default monitor mapping. A conflicting selected output is reset
+to **Авто** when the Jetson reservation changes. With a reserved display, Reg
+uses a non-reserved fallback for unplugged/default-target monitors, including
+after Windows emits a display topology event. When an explicitly selected
+monitor is missing, Launcher shows an error instead of starting an
+incorrectly placed session. If every active display is reserved, startup is
+refused.
+
+This setting **does not switch physical monitor inputs** (HDMI/DisplayPort)
+or control the Jetson desktop: use the monitor's source menu, hardware KVM,
+or a separately supported DDC/CI mechanism. A monitor may continue reporting
+EDID to Windows after its input is switched; reserve it manually before
+starting Reg. Display numbers follow Windows Display Settings > Identify
+and may change with the active topology. Monitor routing changes are applied
+when a **new Reg session** starts; it is not an in-session live output
+switcher. The Launcher's own monitor selection is stored separately, and
+the Launcher moves away if its current monitor becomes Jetson-reserved.
+
+The per-role selectors show each detected screen's current resolution and
+label disconnected selections. The reservation dropdown also allows storing
+monitor 4 while that display is currently absent from Windows.
 
 ## Update compatibility fix
 
