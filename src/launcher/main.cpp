@@ -24,6 +24,7 @@
 #include <limits>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <stdexcept>
 #include <cstdint>
