@@ -84,6 +84,7 @@ json toJson(const Profile& p) {
         {"raw_display", p.rawDisplay},
         {"overlay_display", p.overlayDisplay},
         {"telemetry_display", p.telemetryDisplay},
+        {"reserved_jetson_display", p.reservedJetsonDisplay},
         {"netimgui_enabled", p.netImguiEnabled},
         {"netimgui_port", p.netImguiPort},
         {"metadata_bind", p.metadataBind},
@@ -115,6 +116,7 @@ Profile fromJson(const json& j) {
     p.rawDisplay = j.value("raw_display", p.rawDisplay);
     p.overlayDisplay = j.value("overlay_display", p.overlayDisplay);
     p.telemetryDisplay = j.value("telemetry_display", p.telemetryDisplay);
+    p.reservedJetsonDisplay = j.value("reserved_jetson_display", p.reservedJetsonDisplay);
     p.netImguiEnabled = j.value("netimgui_enabled", p.netImguiEnabled);
     p.netImguiPort = j.value("netimgui_port", p.netImguiPort);
     p.metadataBind = j.value("metadata_bind", p.metadataBind);
@@ -293,8 +295,15 @@ std::string validate(const Profile& p) {
     }
     if (p.rawDisplay < 0 || p.rawDisplay > 16 ||
         p.overlayDisplay < 0 || p.overlayDisplay > 16 ||
-        p.telemetryDisplay < 0 || p.telemetryDisplay > 16) {
+        p.telemetryDisplay < 0 || p.telemetryDisplay > 16 ||
+        p.reservedJetsonDisplay < 0 || p.reservedJetsonDisplay > 16) {
         return "Display number must be from 0 (automatic) to 16";
+    }
+    if (p.reservedJetsonDisplay > 0 &&
+        (p.rawDisplay == p.reservedJetsonDisplay ||
+         (p.overlayEnabled && p.overlayDisplay == p.reservedJetsonDisplay) ||
+         (p.telemetryEnabled && p.telemetryDisplay == p.reservedJetsonDisplay))) {
+        return "Monitor reserved for Jetson is also selected for a Reg window";
     }
     if (p.netImguiPort < 1 || p.netImguiPort > 65535) {
         return "NetImgui TCP port must be from 1 to 65535";
@@ -324,6 +333,7 @@ std::vector<std::string> arguments(
         "--raw-display", asText(p.rawDisplay),
         "--overlay-display", asText(p.overlayDisplay),
         "--telemetry-display", asText(p.telemetryDisplay),
+        "--reserved-display", asText(p.reservedJetsonDisplay),
         "--netimgui-port", asText(p.netImguiPort),
         "--metadata-bind", p.metadataBind,
         "--metadata-port", asText(p.metadataPort),
