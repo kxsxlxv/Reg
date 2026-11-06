@@ -29,6 +29,7 @@ int main() {
     profile.rawDisplay = 2;
     profile.overlayDisplay = 1;
     profile.telemetryDisplay = 3;
+    profile.reservedJetsonDisplay = 4;
     profile.netImguiPort = 8899;
     profile.netImguiEnabled = false;
     profile.telemetryEnabled = false;
@@ -42,6 +43,7 @@ int main() {
     assert(loaded.rawDisplay == 2);
     assert(loaded.overlayDisplay == 1);
     assert(loaded.telemetryDisplay == 3);
+    assert(loaded.reservedJetsonDisplay == 4);
     assert(loaded.netImguiPort == 8899);
     assert(!loaded.netImguiEnabled);
     assert(!loaded.telemetryEnabled);
@@ -51,6 +53,8 @@ int main() {
     const auto recordingDir = root / "some path" / "blackbox";
     const auto args = arguments(loaded, recordingDir);
     assert(std::find(args.begin(), args.end(), "--disable-telemetry") != args.end());
+    const auto reserved = std::find(args.begin(), args.end(), "--reserved-display");
+    assert(reserved != args.end() && reserved + 1 != args.end() && *(reserved + 1) == "4");
     assert(std::find(args.begin(), args.end(), "--disable-netimgui") != args.end());
     const auto raw = std::find(args.begin(), args.end(), "--raw-display");
     assert(raw != args.end() && raw + 1 != args.end() && *(raw + 1) == "2");
@@ -73,6 +77,21 @@ int main() {
     try { saveProfile("../escape", profile); }
     catch (const std::exception&) { invalidNameRejected = true; }
     assert(invalidNameRejected);
+    profile.rawDisplay = 4;
+    assert(!validate(profile).empty()); // Jetson-reserved monitor cannot host Raw.
+    profile.rawDisplay = 2;
+    profile.overlayDisplay = 4;
+    assert(!validate(profile).empty()); // Enabled Overlay cannot use Jetson monitor.
+    profile.overlayDisplay = 1;
+    profile.telemetryDisplay = 4;
+    profile.telemetryEnabled = true;
+    assert(!validate(profile).empty());
+    profile.telemetryEnabled = false;
+    assert(validate(profile).empty()); // Disabled windows do not reserve a monitor.
+    profile.telemetryDisplay = 3;
+    profile.reservedJetsonDisplay = 17;
+    assert(!validate(profile).empty());
+    profile.reservedJetsonDisplay = 4;
     profile.rawDisplay = 17;
     assert(!validate(profile).empty());
     profile.rawDisplay = 2;
