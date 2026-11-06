@@ -623,7 +623,7 @@ struct Ui {
             if (changed) {
                 message = "Экран Jetson исключён. Конфликтующие окна переведены в Авто.";
             }
-            if (launcherDisplay == reserved) {
+            if (launcherDisplay == reserved || launcherDisplay == 0) {
                 const auto next = std::find_if(
                     availableDisplays.begin(), availableDisplays.end(),
                     [&](const reg::launcher::LauncherDisplay& display) {
@@ -650,6 +650,9 @@ struct Ui {
         const std::string label = launcherDisplay == 0
             ? "Системный" : "Монитор " + std::to_string(launcherDisplay);
         if (ImGui::BeginCombo("##launcher-display", label.c_str())) {
+            // The Windows primary monitor may itself be switched to Jetson.
+            // Use an explicit non-reserved screen while reservation is active.
+            ImGui::BeginDisabled(profile.reservedJetsonDisplay > 0);
             if (ImGui::Selectable("Системный монитор", launcherDisplay == 0)) {
                 launcherDisplay = 0;
                 writeLauncherDisplay(0);
@@ -658,6 +661,7 @@ struct Ui {
                 tiledThisSession = !windowLayout.autoLayout;
 #endif
             }
+            ImGui::EndDisabled();
             for (const auto& display : availableDisplays) {
                 const std::string option = "Монитор " + std::to_string(display.number);
                 ImGui::BeginDisabled(display.number == profile.reservedJetsonDisplay);
