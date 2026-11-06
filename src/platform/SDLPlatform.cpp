@@ -1,5 +1,6 @@
 #include "app/RuntimeUiState.hpp"
 #include "platform/SDLPlatform.hpp"
+#include "platform/DisplayRouting.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -683,7 +684,8 @@ SDLPlatform::displays() const {
 bool SDLPlatform::placeWindowOnDisplay(
     SDL_Window* window,
     std::size_t logicalRole,
-    int displayNumberOverride) {
+    int displayNumberOverride,
+    int reservedDisplayNumber) {
     if (window == nullptr) {
         throw std::invalid_argument(
             "placeWindowOnDisplay requires a window");
@@ -696,33 +698,47 @@ bool SDLPlatform::placeWindowOnDisplay(
     constexpr std::array<int, 3> roleToWindowsSettingsDisplay{3, 2, 1};
 
 #ifdef _WIN32
-    if (displayNumberOverride > 0 ||
-        logicalRole < roleToWindowsSettingsDisplay.size()) {
-        const int settingsNumber = displayNumberOverride > 0
-            ? displayNumberOverride
-            : roleToWindowsSettingsDisplay[logicalRole];
-        const auto display =
-            windowsSettingsDisplayByNumber(settingsNumber);
-        if (!display.has_value()) {
-            return false;
-        }
-
-        return placeBorderlessWindow(
-            window,
-            display->x,
-            display->y,
-            display->width,
-            display->height);
+    const auto displays = windowsSettingsDisplays();
+    std::vector<int> active;
+    active.reserve(displays.size());
+    for (const auto& display : displays) {
+        active.push_back(display.settingsNumber);
     }
-#endif
-
-    // Portable fallback: use SDL enumeration order. This path is only for
-    // non-Windows platforms; Windows uses CCD path numbering above so the
-    // operator-facing Settings numbers are authoritative.
+    const int requested = displayNumberOverride > 0
+        ? displayNumberOverride
+        : (logicalRole < roleToWindowsSettingsDisplay.size()
+            ? roleToWindowsSettingsDisplay[logicalRole] : 0);
+    const int selected = selectUsableDisplay(
+        requested, reservedDisplayNumber, active);
+    if (selected == 0) return false;
+    const auto display = std::ranges::find_if(
+        displays, [selected](const WindowsSettingsDisplay& value) {
+            return value.settingsNumber == selected;
+        });
+    if (display == displays.end()) return false;
+    if (selected != requested) {
+        std::cerr << "[display] monitor " << requested
+                  << " unavailable/reserved; using " << selected << '\n';
+    }
+    return placeBorderlessWindow(
+        window, display->x, display->y, display->width, display->height);
+#else
+    // SDL ordinal numbering on non-Windows hosts. Never place a window on
+    // the Jetson-reserved output even if Windows monitor numbering differs.
+    int count = 0;
+    SDL_DisplayID* ids = SDL_GetDisplays(&count);
+    if (!ids) return false;
+    std::vector<int> active;
+    for (int i = 0; i < count; ++i) active.push_back(i + 1);
+    SDL_free(ids);
+    const int requested = displayNumberOverride > 0
+        ? displayNumberOverride : static_cast<int>(logicalRole) + 1;
+    const int selected = selectUsableDisplay(
+        requested, reservedDisplayNumber, active);
+    if (selected == 0) return false;
     return placeWindowFullscreenOnDisplay(
-        window, displayNumberOverride > 0
-            ? static_cast<std::size_t>(displayNumberOverride - 1)
-            : logicalRole);
+        window, static_cast<std::size_t>(selected - 1));
+#endif
 }
 
 bool SDLPlatform::placeWindowFullscreenOnDisplay(
