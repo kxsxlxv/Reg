@@ -22,6 +22,8 @@ struct Profile {
     int rawDisplay{0};
     int overlayDisplay{0};
     int telemetryDisplay{0};
+    // 0 = no reserved output. A positive number is temporarily used by Jetson.
+    int reservedJetsonDisplay{0};
     bool netImguiEnabled{true};
     int netImguiPort{8888};
     std::string metadataBind{"0.0.0.0"};
