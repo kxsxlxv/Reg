@@ -544,19 +544,6 @@ std::vector<WindowsSettingsDisplay> windowsSettingsDisplays() {
     return {};
 }
 
-std::optional<WindowsSettingsDisplay>
-windowsSettingsDisplayByNumber(int settingsNumber) {
-    const auto displays = windowsSettingsDisplays();
-    const auto it = std::ranges::find_if(
-        displays,
-        [settingsNumber](const WindowsSettingsDisplay& display) {
-            return display.settingsNumber == settingsNumber;
-        });
-    if (it == displays.end()) {
-        return std::nullopt;
-    }
-    return *it;
-}
 #endif
 
 } // namespace
