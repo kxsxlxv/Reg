@@ -1,4 +1,5 @@
 #include "launcher/LauncherConfig.hpp"
+#include "platform/DisplayRouting.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -20,6 +21,13 @@ int main() {
 #else
     setenv("XDG_DATA_HOME", root.string().c_str(), 1);
 #endif
+    // Placement must avoid a Jetson-owned monitor during hot-plug.
+    using reg::platform::selectUsableDisplay;
+    assert(selectUsableDisplay(4, 4, {1, 2, 3, 4}) == 1);
+    assert(selectUsableDisplay(3, 4, {1, 2, 3, 4}) == 3);
+    assert(selectUsableDisplay(3, 0, {1, 4}) == 1);
+    assert(selectUsableDisplay(4, 4, {4}) == 0);
+    assert(selectUsableDisplay(1, 0, {}) == 0);
     assert(!profilePath("default").empty());
     assert(!validate(Profile{}).empty());
     Profile profile;
