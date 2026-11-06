@@ -134,7 +134,7 @@ int runApplication(
         if (!platform.placeWindowOnDisplay(
                 rawSdlWindow,
                 0,
-                options.rawDisplay)) {
+                options.rawDisplay, options.reservedDisplay)) {
             std::cerr
                 << "[display] raw display 0 unavailable; using window-manager placement\n";
         }
@@ -164,7 +164,7 @@ int runApplication(
             if (!platform.placeWindowOnDisplay(
                     overlaySdlWindow,
                     1,
-                    options.overlayDisplay)) {
+                    options.overlayDisplay, options.reservedDisplay)) {
                 std::cerr
                     << "[display] overlay display 1 unavailable; using window-manager placement\n";
             }
@@ -186,7 +186,7 @@ int runApplication(
             if (!platform.placeWindowOnDisplay(
                     telemetrySdlWindow,
                     2,
-                    options.telemetryDisplay)) {
+                    options.telemetryDisplay, options.reservedDisplay)) {
                 std::cerr
                     << "[display] telemetry display 2 unavailable; using window-manager placement\n";
             }
@@ -888,20 +888,20 @@ int runApplication(
                     static_cast<void>(
                         platform.placeWindowOnDisplay(
                             rawWindow.sdlWindow(),
-                            0, options.rawDisplay));
+                            0, options.rawDisplay, options.reservedDisplay));
 
                     if (overlayWindow) {
                         static_cast<void>(
                             platform.placeWindowOnDisplay(
                                 overlayWindow->sdlWindow(),
-                                1, options.overlayDisplay));
+                                1, options.overlayDisplay, options.reservedDisplay));
                     }
 
                     if (telemetryWindow) {
                         static_cast<void>(
                             platform.placeWindowOnDisplay(
                                 telemetryWindow->sdlWindow(),
-                                2, options.telemetryDisplay));
+                                2, options.telemetryDisplay, options.reservedDisplay));
                     }
 
                     nextRawSurfaceRecovery = loopNow;
