@@ -27,6 +27,7 @@ int main() {
     assert(defaults.rawDisplay == 0);
     assert(defaults.overlayDisplay == 0);
     assert(defaults.telemetryDisplay == 0);
+    assert(defaults.reservedDisplay == 0);
     assert(defaults.netImguiEnabled);
     assert(defaults.netImguiPort == 8888);
     assert(!defaults.diagnosticApiEnabled);
@@ -34,12 +35,14 @@ int main() {
 
     const auto selected = parse({"probe", "--url", "rtsp://localhost/stream",
         "--raw-display", "3", "--overlay-display", "2",
-        "--telemetry-display", "1", "--netimgui-port", "9999",
+        "--telemetry-display", "1", "--reserved-display", "4",
+        "--netimgui-port", "9999",
         "--disable-netimgui", "--enable-diagnostic-api",
         "--diagnostic-api-port", "9711"});
     assert(selected.rawDisplay == 3);
     assert(selected.overlayDisplay == 2);
     assert(selected.telemetryDisplay == 1);
+    assert(selected.reservedDisplay == 4);
     assert(selected.netImguiPort == 9999);
     assert(!selected.netImguiEnabled);
     assert(selected.diagnosticApiEnabled);
@@ -50,6 +53,9 @@ int main() {
     assert(!portOnly.diagnosticApiEnabled && portOnly.diagnosticApiPort == 9911);
 
     assert(fails({"probe", "--url", "rtsp://localhost", "--raw-display", "17"}));
+    assert(fails({"probe", "--url", "rtsp://localhost", "--reserved-display", "-1"}));
+    assert(fails({"probe", "--url", "rtsp://localhost", "--reserved-display", "17"}));
+    assert(fails({"probe", "--url", "rtsp://localhost", "--reserved-display"}));
     assert(fails({"probe", "--url", "rtsp://localhost", "--raw-display", "-1"}));
     assert(fails({"probe", "--url", "rtsp://localhost", "--netimgui-port", "0"}));
     assert(fails({"probe", "--url", "rtsp://localhost", "--netimgui-port", "65536"}));
