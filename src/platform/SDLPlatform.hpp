@@ -2,6 +2,7 @@
 
 #include "remote/RemoteInputState.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -89,6 +90,8 @@ private:
     remote::RemoteUiInputState remoteUiInput_{};
     bool displayTopologyChanged_{false};
     bool gtImeComposing_{false};
+    // Ignore quick T presses immediately after remote focus changes.
+    std::chrono::steady_clock::time_point lastRawRemoteFocusChange_{};
     bool rawScreenshotRequested_{false};
     bool overlayScreenshotRequested_{false};
 };
