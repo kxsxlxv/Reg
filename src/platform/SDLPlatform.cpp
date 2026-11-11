@@ -600,10 +600,13 @@ SDL_Window* SDLPlatform::createVulkanWindow(
             error);
     }
 
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
     if (windows_.empty()) {
         rawWindowId_ = static_cast<std::uint32_t>(
             SDL_GetWindowID(window));
+    }
+
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    if (windows_.empty()) {
         if (!SDL_StartTextInput(window)) {
             std::cerr
                 << "[netimgui] SDL_StartTextInput(raw) failed: "
