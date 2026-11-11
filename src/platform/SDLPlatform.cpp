@@ -1,6 +1,7 @@
 #include "app/RuntimeUiState.hpp"
 #include "platform/SDLPlatform.hpp"
 #include "platform/DisplayRouting.hpp"
+#include "remote/RemoteTextFocusGate.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -783,6 +784,9 @@ bool SDLPlatform::pollQuitRequested() {
                     static_cast<std::int32_t>(event.button.y);
                 const int button =
                     remoteMouseButtonIndex(event.button.button);
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                    lastRawRemoteFocusChange_ = std::chrono::steady_clock::now();
+                }
                 if (button >= 0) {
                     const std::uint64_t mask =
                         std::uint64_t{1} <<
@@ -801,6 +805,10 @@ bool SDLPlatform::pollQuitRequested() {
             } else if ((event.type == SDL_EVENT_KEY_DOWN ||
                         event.type == SDL_EVENT_KEY_UP) &&
                        event.key.windowID == rawWindowId_) {
+                if (event.type == SDL_EVENT_KEY_DOWN &&
+                    event.key.scancode == SDL_SCANCODE_TAB) {
+                    lastRawRemoteFocusChange_ = std::chrono::steady_clock::now();
+                }
                 updateRemoteModifierKeys(
                     remoteUiInput_,
                     event.key.mod);
@@ -842,7 +850,11 @@ bool SDLPlatform::pollQuitRequested() {
             event.key.windowID == rawWindowId_ &&
             event.key.scancode == SDL_SCANCODE_T &&
             (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0 &&
-            !gtImeComposing_) {
+            !gtImeComposing_ &&
+            remote::gtHotkeyAllowed(remote::gRemoteTextFocus.load(
+                std::memory_order_relaxed)) &&
+            std::chrono::steady_clock::now() - lastRawRemoteFocusChange_ >=
+                std::chrono::milliseconds{250}) {
             app::toggleGtBoxes();
         }
 
