@@ -848,7 +848,7 @@ bool SDLPlatform::pollQuitRequested() {
 
         if (event.type == SDL_EVENT_TEXT_EDITING &&
             event.edit.windowID == rawWindowId_) {
-            gtImeComposing_ = event.edit.text[0] != '\\0';
+            gtImeComposing_ = event.edit.text != nullptr && event.edit.text[0] != '\0';
         }
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
             event.window.windowID == rawWindowId_) {
