@@ -831,6 +831,27 @@ bool SDLPlatform::pollQuitRequested() {
         }
 #endif
 
+        // Physical QWERTY T (Russian layout: Е). Only Raw's keyboard
+        // focus is eligible; never repeat or intercept modifier shortcuts.
+        // SDL's IME composition is handled separately below.
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            !event.key.repeat &&
+            event.key.windowID == rawWindowId_ &&
+            event.key.scancode == SDL_SCANCODE_T &&
+            (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0 &&
+            !gtImeComposing_) {
+            app::toggleGtBoxes();
+        }
+
+        if (event.type == SDL_EVENT_TEXT_EDITING &&
+            event.edit.windowID == rawWindowId_) {
+            gtImeComposing_ = event.edit.text[0] != '\\0';
+        }
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+            event.window.windowID == rawWindowId_) {
+            gtImeComposing_ = false;
+        }
+
         if (event.type ==
                 SDL_EVENT_KEY_DOWN &&
             !event.key.repeat) {
