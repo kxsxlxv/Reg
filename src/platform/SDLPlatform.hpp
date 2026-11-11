@@ -88,6 +88,7 @@ private:
     std::uint32_t rawWindowId_{};
     remote::RemoteUiInputState remoteUiInput_{};
     bool displayTopologyChanged_{false};
+    bool gtImeComposing_{false};
     bool rawScreenshotRequested_{false};
     bool overlayScreenshotRequested_{false};
 };
