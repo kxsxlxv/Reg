@@ -7,6 +7,7 @@ on:
       - mvp/**
       - feat/**
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: linux-build-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
@@ -14,6 +15,9 @@ concurrency:
 
 jobs:
   build:
+    # Linux is opt-in while development and release verification target Windows.
+    # Preserve push/PR workflow status without allocating the expensive runner.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
