@@ -784,7 +784,9 @@ bool SDLPlatform::pollQuitRequested() {
                     static_cast<std::int32_t>(event.button.y);
                 const int button =
                     remoteMouseButtonIndex(event.button.button);
-                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+                    remote::gRemoteTextFocus.load(std::memory_order_relaxed) !=
+                        remote::RemoteTextFocus::Disconnected) {
                     lastRawRemoteFocusChange_ = std::chrono::steady_clock::now();
                 }
                 if (button >= 0) {
@@ -806,7 +808,9 @@ bool SDLPlatform::pollQuitRequested() {
                         event.type == SDL_EVENT_KEY_UP) &&
                        event.key.windowID == rawWindowId_) {
                 if (event.type == SDL_EVENT_KEY_DOWN &&
-                    event.key.scancode == SDL_SCANCODE_TAB) {
+                    event.key.scancode == SDL_SCANCODE_TAB &&
+                    remote::gRemoteTextFocus.load(std::memory_order_relaxed) !=
+                        remote::RemoteTextFocus::Disconnected) {
                     lastRawRemoteFocusChange_ = std::chrono::steady_clock::now();
                 }
                 updateRemoteModifierKeys(
