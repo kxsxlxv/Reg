@@ -1,4 +1,6 @@
 #include "app/CommandLine.hpp"
+#include "app/RuntimeUiState.hpp"
+#include "render/GtOverlayBuilder.hpp"
 #include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "diagnostics/FrameTimingLogger.hpp"
 #include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
@@ -33,6 +35,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -247,6 +250,7 @@ int runApplication(
         }
 
         reg::video::RawFrameMailbox rawMailbox;
+        reg::render::GtOverlayBuilder gtOverlayBuilder;
         reg::video::OverlayFrameBuffer overlayFrames(
             std::chrono::milliseconds{options.overlayDelayMs},
             64);
@@ -402,6 +406,9 @@ int runApplication(
                                     // domain. Remove stale frame/metadata state before
                                     // any frame from this session can be published.
                                     rawMailbox.clear();
+                                    reg::app::gPresentedGtStatus.store(
+                                        reg::media::GtStatus::Missing,
+                                        std::memory_order_relaxed);
                                     overlayFrames.clear();
                                     metadataStore.clear();
                                     exactSyncDiagnostics.clearPending();
@@ -498,6 +505,7 @@ int runApplication(
                                     lastDecodedFrameNs.store(
                                         steadyNowNs(),
                                         std::memory_order_release);
+                                    reg::app::observeGt(frame->gt().status);
                                     rawMailbox.publish(frame);
 
                                     if (options.overlayEnabled) {
@@ -1143,10 +1151,22 @@ int runApplication(
                         try {
                             const auto renderBegin =
                                 std::chrono::steady_clock::now();
-                            const auto identityScene =
+                            auto identityScene =
                                 makeFrameIdentityDiagnosticScene(
                                     *latest,
                                     rawWindow.swapchain().extent());
+                            if (reg::app::showGtBoxes() &&
+                                latest->gt().status == reg::media::GtStatus::Ready) {
+                                auto gtScene = gtOverlayBuilder.build(
+                                    latest->gt(),
+                                    rawWindow.swapchain().extent().width,
+                                    rawWindow.swapchain().extent().height,
+                                    reg::app::showGtIds());
+                                identityScene.primitives.insert(
+                                    identityScene.primitives.end(),
+                                    std::make_move_iterator(gtScene.primitives.begin()),
+                                    std::make_move_iterator(gtScene.primitives.end()));
+                            }
                             rawSignalRenderer->prepare(
                                 identityScene,
                                 rawWindow.swapchain());
@@ -1167,6 +1187,9 @@ int runApplication(
 
                             if (renderSucceeded) {
                                 lastRawPresented = latest;
+                                reg::app::gPresentedGtStatus.store(
+                                    latest->gt().status,
+                                    std::memory_order_relaxed);
                                 didWork = true;
 
                                 const auto count =
