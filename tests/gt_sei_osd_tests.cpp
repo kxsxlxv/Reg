@@ -74,15 +74,24 @@ void testFrames() {
     check(frame != nullptr, "alloc frame");
     const auto json = readyJson();
     appendSei(frame, std::array<std::uint8_t, 16>{}, "{}");
+    const reg::media::SourceFrameIdentity reference{
+        .key = {UINT64_MAX - 1U, 9007199254740993ULL},
+        .sourceTimeNs = UINT64_MAX,
+    };
+    const auto encoded = reg::media::encodeFrameIdentityPayload(reference);
+    appendSei(frame, reg::media::kFrameIdentitySeiUuid,
+        std::string_view(reinterpret_cast<const char*>(encoded.data()), encoded.size()));
     appendSei(frame, reg::media::kGtSeiUuid, json);
     // No positional assumption: GT is surrounded by unrelated SEI records.
     appendSei(frame, std::array<std::uint8_t, 16>{
         0x12,0x32,0x32,0x32,0,0,0,0,0,0,0,0,0,0,0,1}, "{}");
     auto gt = reg::media::extractGtSei(frame);
     check(gt.status == reg::media::GtStatus::Ready, "multi SEI traversal");
-    reg::media::validateGtForFrame(gt, reg::media::SourceFrameIdentity{
-        .key = {UINT64_MAX - 1U, 9007199254740993ULL},
-        .sourceTimeNs = UINT64_MAX}, 1920, 1080);
+    const auto source = reg::media::extractFrameIdentity(frame);
+    check(source.has_value() && source->key == reference.key &&
+          source->sourceTimeNs == reference.sourceTimeNs,
+          "RGF1 survives alongside GT and unrelated SEI");
+    reg::media::validateGtForFrame(gt, source, 1920, 1080);
     check(gt.status == reg::media::GtStatus::Ready, "identity association");
     auto wrongTime = reg::media::extractGtSei(frame);
     reg::media::validateGtForFrame(wrongTime, reg::media::SourceFrameIdentity{
