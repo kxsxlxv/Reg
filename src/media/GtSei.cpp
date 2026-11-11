@@ -260,7 +260,11 @@ bool asBox(const Json* node, std::array<double, 4>& xyxy) noexcept {
     return xyxy[2] > xyxy[0] && xyxy[3] > xyxy[1];
 }
 
-GtMetadata failed() { return GtMetadata{.status = GtStatus::ParseError}; }
+GtMetadata failed() {
+    GtMetadata gt;
+    gt.status = GtStatus::ParseError;
+    return gt;
+}
 
 } // namespace
 
