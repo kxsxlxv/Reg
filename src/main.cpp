@@ -1097,6 +1097,9 @@ int runApplication(
                 }
 
                 if (!signalPresent) {
+                    reg::app::gPresentedGtStatus.store(
+                        reg::media::GtStatus::Missing,
+                        std::memory_order_relaxed);
                     if (loopNow >= nextNoSignalRenderAt) {
                         if (rawWindow.available()) {
                             try {
