@@ -201,6 +201,7 @@ add_executable(reg_probe
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
     src/media/FrameIdentityAvFrame.cpp
+    src/media/GtSei.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
@@ -266,6 +267,7 @@ add_executable(reg_replay
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
     src/media/FrameIdentityAvFrame.cpp
+    src/media/GtSei.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
