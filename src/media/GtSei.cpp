@@ -315,11 +315,13 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
             !asDimension(&videoSize->array[1], gt.videoHeight) ||
             objects == nullptr || objects->type != Json::Type::Array) return failed();
 
+        if (objects->array.size() > 256U) return failed();
         gt.objects.reserve(objects->array.size());
         for (const auto& item : objects->array) {
             const Json* id = item.member("id");
             const Json* visible = item.member("visible");
             if (id == nullptr || id->type != Json::Type::String ||
+                id->scalar.size() > 128U ||
                 visible == nullptr || visible->type != Json::Type::Boolean) return failed();
             GtObject object;
             object.id = id->scalar;
