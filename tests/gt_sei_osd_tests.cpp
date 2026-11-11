@@ -1,5 +1,6 @@
 #include "media/GtSei.hpp"
 #include "render/GtOverlayBuilder.hpp"
+#include "remote/RemoteTextFocusGate.hpp"
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -144,10 +145,23 @@ void testGeometry() {
                         1200U, 1200U, true).empty(), "no stale boxes on not-ready");
     check(builder.build(gt, 0U, 1200U, true).empty(), "no viewport");
 }
+void testRemoteTextHotkeyGate() {
+    using reg::remote::RemoteTextFocus;
+    using reg::remote::gtHotkeyAllowed;
+    check(gtHotkeyAllowed(RemoteTextFocus::Disconnected),
+          "allow T when no remote input client");
+    check(!gtHotkeyAllowed(RemoteTextFocus::Unknown),
+          "legacy remote client must block T");
+    check(gtHotkeyAllowed(RemoteTextFocus::NotEditing),
+          "allow T when upgraded remote client is not editing");
+    check(!gtHotkeyAllowed(RemoteTextFocus::Editing),
+          "typing T in a remote input must not toggle GT");
+}
 }
 
 int main() {
     try {
+        testRemoteTextHotkeyGate();
         testPayloads();
         testFrames();
         testGeometry();
