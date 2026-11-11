@@ -350,6 +350,8 @@ if(REG_BUILD_TESTS)
     add_executable(reg_gt_sei_osd_tests
         tests/gt_sei_osd_tests.cpp
         src/media/GtSei.cpp
+        src/media/FrameIdentity.cpp
+        src/media/FrameIdentityAvFrame.cpp
         src/video/VideoTransform.cpp
     )
     target_include_directories(reg_gt_sei_osd_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
