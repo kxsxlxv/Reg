@@ -1,6 +1,7 @@
 #pragma once
 
 #include "media/FrameIdentity.hpp"
+#include "media/GtSei.hpp"
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -30,6 +31,7 @@ public:
     int width() const noexcept { return frame_->width; }
     int height() const noexcept { return frame_->height; }
     std::optional<media::SourceFrameIdentity> identity() const noexcept { return identity_; }
+    const media::GtMetadata& gt() const noexcept { return gt_; }
     std::chrono::steady_clock::time_point decodedAt() const noexcept { return decodedAt_; }
 
 private:
@@ -37,6 +39,7 @@ private:
 
     AVFrame* frame_{nullptr};
     std::optional<media::SourceFrameIdentity> identity_;
+    media::GtMetadata gt_;
     std::chrono::steady_clock::time_point decodedAt_{};
 };
 

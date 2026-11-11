@@ -1306,6 +1306,37 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         drawEvents(snapshot.events, now);
     }
 
+    static void drawGtPanel() {
+        bool showBoxes = app::showGtBoxes();
+        if (ImGui::Checkbox("Показывать GT bbox (T / Е)", &showBoxes)) {
+            app::setShowGtBoxes(showBoxes);
+        }
+        bool showIds = app::showGtIds();
+        if (ImGui::Checkbox("Показывать ID объектов", &showIds)) {
+            app::setShowGtIds(showIds);
+        }
+        ImGui::TextDisabled(
+            "Локальный OSD Raw: запись и вход CV остаются без изменений.");
+        ImGui::SeparatorText("GT / ТЕКУЩИЙ ОТОБРАЖЁННЫЙ КАДР");
+        const auto status = app::gPresentedGtStatus.load(
+            std::memory_order_relaxed);
+        ImGui::Text("Статус: %s", media::gtStatusName(status));
+        ImGui::SeparatorText("GT / ДЕКОДИРОВАННЫЕ КАДРЫ");
+        ImGui::Text("ready: %llu",
+            static_cast<unsigned long long>(app::gGtReadyFrames.load()));
+        ImGui::Text("not_ready / busy / unavailable: %llu",
+            static_cast<unsigned long long>(app::gGtNotReadyFrames.load()));
+        ImGui::Text("missing: %llu",
+            static_cast<unsigned long long>(app::gGtMissingFrames.load()));
+        ImGui::Text("parse_error: %llu",
+            static_cast<unsigned long long>(app::gGtParseErrors.load()));
+        ImGui::Text("frame_mismatch: %llu",
+            static_cast<unsigned long long>(app::gGtMismatchedFrames.load()));
+        ImGui::Spacing();
+        ImGui::TextDisabled(
+            "GT наносится только на кадр с идентичными epoch, frame_id и source_time_ns.");
+    }
+
     void buildDashboard(
         const telemetry::Snapshot& snapshot,
         const NetImguiDiagnostics& netImgui,
@@ -1345,6 +1376,10 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 selectedPage == app::TelemetryPage::NetImgui
                     ? ImGuiTabItemFlags_SetSelected
                     : ImGuiTabItemFlags_None;
+            const ImGuiTabItemFlags gtFlags =
+                selectedPage == app::TelemetryPage::Gt
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
 
             const bool overviewOpen = ImGui::BeginTabItem(
                 "Обзор",
@@ -1382,6 +1417,14 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     drawNetImguiDiagnostics(netImgui);
                     ImGui::EndTabItem();
                 }
+            }
+            const bool gtOpen = ImGui::BeginTabItem("GT", nullptr, gtFlags);
+            if (ImGui::IsItemClicked()) {
+                app::setTelemetryPage(app::TelemetryPage::Gt);
+            }
+            if (gtOpen) {
+                drawGtPanel();
+                ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
         }

@@ -67,6 +67,14 @@ struct CrosshairPrimitive {
     LineStyle style{};
 };
 
+// Scopes the GT OSD to the aspect-fitted video rectangle. Unlike pre-clamping
+// coordinates alone this also clips line thickness and glyph background.
+struct ClipPushPrimitive {
+    video::RectF rect{};
+};
+
+struct ClipPopPrimitive {};
+
 struct TextPrimitive {
     video::Vec2 position{};
     std::string utf8;
@@ -83,7 +91,9 @@ using OverlayPrimitive = std::variant<
     FilledRectPrimitive,
     CirclePrimitive,
     CrosshairPrimitive,
-    TextPrimitive>;
+    TextPrimitive,
+    ClipPushPrimitive,
+    ClipPopPrimitive>;
 
 struct OverlayScene {
     std::vector<OverlayPrimitive> primitives;

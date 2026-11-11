@@ -1,6 +1,7 @@
 #include "app/RuntimeUiState.hpp"
 #include "platform/SDLPlatform.hpp"
 #include "platform/DisplayRouting.hpp"
+#include "remote/RemoteTextFocusGate.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -600,10 +601,13 @@ SDL_Window* SDLPlatform::createVulkanWindow(
             error);
     }
 
-#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
     if (windows_.empty()) {
         rawWindowId_ = static_cast<std::uint32_t>(
             SDL_GetWindowID(window));
+    }
+
+#if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
+    if (windows_.empty()) {
         if (!SDL_StartTextInput(window)) {
             std::cerr
                 << "[netimgui] SDL_StartTextInput(raw) failed: "
@@ -780,6 +784,11 @@ bool SDLPlatform::pollQuitRequested() {
                     static_cast<std::int32_t>(event.button.y);
                 const int button =
                     remoteMouseButtonIndex(event.button.button);
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+                    remote::gRemoteTextFocus.load(std::memory_order_relaxed) !=
+                        remote::RemoteTextFocus::Disconnected) {
+                    lastRawRemoteFocusChange_ = std::chrono::steady_clock::now();
+                }
                 if (button >= 0) {
                     const std::uint64_t mask =
                         std::uint64_t{1} <<
@@ -798,6 +807,12 @@ bool SDLPlatform::pollQuitRequested() {
             } else if ((event.type == SDL_EVENT_KEY_DOWN ||
                         event.type == SDL_EVENT_KEY_UP) &&
                        event.key.windowID == rawWindowId_) {
+                if (event.type == SDL_EVENT_KEY_DOWN &&
+                    event.key.scancode == SDL_SCANCODE_TAB &&
+                    remote::gRemoteTextFocus.load(std::memory_order_relaxed) !=
+                        remote::RemoteTextFocus::Disconnected) {
+                    lastRawRemoteFocusChange_ = std::chrono::steady_clock::now();
+                }
                 updateRemoteModifierKeys(
                     remoteUiInput_,
                     event.key.mod);
@@ -830,6 +845,31 @@ bool SDLPlatform::pollQuitRequested() {
             }
         }
 #endif
+
+        // Physical QWERTY T (Russian layout: Е). Only Raw's keyboard
+        // focus is eligible; never repeat or intercept modifier shortcuts.
+        // SDL's IME composition is handled separately below.
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            !event.key.repeat &&
+            event.key.windowID == rawWindowId_ &&
+            event.key.scancode == SDL_SCANCODE_T &&
+            (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0 &&
+            !gtImeComposing_ &&
+            remote::gtHotkeyAllowed(remote::gRemoteTextFocus.load(
+                std::memory_order_relaxed)) &&
+            std::chrono::steady_clock::now() - lastRawRemoteFocusChange_ >=
+                std::chrono::milliseconds{250}) {
+            app::toggleGtBoxes();
+        }
+
+        if (event.type == SDL_EVENT_TEXT_EDITING &&
+            event.edit.windowID == rawWindowId_) {
+            gtImeComposing_ = event.edit.text != nullptr && event.edit.text[0] != '\0';
+        }
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+            event.window.windowID == rawWindowId_) {
+            gtImeComposing_ = false;
+        }
 
         if (event.type ==
                 SDL_EVENT_KEY_DOWN &&

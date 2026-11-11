@@ -2,6 +2,7 @@
 
 #include "remote/NetImguiEmbeddedBridge.hpp"
 #include "remote/RemoteInputState.hpp"
+#include "remote/RemoteTextFocusGate.hpp"
 
 #include "NetImguiServer_Config.h"
 #include "NetImguiServer_Network.h"
@@ -133,6 +134,7 @@ struct NetImguiHost::Impl {
     }
 
     ~Impl() {
+        gRemoteTextFocus.store(RemoteTextFocus::Disconnected, std::memory_order_relaxed);
         if (networkStarted) {
             NetImguiServer::Network::Shutdown();
             networkStarted = false;
@@ -150,6 +152,7 @@ struct NetImguiHost::Impl {
         float dpiScale) {
         currentDrawData = nullptr;
         connectedCount = 0U;
+        RemoteTextFocus combinedFocus = RemoteTextFocus::Disconnected;
 
         mergeRemoteUiInput(
             pendingInput,
@@ -179,6 +182,20 @@ struct NetImguiHost::Impl {
             }
 
             ++connectedCount;
+            const std::uint8_t focusValue = client.mRemoteTextInputState.load(
+                std::memory_order_relaxed);
+            const auto clientFocus = focusValue == 1U
+                ? RemoteTextFocus::NotEditing
+                : (focusValue == 2U ? RemoteTextFocus::Editing
+                                    : RemoteTextFocus::Unknown);
+            // All connected remote clients receive Reg keyboard input. Any
+            // unknown or focused text widget must suppress the GT hotkey.
+            if (combinedFocus == RemoteTextFocus::Disconnected ||
+                clientFocus == RemoteTextFocus::Editing ||
+                (clientFocus == RemoteTextFocus::Unknown &&
+                 combinedFocus != RemoteTextFocus::Editing)) {
+                combinedFocus = clientFocus;
+            }
             client.mbIsVisible = true;
             client.mbIsActive = active;
 
@@ -211,6 +228,7 @@ struct NetImguiHost::Impl {
             clearRemoteUiTransient(pendingInput);
         }
 
+        gRemoteTextFocus.store(combinedFocus, std::memory_order_relaxed);
         processNetImguiServerTextures();
     }
 

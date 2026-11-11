@@ -125,8 +125,15 @@ void drawScenePrimitive(
     std::visit(
         [drawList](const auto& value) {
             using T = std::decay_t<decltype(value)>;
-
-            if constexpr (std::is_same_v<T, LinePrimitive>) {
+            if constexpr (std::is_same_v<T, ClipPushPrimitive>) {
+                drawList->PushClipRect(
+                    ImVec2(value.rect.x, value.rect.y),
+                    ImVec2(value.rect.x + value.rect.width,
+                           value.rect.y + value.rect.height),
+                    true);
+            } else if constexpr (std::is_same_v<T, ClipPopPrimitive>) {
+                drawList->PopClipRect();
+            } else if constexpr (std::is_same_v<T, LinePrimitive>) {
                 drawPatternedLine(drawList, value.from, value.to, value.style);
             } else if constexpr (std::is_same_v<T, PolylinePrimitive>) {
                 if (value.points.size() < 2) {

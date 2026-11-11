@@ -159,6 +159,7 @@ jobs:
       - name: Publish update to GitHub Releases
         if: >-
           github.event_name == 'push' &&
+          github.ref != 'refs/heads/feat/raw-gt-sei-osd-20261111' &&
           (startsWith(github.ref, 'refs/heads/master') ||
            startsWith(github.ref, 'refs/heads/mvp/') ||
            startsWith(github.ref, 'refs/heads/feat/') ||

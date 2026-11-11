@@ -201,6 +201,7 @@ add_executable(reg_probe
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
     src/media/FrameIdentityAvFrame.cpp
+    src/media/GtSei.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
@@ -266,6 +267,7 @@ add_executable(reg_replay
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
     src/media/FrameIdentityAvFrame.cpp
+    src/media/GtSei.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
@@ -344,6 +346,24 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
+
+    add_executable(reg_gt_sei_osd_tests
+        tests/gt_sei_osd_tests.cpp
+        src/media/GtSei.cpp
+        src/media/FrameIdentity.cpp
+        src/media/FrameIdentityAvFrame.cpp
+        src/video/VideoTransform.cpp
+    )
+    target_include_directories(reg_gt_sei_osd_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_gt_sei_osd_tests PRIVATE FFmpeg::avutil)
+    if(MSVC)
+        target_compile_options(reg_gt_sei_osd_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_gt_sei_osd_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME gt_sei_osd COMMAND reg_gt_sei_osd_tests)
+
+
 
     add_executable(reg_frame_sync_tests
         tests/frame_sync_tests.cpp

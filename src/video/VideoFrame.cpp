@@ -7,7 +7,10 @@ namespace reg::video {
 VideoFrame::VideoFrame(AVFrame* frame)
     : frame_(frame),
       identity_(media::extractFrameIdentity(frame)),
-      decodedAt_(std::chrono::steady_clock::now()) {}
+      gt_(media::extractGtSei(frame)),
+      decodedAt_(std::chrono::steady_clock::now()) {
+    media::validateGtForFrame(gt_, identity_, frame->width, frame->height);
+}
 
 VideoFrame::~VideoFrame() {
     if (frame_ != nullptr) {
