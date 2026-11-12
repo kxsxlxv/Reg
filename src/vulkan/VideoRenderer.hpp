@@ -186,7 +186,10 @@ private:
     std::vector<std::uint8_t> readScreenshotBuffer(
         const ScreenshotBuffer& buffer) const;
 
-    VkViewport videoViewport(const video::VideoFrame& frame, VkExtent2D extent) const;
+    VkViewport videoViewport(
+        std::uint32_t visibleWidth,
+        std::uint32_t visibleHeight,
+        VkExtent2D extent) const;
 
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
     render::VideoOverlayRecorder* ensureNetImguiOverlay(Swapchain& swapchain);
