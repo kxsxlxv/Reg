@@ -341,6 +341,16 @@ void VideoRenderer::createVideoResources(
         throw std::bad_alloc{};
     }
 
+    // Once per frame pool: makes coded-vs-visible dimension mismatches
+    // diagnosable without per-frame logging or GPU readback.
+    const auto* hwFrames = reinterpret_cast<const AVHWFramesContext*>(
+        retainedFramesContext_->data);
+    std::cout << "[renderer] Vulkan decode image "
+              << hwFrames->width << 'x' << hwFrames->height
+              << ", AVFrame " << frame.width() << 'x' << frame.height()
+              << ", crop left/top " << frame.avFrame()->crop_left
+              << '/' << frame.avFrame()->crop_top << '\n';
+
     VkSamplerYcbcrConversionCreateInfo conversionInfo{
         VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
     conversionInfo.format = format.format;
