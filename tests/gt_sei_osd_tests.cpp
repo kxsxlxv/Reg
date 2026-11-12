@@ -1,5 +1,6 @@
 #include "media/GtSei.hpp"
 #include "render/GtOverlayBuilder.hpp"
+#include "vulkan/VideoUvRegion.hpp"
 #include "remote/RemoteTextFocusGate.hpp"
 
 extern "C" {
@@ -159,9 +160,54 @@ void testRemoteTextHotkeyGate() {
 }
 }
 
+void testVisibleVideoSampling() {
+    using reg::vulkan::computeVideoUvRegion;
+
+    // H.264 1080p decodes into a 1088-line Vulkan image on typical encoders.
+    // GT pixel coordinates address the visible 1080 lines, never the padding.
+    const auto sample = computeVideoUvRegion(1920, 1080, 1920, 1088);
+    check(sample.visibleWidth == 1920U && sample.visibleHeight == 1080U,
+          "visible dimensions preserve GT coordinate system");
+    check(sample.uvRect[0] == 0.0F && sample.uvRect[1] == 0.0F &&
+          sample.uvRect[2] == 1.0F, "uncropped width/offset");
+    check(std::fabs(sample.uvRect[3] - 1080.0F / 1088.0F) < 1e-7F,
+          "bottom padding rows must be excluded");
+    // The old full-texture sampling displayed visible y=1080 at y=1072,
+    // displacing GT bboxes by almost eight output pixels at the bottom.
+    const float sourceY = 1079.0F;
+    const float sourceUv = sourceY / 1088.0F;
+    const float displayedY =
+        (sourceUv - sample.uvRect[1]) /
+        (sample.uvRect[3] - sample.uvRect[1]) * 1080.0F;
+    check(std::fabs(displayedY - sourceY) < 0.001F,
+          "GT bbox y and displayed image y must agree");
+    check(std::fabs(sourceUv * 1080.0F - sourceY) > 7.0F,
+          "regression demonstrates prior eight-line displacement");
+
+    const auto unpadded = computeVideoUvRegion(1280, 720, 1280, 720);
+    check(unpadded.uvRect[3] == 1.0F && unpadded.visibleHeight == 720U,
+          "no crop for full-extent surfaces");
+    // FFmpeg keeps left/top crop offsets for hardware frames while already
+    // subtracting right/bottom cropping from decoded width/height.
+    const auto crop = computeVideoUvRegion(1920, 1080, 1920, 1088, 4, 2);
+    check(crop.visibleWidth == 1916U && crop.visibleHeight == 1078U,
+          "left/top cropping adjusts viewport dimensions");
+    check(std::fabs(crop.uvRect[0] - 4.0F / 1920.0F) < 1e-7F &&
+          std::fabs(crop.uvRect[1] - 2.0F / 1088.0F) < 1e-7F,
+          "left/top cropping offsets UV origin");
+    bool rejected = false;
+    try {
+        static_cast<void>(computeVideoUvRegion(1920, 1080, 1920, 1072));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "reject decoded dimensions outside backing VkImage");
+}
+
 int main() {
     try {
         testRemoteTextHotkeyGate();
+        testVisibleVideoSampling();
         testPayloads();
         testFrames();
         testGeometry();
