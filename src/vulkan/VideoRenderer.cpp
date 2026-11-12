@@ -7,6 +7,7 @@
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanError.hpp"
 #include "vulkan/VulkanContext.hpp"
+#include "vulkan/VideoUvRegion.hpp"
 
 extern "C" {
 #include <libavutil/buffer.h>
@@ -479,9 +480,18 @@ void VideoRenderer::ensureGraphicsPipeline(VkFormat swapchainFormat) {
         destroyGraphicsPipeline();
     }
 
+    // A single vec4 selects only the visible pixel region of FFmpeg's coded
+    // Vulkan image. It changes per frame without rebuilding descriptors.
+    const VkPushConstantRange sampleRange{
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = sizeof(std::array<float, 4>),
+    };
     VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &descriptorSetLayout_;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &sampleRange;
     checkVk(vkCreatePipelineLayout(vulkan_.device(), &layoutInfo, nullptr, &pipelineLayout_),
             "vkCreatePipelineLayout(video)");
 
@@ -1080,10 +1090,11 @@ VideoRenderer::readScreenshotBuffer(
 }
 
 VkViewport VideoRenderer::videoViewport(
-    const video::VideoFrame& frame,
+    std::uint32_t visibleWidth,
+    std::uint32_t visibleHeight,
     VkExtent2D extent) const {
-    const float sourceWidth = static_cast<float>(frame.width());
-    const float sourceHeight = static_cast<float>(frame.height());
+    const float sourceWidth = static_cast<float>(visibleWidth);
+    const float sourceHeight = static_cast<float>(visibleHeight);
     const float targetWidth = static_cast<float>(extent.width);
     const float targetHeight = static_cast<float>(extent.height);
 
@@ -1126,6 +1137,22 @@ bool VideoRenderer::render(
     ensureVideoResources(*frame);
     ensureGraphicsPipeline(swapchain.format());
     syncSwapchainState(swapchain);
+
+    // Visible AVFrame dimensions may be 1920x1080 even though the Vulkan
+    // decode image is 1920x1088. Crop the sampled image to its visible region;
+    // the viewport and GT coordinates must use that same visible rectangle.
+    const auto* hwFrames = reinterpret_cast<const AVHWFramesContext*>(
+        frame->avFrame()->hw_frames_ctx->data);
+    if (hwFrames == nullptr) {
+        throw std::runtime_error("Decoded frame lacks Vulkan pool dimensions");
+    }
+    const VideoUvRegion sampleRegion = computeVideoUvRegion(
+        frame->width(),
+        frame->height(),
+        hwFrames->width,
+        hwFrames->height,
+        frame->avFrame()->crop_left,
+        frame->avFrame()->crop_top);
 
     std::uint32_t imageIndex = 0;
     const AcquireStatus acquireStatus = swapchain.acquire(slot.imageAvailable, imageIndex);
@@ -1209,7 +1236,10 @@ bool VideoRenderer::render(
 
         vkCmdBeginRendering(slot.commandBuffer, &renderingInfo);
 
-        const VkViewport viewport = videoViewport(*frame, swapchain.extent());
+        const VkViewport viewport = videoViewport(
+            sampleRegion.visibleWidth,
+            sampleRegion.visibleHeight,
+            swapchain.extent());
         const VkRect2D scissor{
             .offset = {0, 0},
             .extent = swapchain.extent(),
@@ -1230,6 +1260,13 @@ bool VideoRenderer::render(
             &surface.descriptorSet,
             0,
             nullptr);
+        vkCmdPushConstants(
+            slot.commandBuffer,
+            pipelineLayout_,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(sampleRegion.uvRect),
+            sampleRegion.uvRect.data());
         vkCmdDraw(slot.commandBuffer, 3, 1, 0, 0);
 
         if (overlay != nullptr) {
