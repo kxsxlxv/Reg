@@ -130,6 +130,8 @@ private:
     std::deque<Sample> samples_;
     std::deque<Event> events_;
     std::vector<Target> targets_;
+    // Separate lock: render snapshots must not block video/CVM1 threads.
+    mutable std::mutex gtRangeMutex_;
     GtRangeHistory gtRanges_;
 
     std::chrono::steady_clock::time_point lastSampleTime_{};
