@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -81,7 +82,7 @@ struct Snapshot {
     std::vector<Sample> samples;
     std::vector<Event> events;
     std::vector<Target> targets;
-    std::vector<GtRangeTrack> gtRangeTracks;
+    std::shared_ptr<const std::vector<GtRangeTrack>> gtRangeTracks;
 };
 
 class TelemetryModel final {
@@ -133,6 +134,9 @@ private:
     // Separate lock: render snapshots must not block video/CVM1 threads.
     mutable std::mutex gtRangeMutex_;
     GtRangeHistory gtRanges_;
+    // Reuse a 10 Hz immutable snapshot across faster UI frames.
+    mutable std::shared_ptr<const std::vector<GtRangeTrack>> gtRangeSnapshot_;
+    mutable std::chrono::steady_clock::time_point gtRangeSnapshotAt_{};
 
     std::chrono::steady_clock::time_point lastSampleTime_{};
 };
