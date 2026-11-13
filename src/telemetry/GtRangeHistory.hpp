@@ -70,14 +70,16 @@ public:
         frame.sourceTimeNs = gt.source.sourceTimeNs;
 
         for (const auto& object : gt.objects) {
-            if (!object.visible || !object.validBox || object.id.empty())
+            if (!object.visible || object.id.empty())
                 continue;
             const bool hasRange = object.validRange &&
                 std::isfinite(object.rangeM) && object.rangeM >= 0.0;
-            frame.objects.push_back(Candidate{
-                object.id, object.xyxyVideo, gt.videoWidth, gt.videoHeight,
-                hasRange, object.rangeM
-            });
+            if (object.validBox) {
+                frame.objects.push_back(Candidate{
+                    object.id, object.xyxyVideo, gt.videoWidth, gt.videoHeight,
+                    hasRange, object.rangeM
+                });
+            }
             if (!hasRange)
                 continue;
             auto& track = tracks_[object.id];
@@ -94,6 +96,8 @@ public:
                 when - track.points.back().time >= std::chrono::milliseconds(50)) {
                 track.points.push_back(GtRangePoint{
                     when, gt.source.key, gt.source.sourceTimeNs, object.rangeM});
+                if (track.points.size() > 6000U)
+                    track.points.pop_front();
             }
         }
 
@@ -209,6 +213,8 @@ private:
             it->second.matches.push_back(GtCvMatch{
                 frame.firstSeen, key, frame.sourceTimeNs, cv.id, cv.flags,
                 cv.classId, gt.rangeM, pair.overlap, cv.confidence});
+            if (it->second.matches.size() > 6000U)
+                it->second.matches.pop_front();
         }
         pending_.erase(key);
     }
