@@ -1,6 +1,9 @@
 #include "render/TargetOverlayBuilder.hpp"
+#include "render/Cvm1SemanticStyle.hpp"
 
 #include <algorithm>
+#include <array>
+#include <utility>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -10,8 +13,6 @@
 namespace reg::render {
 namespace {
 
-constexpr std::uint16_t kDetectorFlag = 0x0001U;
-constexpr std::uint16_t kPropagatedFlag = 0x0002U;
 
 struct LabelPlacement {
     video::Vec2 position{};
@@ -96,25 +97,20 @@ OverlayScene TargetOverlayBuilder::build(
     OverlayScene scene;
 
     // Typical load is <= 10 targets. Reserve fill + bbox + crosshair + label.
-    scene.primitives.reserve(metadata.targets.size() * 4U);
+    scene.primitives.reserve(metadata.targets.size() * 14U);
 
     const video::RectF viewport = transform.viewport();
+    const auto palette = cvm1::current();
 
     for (const metadata::TargetMetadata& target : metadata.targets) {
-        const bool propagated =
-            (target.flags & kPropagatedFlag) != 0U;
-        const bool detector =
-            (target.flags & kDetectorFlag) != 0U;
-
-        const Color strokeColor = propagated
-            ? style_.propagatedStrokeColor
-            : style_.detectorStrokeColor;
-        const Color fillColor = propagated
-            ? style_.propagatedFillColor
-            : style_.detectorFillColor;
-        const LinePattern bboxPattern = propagated
-            ? style_.propagatedPattern
-            : style_.detectorPattern;
+        const auto& semantic = palette->style(target.flags);
+        if (!semantic.visible) continue;
+        const Color strokeColor{semantic.color.r, semantic.color.g,
+                                semantic.color.b, semantic.color.a};
+        Color fillColor = strokeColor;
+        fillColor.a = 0.08F;
+        const LinePattern bboxPattern = semantic.pattern == cvm1::Pattern::dashed
+            ? LinePattern::Dashed : LinePattern::Solid;
 
         const video::RectF normalizedRect{
             .x = target.bbox.x,
@@ -130,14 +126,33 @@ OverlayScene TargetOverlayBuilder::build(
             .color = applyMasterAlpha(fillColor),
         });
 
-        scene.primitives.emplace_back(RectPrimitive{
-            .rect = screenRect,
-            .style = LineStyle{
-                .color = applyMasterAlpha(strokeColor),
-                .thickness = style_.bboxThicknessPx,
-                .pattern = bboxPattern,
-            },
-        });
+        const LineStyle semanticLine{
+            .color = applyMasterAlpha(strokeColor),
+            .thickness = semantic.width,
+            .pattern = bboxPattern,
+        };
+        if (semantic.pattern == cvm1::Pattern::corners) {
+            const float arm = std::min({screenRect.width * 0.26F,
+                screenRect.height * 0.26F, 22.0F});
+            const float x = screenRect.x, y = screenRect.y;
+            const float r = x + screenRect.width, b = y + screenRect.height;
+            const video::Vec2 a{x,y}, c{r,y}, d{x,b}, e{r,b};
+            const video::Vec2 aa{x+arm,y}, ab{x,y+arm};
+            const video::Vec2 ca{r-arm,y}, cb{r,y+arm};
+            const video::Vec2 da{x+arm,b}, db{x,b-arm};
+            const video::Vec2 ea{r-arm,b}, eb{r,b-arm};
+            const std::array<std::pair<video::Vec2,video::Vec2>,8> edges{{
+                {a,aa}, {a,ab}, {c,ca}, {c,cb},
+                {d,da}, {d,db}, {e,ea}, {e,eb}
+            }};
+            for (const auto& edge : edges) {
+                scene.primitives.emplace_back(LinePrimitive{
+                    .from = edge.first, .to = edge.second, .style = semanticLine});
+            }
+        } else {
+            scene.primitives.emplace_back(RectPrimitive{
+                .rect = screenRect, .style = semanticLine});
+        }
 
         const video::Vec2 center{
             .x = screenRect.x + screenRect.width * 0.5F,
@@ -149,24 +164,25 @@ OverlayScene TargetOverlayBuilder::build(
             .armLengthPx = style_.crosshairArmPx,
             .style = LineStyle{
                 .color = applyMasterAlpha(strokeColor),
-                .thickness = style_.bboxThicknessPx,
+                .thickness = semantic.width,
                 .pattern = LinePattern::Solid,
             },
         });
 
-        const char* source = propagated
-            ? "OFA"
-            : (detector ? "DETR" : "CV");
-
+        const char* source = semantic.label.c_str();
         char label[128]{};
-        std::snprintf(
-            label,
-            sizeof(label),
-            "%s  ID %llu  C%u  %.0f%%",
-            source,
-            static_cast<unsigned long long>(target.id),
-            static_cast<unsigned>(target.classId),
-            static_cast<double>(target.confidence * 100.0F));
+        if (cvm1::isEphemeralId(target.id)) {
+            std::snprintf(label, sizeof(label),
+                "%s  frame-local  C%u  %.0f%%", source,
+                static_cast<unsigned>(target.classId),
+                static_cast<double>(target.confidence * 100.0F));
+        } else {
+            std::snprintf(label, sizeof(label),
+                "%s  ID %llu  C%u  %.0f%%", source,
+                static_cast<unsigned long long>(target.id),
+                static_cast<unsigned>(target.classId),
+                static_cast<double>(target.confidence * 100.0F));
+        }
 
         const std::string labelText(label);
         const LabelPlacement placement = placeLabel(

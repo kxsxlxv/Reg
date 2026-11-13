@@ -46,6 +46,7 @@ void MetadataReceiver::run() {
             continue;
         }
 
+        framesDecoded_.fetch_add(1, std::memory_order_relaxed);
         const SequenceObservation observation =
             sequences.observe(decoded.metadata.sequence);
         if (observation.duplicate) {
@@ -60,6 +61,7 @@ void MetadataReceiver::run() {
                 std::memory_order_relaxed);
         }
 
+        const auto targetCount = decoded.metadata.targets.size();
         FrameMetadata acceptedCopy{};
         if (onAccepted_) {
             acceptedCopy = decoded.metadata;
@@ -68,6 +70,10 @@ void MetadataReceiver::run() {
         const InsertResult insertResult =
             store_.insert(std::move(decoded.metadata));
 
+        if (insertResult != InsertResult::Duplicate) {
+            framesAccepted_.fetch_add(1, std::memory_order_relaxed);
+            targetsAccepted_.fetch_add(targetCount, std::memory_order_relaxed);
+        }
         if (insertResult != InsertResult::Duplicate &&
             onAccepted_) {
             onAccepted_(std::move(acceptedCopy));
@@ -89,6 +95,9 @@ MetadataReceiverStats MetadataReceiver::stats() const noexcept {
     return MetadataReceiverStats{
         .packetsReceived = packetsReceived_.load(std::memory_order_relaxed),
         .packetsInvalid = packetsInvalid_.load(std::memory_order_relaxed),
+        .framesDecoded = framesDecoded_.load(std::memory_order_relaxed),
+        .framesAccepted = framesAccepted_.load(std::memory_order_relaxed),
+        .targetsAccepted = targetsAccepted_.load(std::memory_order_relaxed),
         .packetDuplicates = packetDuplicates_.load(std::memory_order_relaxed),
         .packetsOutOfOrder = packetsOutOfOrder_.load(std::memory_order_relaxed),
         .sequenceGaps = sequenceGaps_.load(std::memory_order_relaxed),

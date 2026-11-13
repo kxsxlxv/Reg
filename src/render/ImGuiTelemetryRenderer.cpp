@@ -1262,6 +1262,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             paused ? pausedRangeTracks : snapshot.gtRangeTracks;
         static const std::vector<telemetry::GtRangeTrack> emptyRange;
         gtDashboard.draw(rangeView ? *rangeView : emptyRange,
+                         snapshot.counters, snapshot.gtCvDiagnostics,
                          paused ? pausedRangeAt : now, paused);
     }
 

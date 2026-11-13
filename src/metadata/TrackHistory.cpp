@@ -1,4 +1,5 @@
 #include "metadata/TrackHistory.hpp"
+#include "render/Cvm1SemanticStyle.hpp"
 
 #include <stdexcept>
 
@@ -23,6 +24,7 @@ void TrackHistory::update(
     prune(now);
 
     for (const TargetMetadata& target : metadata.targets) {
+        if (render::cvm1::isEphemeralId(target.id)) continue;
         auto& track = tracks_[target.id];
 
         track.push_back(TrackPoint{

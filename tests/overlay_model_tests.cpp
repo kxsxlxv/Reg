@@ -2,6 +2,7 @@
 #include "metadata/TrackHistory.hpp"
 #include "render/OverlayPrimitives.hpp"
 #include "render/TargetOverlayBuilder.hpp"
+#include "render/Cvm1SemanticStyle.hpp"
 #include "video/VideoTransform.hpp"
 
 #include <chrono>
@@ -245,8 +246,8 @@ void provenanceFlagsDriveOverlayStyle() {
         detectorRect.style.pattern == reg::render::LinePattern::Solid,
         "DETR bbox must be solid");
     require(
-        detectorLabel.utf8.find("DETR") != std::string::npos,
-        "DETR label provenance missing");
+        detectorLabel.utf8.find("detection") != std::string::npos,
+        "detector semantic label missing");
 
     auto propagatedMetadata = makeMetadata();
     propagatedMetadata.targets[0].flags = 0x0002U;
@@ -260,11 +261,57 @@ void provenanceFlagsDriveOverlayStyle() {
     const auto& propagatedLabel =
         std::get<reg::render::TextPrimitive>(propagatedScene.primitives[3]);
     require(
-        propagatedRect.style.pattern == reg::render::LinePattern::Dashed,
-        "OFA bbox must be dashed");
+        propagatedRect.style.pattern == reg::render::LinePattern::Solid,
+        "propagated bbox must use shared solid blue style");
     require(
-        propagatedLabel.utf8.find("OFA") != std::string::npos,
-        "OFA label provenance missing");
+        propagatedLabel.utf8.find("propagated") != std::string::npos,
+        "propagated semantic label missing");
+}
+
+void semanticLifecycleAndEphemeralAreRendered() {
+    namespace cvm1 = reg::render::cvm1;
+    reg::metadata::TrackHistory history(5s, 32);
+    reg::video::VideoTransform transform(1920, 1080, 1920, 1080);
+    reg::render::TargetOverlayBuilder builder;
+
+    auto candidate = makeMetadata();
+    candidate.targets[0].flags = cvm1::kTentative | cvm1::kDetector;
+    const auto tentative = builder.build(candidate, history, transform);
+    require(std::get<reg::render::RectPrimitive>(tentative.primitives[1]).style.pattern
+                == reg::render::LinePattern::Dashed,
+        "tentative must be dashed");
+
+    candidate.targets[0].flags = cvm1::kConfirmed | cvm1::kPredicted;
+    const auto predicted = builder.build(candidate, history, transform);
+    const auto& rect =
+        std::get<reg::render::RectPrimitive>(predicted.primitives[1]);
+    require(near(rect.style.thickness, 2.0F),
+        "predicted overrides confirmed with 2px width");
+
+    candidate.targets[0].flags = cvm1::kSotSelected;
+    const auto selected = builder.build(candidate, history, transform);
+    require(selected.primitives.size() == 11U,
+        "selected SOT must use eight corners plus fill/crosshair/label");
+    for (std::size_t i = 1; i < 9; ++i)
+        require(std::holds_alternative<reg::render::LinePrimitive>(
+                    selected.primitives[i]), "corner segment missing");
+
+    candidate.targets[0].flags = cvm1::kTentative | cvm1::kConfirmed;
+    const auto conflict = builder.build(candidate, history, transform);
+    require(near(std::get<reg::render::RectPrimitive>(
+                    conflict.primitives[1]).style.thickness, 2.0F),
+        "conflicting flags must render neutral fallback");
+
+    candidate.targets[0].flags = cvm1::kDetector;
+    candidate.targets[0].id = cvm1::frameLocalId(1);
+    history.update(candidate, std::chrono::steady_clock::now());
+    require(history.points(candidate.targets[0].id).empty(),
+        "frame-local detection must not create persistent trajectory");
+    const auto noTrack = builder.build(candidate, history, transform);
+    require(std::get<reg::render::TextPrimitive>(
+                    noTrack.primitives[3]).utf8.find("frame-local") !=
+                    std::string::npos,
+        "ephemeral ID must be clearly labeled");
 }
 
 } // namespace
@@ -277,6 +324,7 @@ int main() {
         sceneBuilderCreatesExpectedTargetPrimitives();
         adaptiveLabelsStayOutsideBBox();
         provenanceFlagsDriveOverlayStyle();
+        semanticLifecycleAndEphemeralAreRendered();
 
         std::cout << "overlay_model_tests: PASS\n";
         return EXIT_SUCCESS;

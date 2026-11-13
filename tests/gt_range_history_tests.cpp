@@ -101,6 +101,11 @@ void exactFrameJoinBothArrivalOrders() {
     require(rows[0].matches.size() == 2, "CV-first exact-frame join failed");
     require(rows[0].matches[1].meters == 500.0,
             "CV-first join used stale range");
+    require(rows[0].matches[1].time == base + 50ms,
+            "CV marker must use GT sample time, not CV packet arrival");
+    require(history.diagnostics().joinedFrames == 2 &&
+            history.diagnostics().matchedTargets == 2,
+            "exact joins/matched targets diagnostics wrong");
 
     history.observeCv(cv(21, base + 60ms, 99));
     history.observeGt(gt(21, 480.0, base + 80ms, 7), base + 80ms);
@@ -119,6 +124,8 @@ void lowIouIgnoredAndReset() {
     auto rows = history.snapshot(base + 20ms);
     require(rows.size() == 1 && rows[0].matches.empty(),
             "unrelated bounding boxes were falsely matched");
+    require(history.diagnostics().unmatchedCvTargets == 1,
+            "unmatched CV targets should be accounted for");
     history.clear();
     require(history.snapshot(base + 20ms).empty(), "session reset kept GT ID");
 }

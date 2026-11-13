@@ -21,6 +21,9 @@ on:
       - 'src/telemetry/TelemetryModel.cpp'
       - 'src/telemetry/TelemetryModel.hpp'
       - 'tests/gt_range_history_tests.cpp'
+      - 'src/render/Cvm1SemanticStyle.hpp'
+      - 'src/telemetry/GtRangeHistory.hpp'
+      - 'tests/cvm1_semantic_style_tests.cpp'
       - 'CMakeLists.txt'
   push:
     branches:
@@ -40,6 +43,9 @@ on:
       - 'src/telemetry/TelemetryModel.cpp'
       - 'src/telemetry/TelemetryModel.hpp'
       - 'tests/gt_range_history_tests.cpp'
+      - 'src/render/Cvm1SemanticStyle.hpp'
+      - 'src/telemetry/GtRangeHistory.hpp'
+      - 'tests/cvm1_semantic_style_tests.cpp'
       - 'CMakeLists.txt'
 
 permissions:
@@ -67,6 +73,7 @@ jobs:
           g++ $flags tests/diagnostic_fixture_bridge.cpp -o build-headless/reg_diag_bridge
           g++ $flags tests/diagnostic_api_contract_tests.cpp -o build-headless/reg_diag_api_contract
           g++ $flags tests/gt_range_history_tests.cpp -o build-headless/reg_gt_range_history
+          g++ $flags tests/cvm1_semantic_style_tests.cpp -o build-headless/reg_cvm1_semantics
           g++ $flags tests/telemetry_model_tests.cpp src/telemetry/TelemetryModel.cpp -o build-headless/reg_telemetry_model
 
       - name: Execute C++ statistical and Exact Sync regressions
@@ -75,6 +82,7 @@ jobs:
           ./build-headless/reg_diag_sync
           ./build-headless/reg_diag_api_contract
           ./build-headless/reg_gt_range_history
+          ./build-headless/reg_cvm1_semantics
           ./build-headless/reg_telemetry_model
 
       - name: Verify B fixture oracle through A and C C++ implementations

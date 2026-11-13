@@ -1,4 +1,5 @@
 #include "render/GtRangeDashboard.hpp"
+#include "render/Cvm1SemanticStyle.hpp"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -51,23 +52,10 @@ ImVec4 parseHex(std::string_view hex, ImVec4 fallback) {
                   rgb[2] / 255.0F, 1.0F);
 }
 
-struct MarkerStyle {
-    std::string name;
-    std::uint16_t mask{};
-    std::uint16_t value{};
-    ImVec4 color{};
-    float size{5.0F};
-};
-
 struct ChartSettings {
     double windowSeconds{60.0};
     double gapSeconds{0.4};
     ImVec4 rangeColor{kDefaultLine};
-    std::vector<MarkerStyle> markers{
-        {"DETR", 0x0001U, 0x0001U, kDefaultDetection, 5.0F},
-        {"MOT / propagated", 0x0002U, 0x0002U, kDefaultTracking, 5.0F},
-        {"CV", 0U, 0U, kDefaultOther, 5.0F}
-    };
 };
 
 std::filesystem::path settingsPath() {
@@ -78,32 +66,6 @@ std::filesystem::path settingsPath() {
     if (const char* base = SDL_GetBasePath(); base != nullptr)
         return std::filesystem::path(base) / "config/gt-range-ui.json";
     return "config/gt-range-ui.json";
-}
-
-std::size_t styleIndex(const ChartSettings& settings, std::uint16_t flags) {
-    for (std::size_t i = 0; i < settings.markers.size(); ++i) {
-        const auto& rule = settings.markers[i];
-        if (rule.mask != 0 && (flags & rule.mask) == rule.value)
-            return i;
-    }
-    for (std::size_t i = 0; i < settings.markers.size(); ++i) {
-        if (settings.markers[i].mask == 0) return i;
-    }
-    return settings.markers.size(); // Built-in unmatched-CV fallback.
-}
-
-const MarkerStyle& styleFor(const ChartSettings& settings,
-                            std::uint16_t flags) {
-    // More specific masks take priority; fallback mask=0 matches any CVM1 hit.
-    for (const auto& style : settings.markers) {
-        if (style.mask != 0 && (flags & style.mask) == style.value)
-            return style;
-    }
-    for (const auto& style : settings.markers) {
-        if (style.mask == 0) return style;
-    }
-    static const MarkerStyle fallback{"CV", 0, 0, kDefaultOther, 5.0F};
-    return fallback;
 }
 
 bool visible(double x, const ChartSettings& settings) {
@@ -120,6 +82,7 @@ struct GtRangeDashboard::Impl {
     Clock::time_point nextCheck{};
     std::string focusedId;
     int page{};
+    std::size_t markersDrawnLastFrame{};
 
     void reloadConfig(Clock::time_point now) {
         if (now < nextCheck) return;
@@ -146,23 +109,6 @@ struct GtRangeDashboard::Impl {
             next.rangeColor = parseHex(
                 json.value("range_color", std::string("#43C9FF")),
                 kDefaultLine);
-            if (json.contains("cv_markers") && json["cv_markers"].is_array()) {
-                next.markers.clear();
-                for (const auto& item : json["cv_markers"]) {
-                    if (!item.is_object()) continue;
-                    const auto mask = item.value("flags_mask", 0U);
-                    const auto value = item.value("flags_value", 0U);
-                    if (mask > 0xffffU || value > 0xffffU) continue;
-                    const auto name = item.value("label", std::string("CV"));
-                    const auto color = item.value("color", std::string("#AF96FF"));
-                    next.markers.push_back(MarkerStyle{
-                        name, static_cast<std::uint16_t>(mask),
-                        static_cast<std::uint16_t>(value),
-                        parseHex(color, kDefaultOther),
-                        std::clamp(item.value("marker_size", 5.0F), 2.0F, 12.0F)
-                    });
-                }
-            }
             settings = std::move(next);
         } catch (const std::exception& e) {
             // Never crash the renderer or discard the last valid settings.
@@ -244,28 +190,32 @@ struct GtRangeDashboard::Impl {
                 }
                 flush();
 
+                const auto palette = cvm1::current();
                 for (std::size_t group = 0;
-                     group <= settings.markers.size(); ++group) {
+                     group < cvm1::kStyleCount; ++group) {
                     std::vector<double> mx, my;
                     for (const auto& m : track.matches) {
                         const double x = secondsBetween(m.time, anchor);
                         if (!visible(x, settings) ||
-                            styleIndex(settings, m.flags) != group)
+                            cvm1::Palette::index(palette->resolve(m.flags)) != group ||
+                            !palette->style(m.flags).visible)
                             continue;
                         mx.push_back(x);
                         my.push_back(m.meters);
                     }
                     if (mx.empty()) continue;
-                    const MarkerStyle& style =
-                        group < settings.markers.size()
-                            ? settings.markers[group]
-                            : styleFor(settings, 0);
+                    markersDrawnLastFrame += mx.size();
+                    const auto& style = palette->styles[group];
+                    const ImVec4 color(style.color.r, style.color.g,
+                                       style.color.b, style.color.a);
                     ImPlotSpec marker;
-                    marker.LineColor = style.color;
-                    marker.MarkerLineColor = style.color;
-                    marker.MarkerFillColor = style.color;
-                    marker.Marker = ImPlotMarker_Diamond;
-                    marker.MarkerSize = style.size;
+                    marker.LineColor = color;
+                    marker.MarkerLineColor = color;
+                    marker.MarkerFillColor = color;
+                    marker.Marker = style.pattern == cvm1::Pattern::dashed
+                        ? ImPlotMarker_Cross : (style.pattern == cvm1::Pattern::corners
+                        ? ImPlotMarker_Square : ImPlotMarker_Diamond);
+                    marker.MarkerSize = style.markerSize;
                     marker.Flags = ImPlotItemFlags_NoLegend;
                     const std::string label =
                         "##cv_group_" + std::to_string(group);
@@ -308,12 +258,17 @@ struct GtRangeDashboard::Impl {
                         ImGui::BeginTooltip();
                         ImGui::TextUnformatted(track.id.c_str());
                         if (nearestHit) {
-                            const auto& style = styleFor(settings, nearestHit->flags);
-                            ImGui::TextColored(style.color, "%s", style.name.c_str());
+                            const auto& style = cvm1::current()->style(nearestHit->flags);
+                            ImGui::TextColored(ImVec4(style.color.r, style.color.g,
+                                style.color.b, style.color.a), "%s", style.label.c_str());
                             ImGui::Text("GT: %.2f м (измерено)", nearestHit->meters);
-                            ImGui::Text("CV ID: %llu  class: %u",
-                                static_cast<unsigned long long>(nearestHit->trackId),
-                                static_cast<unsigned>(nearestHit->classId));
+                            if (cvm1::isEphemeralId(nearestHit->trackId))
+                                ImGui::Text("CV frame-local ID  class: %u",
+                                    static_cast<unsigned>(nearestHit->classId));
+                            else
+                                ImGui::Text("CV ID: %llu  class: %u",
+                                    static_cast<unsigned long long>(nearestHit->trackId),
+                                    static_cast<unsigned>(nearestHit->classId));
                             ImGui::Text("IoU: %.3f   confidence: %.3f",
                                 nearestHit->iou, static_cast<double>(nearestHit->confidence));
                             ImGui::Text("Frame: %llu/%llu",
@@ -344,6 +299,8 @@ struct GtRangeDashboard::Impl {
     }
 
     void draw(const std::vector<telemetry::GtRangeTrack>& tracks,
+              const telemetry::Counters& counters,
+              const telemetry::GtCvDiagnostics& diagnostics,
               Clock::time_point anchor,
               bool paused) {
         reloadConfig(Clock::now());
@@ -351,7 +308,32 @@ struct GtRangeDashboard::Impl {
             ImGui::TextColored(kDefaultDetection, "ПАУЗА");
         else
             ImGui::TextDisabled("GT range  /  CVM1 IoU (FrameKey)");
+        ImGui::TextDisabled("CVM1 UDP %llu  decoded %llu  accepted %llu  targets %llu",
+            static_cast<unsigned long long>(counters.metadataPackets),
+            static_cast<unsigned long long>(counters.metadataValidFrames),
+            static_cast<unsigned long long>(counters.metadataAcceptedFrames),
+            static_cast<unsigned long long>(counters.metadataTargets));
+        ImGui::TextDisabled("Exact FrameKey joins %llu  matched CV %llu  plotted %zu",
+            static_cast<unsigned long long>(diagnostics.joinedFrames),
+            static_cast<unsigned long long>(diagnostics.matchedTargets),
+            markersDrawnLastFrame);
+        ImGui::TextDisabled("RGF1 missing %llu  GT unavailable %llu  unmatched CV %llu  expired CV %llu  pending CV %llu",
+            static_cast<unsigned long long>(counters.identityMissingFrames),
+            static_cast<unsigned long long>(diagnostics.gtUnavailableFrames),
+            static_cast<unsigned long long>(diagnostics.unmatchedCvFrames),
+            static_cast<unsigned long long>(diagnostics.expiredCvFrames),
+            static_cast<unsigned long long>(diagnostics.pendingCvFrames));
+        if (counters.metadataPackets > 0 && counters.metadataValidFrames == 0)
+            ImGui::TextColored(ImVec4(1.0F, 0.30F, 0.30F, 1.0F),
+                "CVM1 received but protocol decoder rejected every datagram");
+        else if (counters.metadataAcceptedFrames > 0 && diagnostics.joinedFrames == 0)
+            ImGui::TextColored(ImVec4(1.0F, 0.58F, 0.22F, 1.0F),
+                "CVM1 accepted, but there are no exact GT FrameKey joins");
+        else if (diagnostics.joinedFrames > 0 && diagnostics.matchedTargets == 0 && counters.metadataTargets > 0)
+            ImGui::TextColored(ImVec4(1.0F, 0.58F, 0.22F, 1.0F),
+                "Exact FrameKey joins exist, but no target passed IoU 0.30");
         ImGui::Separator();
+        markersDrawnLastFrame = 0;
 
         if (tracks.empty()) {
             ImGui::TextDisabled("Ожидание GT с полем range_m...");
@@ -413,9 +395,11 @@ GtRangeDashboard::~GtRangeDashboard() = default;
 
 void GtRangeDashboard::draw(
     const std::vector<telemetry::GtRangeTrack>& tracks,
+    const telemetry::Counters& counters,
+    const telemetry::GtCvDiagnostics& diagnostics,
     Clock::time_point anchor,
     bool paused) {
-    impl_->draw(tracks, anchor, paused);
+    impl_->draw(tracks, counters, diagnostics, anchor, paused);
 }
 
 } // namespace reg::render
