@@ -1311,7 +1311,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoSavedSettings |
-            ImGuiWindowFlags_NoBringToFrontOnFocus;
+            ImGuiWindowFlags_NoBringToFrontOnFocus |
+            ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoScrollWithMouse;
         if (!ImGui::Begin("Reg Телеметрия", nullptr, flags)) {
             ImGui::End();
             return;
