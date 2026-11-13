@@ -1008,7 +1008,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     GtRangeDashboard gtDashboard;
     bool rangeWasPaused{false};
     std::chrono::steady_clock::time_point pausedRangeAt{};
-    std::vector<telemetry::GtRangeTrack> pausedRangeTracks;
+    std::shared_ptr<const std::vector<telemetry::GtRangeTrack>> pausedRangeTracks;
     std::mutex inputMutex;
     std::vector<PendingInputEvent> pendingInput;
 
@@ -1258,7 +1258,10 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         if (!paused && rangeWasPaused)
             pausedRangeTracks.clear();
         rangeWasPaused = paused;
-        gtDashboard.draw(paused ? pausedRangeTracks : snapshot.gtRangeTracks,
+        const auto& rangeView =
+            paused ? pausedRangeTracks : snapshot.gtRangeTracks;
+        static const std::vector<telemetry::GtRangeTrack> emptyRange;
+        gtDashboard.draw(rangeView ? *rangeView : emptyRange,
                          paused ? pausedRangeAt : now, paused);
     }
 
