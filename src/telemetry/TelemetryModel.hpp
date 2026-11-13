@@ -2,6 +2,7 @@
 
 #include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "metadata/FrameMetadata.hpp"
+#include "telemetry/GtRangeHistory.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -80,6 +81,7 @@ struct Snapshot {
     std::vector<Sample> samples;
     std::vector<Event> events;
     std::vector<Target> targets;
+    std::vector<GtRangeTrack> gtRangeTracks;
 };
 
 class TelemetryModel final {
@@ -100,6 +102,11 @@ public:
         const metadata::FrameMetadata& metadata);
 
     void clearTargets();
+
+    void observeGtRange(const media::GtMetadata& gt,
+                        std::chrono::steady_clock::time_point when);
+    void observeCvForGt(const metadata::FrameMetadata& metadata);
+    void resetGtRanges();
 
     void log(
         Severity severity,
@@ -123,6 +130,7 @@ private:
     std::deque<Sample> samples_;
     std::deque<Event> events_;
     std::vector<Target> targets_;
+    GtRangeHistory gtRanges_;
 
     std::chrono::steady_clock::time_point lastSampleTime_{};
 };
