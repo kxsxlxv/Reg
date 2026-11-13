@@ -1,0 +1,30 @@
+{
+  "$comment": "Hot-reloaded by REG every 300 ms (without rebuilding). cv_markers match existing CVM1 flags, not GT truth or future algorithm stages.",
+  "version": 1,
+  "window_seconds": 60,
+  "gap_ms": 400,
+  "range_color": "#43C9FF",
+  "cv_markers": [
+    {
+      "label": "Detector",
+      "flags_mask": 1,
+      "flags_value": 1,
+      "color": "#FFC05A",
+      "marker_size": 6
+    },
+    {
+      "label": "MOT / Propagated",
+      "flags_mask": 2,
+      "flags_value": 2,
+      "color": "#75EFA4",
+      "marker_size": 5
+    },
+    {
+      "label": "Other CV",
+      "flags_mask": 0,
+      "flags_value": 0,
+      "color": "#B496FF",
+      "marker_size": 5
+    }
+  ]
+}

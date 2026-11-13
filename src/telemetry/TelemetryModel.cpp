@@ -89,6 +89,30 @@ void TelemetryModel::setTargets(
     }
 }
 
+void TelemetryModel::observeGtRange(
+    const media::GtMetadata& gt,
+    std::chrono::steady_clock::time_point when) {
+    // Best-effort UI data; never stall the decoder for a diagnostic chart.
+    std::unique_lock lock(gtRangeMutex_, std::try_to_lock);
+    if (lock.owns_lock())
+        gtRanges_.observeGt(gt, when);
+}
+
+void TelemetryModel::observeCvForGt(
+    const metadata::FrameMetadata& metadata) {
+    // Accepted CVM1 remains in its authoritative store even if UI skips it.
+    std::unique_lock lock(gtRangeMutex_, std::try_to_lock);
+    if (lock.owns_lock())
+        gtRanges_.observeCv(metadata);
+}
+
+void TelemetryModel::resetGtRanges() {
+    std::scoped_lock lock(gtRangeMutex_);
+    gtRanges_.clear();
+    gtRangeSnapshot_.reset();
+    gtRangeSnapshotAt_ = {};
+}
+
 void TelemetryModel::clearTargets() {
     std::scoped_lock lock(mutex_);
     targets_.clear();
@@ -136,18 +160,27 @@ void TelemetryModel::log(
 }
 
 Snapshot TelemetryModel::snapshot() const {
-    std::scoped_lock lock(mutex_);
-
-    return Snapshot{
-        .counters = counters_,
-        .samples = std::vector<Sample>(
-            samples_.begin(),
-            samples_.end()),
-        .events = std::vector<Event>(
-            events_.begin(),
-            events_.end()),
-        .targets = targets_,
-    };
+    Snapshot snapshot;
+    {
+        std::scoped_lock lock(mutex_);
+        snapshot.counters = counters_;
+        snapshot.samples.assign(samples_.begin(), samples_.end());
+        snapshot.events.assign(events_.begin(), events_.end());
+        snapshot.targets = targets_;
+    }
+    {
+        std::scoped_lock lock(gtRangeMutex_);
+        const auto now = std::chrono::steady_clock::now();
+        if (!gtRangeSnapshot_ ||
+            now - gtRangeSnapshotAt_ >= std::chrono::milliseconds(100)) {
+            gtRangeSnapshot_ =
+                std::make_shared<const std::vector<GtRangeTrack>>(
+                    gtRanges_.snapshot(now));
+            gtRangeSnapshotAt_ = now;
+        }
+        snapshot.gtRangeTracks = gtRangeSnapshot_;
+    }
+    return snapshot;
 }
 
 void TelemetryModel::pruneLocked(

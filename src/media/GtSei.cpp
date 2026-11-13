@@ -330,6 +330,11 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
             GtObject object;
             object.id = id->scalar;
             object.visible = visible->boolean;
+            // Missing/null/invalid range means no measurement, not zero.
+            if (const Json* range = item.member("range_m"); range != nullptr) {
+                object.validRange = asDouble(*range, object.rangeM) &&
+                    object.rangeM >= 0.0;
+            }
             // An invisible object may have null/absent boxes.
             if (object.visible) {
                 object.validBox = asBox(item.member("xyxy_video"), object.xyxyVideo);

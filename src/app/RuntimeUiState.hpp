@@ -12,6 +12,7 @@ enum class TelemetryPage : std::uint8_t {
     ExactSync,
     NetImgui,
     Gt,
+    Events,
 };
 
 inline std::atomic<TelemetryPage> gTelemetryPage{
@@ -34,7 +35,20 @@ inline void toggleTelemetryPage() noexcept {
                 ? TelemetryPage::NetImgui
                 : (current == TelemetryPage::NetImgui
                     ? TelemetryPage::Gt
-                    : TelemetryPage::Overview)));
+                    : (current == TelemetryPage::Gt
+                        ? TelemetryPage::Events
+                        : TelemetryPage::Overview))));
+}
+
+// UI-only freeze; telemetry collection and GT/CVM1 pairing keep running.
+inline std::atomic_bool gRangeTimelinePaused{false};
+inline bool rangeTimelinePaused() noexcept {
+    return gRangeTimelinePaused.load(std::memory_order_relaxed);
+}
+inline void toggleRangeTimelinePaused() noexcept {
+    bool old = gRangeTimelinePaused.load(std::memory_order_relaxed);
+    while (!gRangeTimelinePaused.compare_exchange_weak(
+        old, !old, std::memory_order_relaxed)) {}
 }
 
 // Shared between the telemetry checkbox and the physical Raw-window T key.

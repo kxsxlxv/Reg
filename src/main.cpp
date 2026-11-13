@@ -331,7 +331,8 @@ int runApplication(
         std::atomic<std::int64_t> lastAcceptedMetadataNs{0};
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
-        if (options.overlayEnabled) {
+        // The GT/CV timeline uses accepted CVM1 even when Overlay is hidden.
+        if (options.overlayEnabled || options.telemetryEnabled) {
             metadataReceiver =
                 std::make_unique<reg::metadata::MetadataReceiver>(
                     metadataStore,
@@ -348,6 +349,7 @@ int runApplication(
                             steadyNowNs(),
                             std::memory_order_release);
                         exactSyncDiagnostics.metadataAccepted(metadata);
+                        telemetryModel.observeCvForGt(metadata);
 
                         if (blackboxRecorder) {
                             static_cast<void>(
@@ -411,6 +413,7 @@ int runApplication(
                                         std::memory_order_relaxed);
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    telemetryModel.resetGtRanges();
                                     exactSyncDiagnostics.clearPending();
                                     lastDecodedFrameNs.store(
                                         0,
@@ -506,6 +509,8 @@ int runApplication(
                                         steadyNowNs(),
                                         std::memory_order_release);
                                     reg::app::observeGt(frame->gt().status);
+                                    telemetryModel.observeGtRange(
+                                        frame->gt(), frame->decodedAt());
                                     rawMailbox.publish(frame);
 
                                     if (options.overlayEnabled) {

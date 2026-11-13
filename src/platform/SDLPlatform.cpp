@@ -816,7 +816,9 @@ bool SDLPlatform::pollQuitRequested() {
                 updateRemoteModifierKeys(
                     remoteUiInput_,
                     event.key.mod);
-                if (!isRegLocalHotkey(event.key.key)) {
+                if (!isRegLocalHotkey(event.key.key) &&
+                    !(event.key.scancode == SDL_SCANCODE_SPACE &&
+                      (event.key.mod & SDL_KMOD_SHIFT) != 0)) {
                     remote::setRemoteUiKey(
                         remoteUiInput_,
                         sdlKeyToImGuiKey(
@@ -845,6 +847,19 @@ bool SDLPlatform::pollQuitRequested() {
             }
         }
 #endif
+
+        // Freeze/unfreeze only the visible GT range history, not recording
+        // or real-time telemetry collection. Ignore repeats and text editing.
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            !event.key.repeat &&
+            event.key.scancode == SDL_SCANCODE_SPACE &&
+            (event.key.mod & SDL_KMOD_SHIFT) != 0 &&
+            (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0 &&
+            !(event.key.windowID == rawWindowId_ &&
+              remote::gRemoteTextFocus.load(std::memory_order_relaxed) ==
+                  remote::RemoteTextFocus::Editing)) {
+            app::toggleRangeTimelinePaused();
+        }
 
         // Physical QWERTY T (Russian layout: Е). Only Raw's keyboard
         // focus is eligible; never repeat or intercept modifier shortcuts.

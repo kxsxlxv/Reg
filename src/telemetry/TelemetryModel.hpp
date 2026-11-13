@@ -2,12 +2,14 @@
 
 #include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "metadata/FrameMetadata.hpp"
+#include "telemetry/GtRangeHistory.hpp"
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -80,6 +82,7 @@ struct Snapshot {
     std::vector<Sample> samples;
     std::vector<Event> events;
     std::vector<Target> targets;
+    std::shared_ptr<const std::vector<GtRangeTrack>> gtRangeTracks;
 };
 
 class TelemetryModel final {
@@ -100,6 +103,11 @@ public:
         const metadata::FrameMetadata& metadata);
 
     void clearTargets();
+
+    void observeGtRange(const media::GtMetadata& gt,
+                        std::chrono::steady_clock::time_point when);
+    void observeCvForGt(const metadata::FrameMetadata& metadata);
+    void resetGtRanges();
 
     void log(
         Severity severity,
@@ -123,6 +131,12 @@ private:
     std::deque<Sample> samples_;
     std::deque<Event> events_;
     std::vector<Target> targets_;
+    // Separate lock: render snapshots must not block video/CVM1 threads.
+    mutable std::mutex gtRangeMutex_;
+    GtRangeHistory gtRanges_;
+    // Reuse a 10 Hz immutable snapshot across faster UI frames.
+    mutable std::shared_ptr<const std::vector<GtRangeTrack>> gtRangeSnapshot_;
+    mutable std::chrono::steady_clock::time_point gtRangeSnapshotAt_{};
 
     std::chrono::steady_clock::time_point lastSampleTime_{};
 };
