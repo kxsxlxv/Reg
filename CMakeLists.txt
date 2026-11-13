@@ -597,6 +597,15 @@ if(REG_BUILD_TESTS)
     target_link_libraries(reg_cvm1_style_config_tests PRIVATE
         nlohmann_json::nlohmann_json SDL3::SDL3)
     add_test(NAME cvm1_style_hot_reload COMMAND reg_cvm1_style_config_tests)
+    if(WIN32)
+        # CTest executes before the runtime-DLL deployment step. Keep the
+        # shared SDL3 runtime next to this standalone test executable.
+        add_custom_command(TARGET reg_cvm1_style_config_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:SDL3::SDL3>"
+                "$<TARGET_FILE_DIR:reg_cvm1_style_config_tests>"
+            VERBATIM)
+    endif()
 endif()
 
 # Graph styles/labels are user-editable at runtime, without rebuilding REG.
