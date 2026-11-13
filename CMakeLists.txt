@@ -218,6 +218,7 @@ add_executable(reg_probe
     src/render/ImGuiTheme.cpp
     src/render/ImGuiOverlayRenderer.cpp
     src/render/ImGuiTelemetryRenderer.cpp
+    src/render/GtRangeDashboard.cpp
     src/telemetry/TelemetryModel.cpp
     src/recorder/SegmentedMkvWriter.cpp
     src/recorder/MetadataJournal.cpp
@@ -561,6 +562,16 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(nlohmann_json)
+
+# Graph styles/labels are user-editable at runtime, without rebuilding REG.
+target_link_libraries(reg_probe PRIVATE nlohmann_json::nlohmann_json)
+add_custom_command(TARGET reg_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:reg_probe>/config"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/gt-range-ui.json"
+        "$<TARGET_FILE_DIR:reg_probe>/config/gt-range-ui.json"
+    VERBATIM)
+
 
 add_library(reg_launcher_core STATIC
     src/launcher/LauncherConfig.cpp
