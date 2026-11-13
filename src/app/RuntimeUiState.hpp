@@ -46,7 +46,9 @@ inline bool rangeTimelinePaused() noexcept {
     return gRangeTimelinePaused.load(std::memory_order_relaxed);
 }
 inline void toggleRangeTimelinePaused() noexcept {
-    gRangeTimelinePaused.fetch_xor(true, std::memory_order_relaxed);
+    bool old = gRangeTimelinePaused.load(std::memory_order_relaxed);
+    while (!gRangeTimelinePaused.compare_exchange_weak(
+        old, !old, std::memory_order_relaxed)) {}
 }
 
 // Shared between the telemetry checkbox and the physical Raw-window T key.
