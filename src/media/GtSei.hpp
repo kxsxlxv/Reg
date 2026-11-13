@@ -39,6 +39,8 @@ struct GtObject {
     // Continuous half-open [xmin,ymin,xmax,ymax] in video pixels.
     std::array<double, 4> xyxyVideo{};
     bool validBox{};
+    double rangeM{};
+    bool validRange{}; // Optional finite, non-negative GT range; never infer zero on absence.
 };
 
 struct GtMetadata {
