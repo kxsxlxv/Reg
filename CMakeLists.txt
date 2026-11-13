@@ -505,6 +505,17 @@ if(REG_BUILD_TESTS)
 
     add_test(NAME telemetry_model COMMAND reg_telemetry_model_tests)
 
+    add_executable(reg_gt_range_history_tests tests/gt_range_history_tests.cpp)
+    target_include_directories(reg_gt_range_history_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        target_compile_options(reg_gt_range_history_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_gt_range_history_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME gt_range_history COMMAND reg_gt_range_history_tests)
+
     add_executable(reg_replay_foundation_tests
         tests/replay_foundation_tests.cpp
         src/metadata/Protocol.cpp
