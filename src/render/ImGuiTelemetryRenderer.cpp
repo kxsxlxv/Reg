@@ -1256,7 +1256,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             pausedRangeTracks = snapshot.gtRangeTracks;
         }
         if (!paused && rangeWasPaused)
-            pausedRangeTracks.clear();
+            pausedRangeTracks.reset();
         rangeWasPaused = paused;
         const auto& rangeView =
             paused ? pausedRangeTracks : snapshot.gtRangeTracks;
