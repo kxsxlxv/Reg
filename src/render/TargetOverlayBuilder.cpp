@@ -108,7 +108,7 @@ OverlayScene TargetOverlayBuilder::build(
         const Color strokeColor{semantic.color.r, semantic.color.g,
                                 semantic.color.b, semantic.color.a};
         Color fillColor = strokeColor;
-        fillColor.a = 0.08F;
+        fillColor.a = 0.10F;
         const LinePattern bboxPattern = semantic.pattern == cvm1::Pattern::dashed
             ? LinePattern::Dashed : LinePattern::Solid;
 
