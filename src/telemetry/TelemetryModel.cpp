@@ -89,6 +89,24 @@ void TelemetryModel::setTargets(
     }
 }
 
+void TelemetryModel::observeGtRange(
+    const media::GtMetadata& gt,
+    std::chrono::steady_clock::time_point when) {
+    std::scoped_lock lock(mutex_);
+    gtRanges_.observeGt(gt, when);
+}
+
+void TelemetryModel::observeCvForGt(
+    const metadata::FrameMetadata& metadata) {
+    std::scoped_lock lock(mutex_);
+    gtRanges_.observeCv(metadata);
+}
+
+void TelemetryModel::resetGtRanges() {
+    std::scoped_lock lock(mutex_);
+    gtRanges_.clear();
+}
+
 void TelemetryModel::clearTargets() {
     std::scoped_lock lock(mutex_);
     targets_.clear();
@@ -147,6 +165,7 @@ Snapshot TelemetryModel::snapshot() const {
             events_.begin(),
             events_.end()),
         .targets = targets_,
+        .gtRangeTracks = gtRanges_.snapshot(std::chrono::steady_clock::now()),
     };
 }
 
