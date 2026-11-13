@@ -23,7 +23,7 @@ void check(bool condition, const char* why) {
 }
 
 std::string readyJson() {
-    return R"({"type":"KGT1","version":1,"stream_epoch":18446744073709551614,"frame_id":9007199254740993,"source_time_ns":18446744073709551615,"status":"ready","video_size":[1920,1080],"surface_size":[2112,1188],"objects":[{"id":"npc-01","visible":true,"pixels":1000,"xyxy_surface":[973,578,1139,604],"xyxy_video":[884.5454545454545,525.4545454545455,1035.4545454545455,549.0909090909091],\"range_m\":1234.5},{"id":"npc-02","visible":false,"pixels":0,"xyxy_video":null},{"id":"npc-03","visible":true,"xyxy_video":[960.5,500.25,1100.75,575.125]}]})";
+    return R"({"type":"KGT1","version":1,"stream_epoch":18446744073709551614,"frame_id":9007199254740993,"source_time_ns":18446744073709551615,"status":"ready","video_size":[1920,1080],"surface_size":[2112,1188],"objects":[{"id":"npc-01","visible":true,"pixels":1000,"xyxy_surface":[973,578,1139,604],"xyxy_video":[884.5454545454545,525.4545454545455,1035.4545454545455,549.0909090909091],"range_m":1234.5},{"id":"npc-02","visible":false,"pixels":0,"xyxy_video":null},{"id":"npc-03","visible":true,"xyxy_video":[960.5,500.25,1100.75,575.125]}]})";
 }
 
 reg::media::GtMetadata parse(std::string_view text) {
