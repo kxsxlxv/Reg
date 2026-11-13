@@ -1,4 +1,5 @@
 #include "render/ImGuiTelemetryRenderer.hpp"
+#include "render/GtRangeDashboard.hpp"
 
 #include "app/RuntimeUiState.hpp"
 #include "render/ImGuiTheme.hpp"
@@ -32,8 +33,6 @@
 namespace reg::render {
 namespace {
 
-constexpr std::uint16_t kDetectorFlag = 0x0001U;
-constexpr std::uint16_t kPropagatedFlag = 0x0002U;
 constexpr double kPerformanceWindowSeconds = 60.0;
 
 const ImVec4 kAccentBlue{0.290F, 0.565F, 0.851F, 1.000F};
@@ -589,61 +588,6 @@ void drawPerformanceAndHealth(
     ImGui::EndTable();
 }
 
-void drawTargets(const std::vector<telemetry::Target>& targets) {
-    std::size_t detectorCount = 0U;
-    std::size_t propagatedCount = 0U;
-    for (const auto& target : targets) {
-        if ((target.flags & kPropagatedFlag) != 0U) {
-            ++propagatedCount;
-        } else if ((target.flags & kDetectorFlag) != 0U) {
-            ++detectorCount;
-        }
-    }
-
-    ImGui::Text(
-        "Цели: %zu   DETR: %zu   OFA: %zu",
-        targets.size(),
-        detectorCount,
-        propagatedCount);
-
-    if (!ImGui::BeginTable(
-            "targets",
-            1,
-            ImGuiTableFlags_Borders |
-                ImGuiTableFlags_RowBg |
-                ImGuiTableFlags_ScrollY,
-            ImVec2(0.0F, 220.0F))) {
-        return;
-    }
-
-    ImGui::TableSetupColumn("Цель");
-    ImGui::TableHeadersRow();
-    for (const auto& target : targets) {
-        const bool propagated = (target.flags & kPropagatedFlag) != 0U;
-        const char* source = propagated
-            ? "OFA"
-            : ((target.flags & kDetectorFlag) != 0U ? "DETR" : "CV");
-
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        ImGui::PushStyleColor(
-            ImGuiCol_Text,
-            propagated ? kWarningAmber : kSignalGreen);
-        ImGui::Text(
-            "%s  ID %llu  C%u  %.1f%%   bbox [%.3f, %.3f, %.3f, %.3f]",
-            source,
-            static_cast<unsigned long long>(target.id),
-            static_cast<unsigned>(target.classId),
-            static_cast<double>(target.confidence * 100.0F),
-            static_cast<double>(target.bbox.x),
-            static_cast<double>(target.bbox.y),
-            static_cast<double>(target.bbox.width),
-            static_cast<double>(target.bbox.height));
-        ImGui::PopStyleColor();
-    }
-    ImGui::EndTable();
-}
-
 std::string localizeEventMessage(std::string_view message) {
     if (message == "Application started") {
         return "Приложение запущено";
@@ -1061,6 +1005,10 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     std::chrono::steady_clock::time_point lastFrameTime{
         std::chrono::steady_clock::now()};
     RateHistory rateHistory;
+    GtRangeDashboard gtDashboard;
+    bool rangeWasPaused{false};
+    std::chrono::steady_clock::time_point pausedRangeAt{};
+    std::vector<telemetry::GtRangeTrack> pausedRangeTracks;
     std::mutex inputMutex;
     std::vector<PendingInputEvent> pendingInput;
 
@@ -1300,10 +1248,18 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         const telemetry::Snapshot& snapshot,
         std::chrono::steady_clock::time_point now) {
         drawPerformanceAndHealth(snapshot.counters, rateHistory);
-        ImGui::SeparatorText("ТЕКУЩИЕ ЦЕЛИ");
-        drawTargets(snapshot.targets);
-        ImGui::SeparatorText("СОБЫТИЯ / ПОСЛЕДНИЕ 5 МИНУТ");
-        drawEvents(snapshot.events, now);
+        ImGui::SeparatorText("GT / ДАЛЬНОСТЬ И ОБНАРУЖЕНИЯ CV");
+        // Freeze only the viewed data, not the decode/metadata ingestion.
+        const bool paused = app::rangeTimelinePaused();
+        if (paused && !rangeWasPaused) {
+            pausedRangeAt = now;
+            pausedRangeTracks = snapshot.gtRangeTracks;
+        }
+        if (!paused && rangeWasPaused)
+            pausedRangeTracks.clear();
+        rangeWasPaused = paused;
+        gtDashboard.draw(paused ? pausedRangeTracks : snapshot.gtRangeTracks,
+                         paused ? pausedRangeAt : now, paused);
     }
 
     static void drawGtPanel() {
@@ -1380,6 +1336,10 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 selectedPage == app::TelemetryPage::Gt
                     ? ImGuiTabItemFlags_SetSelected
                     : ImGuiTabItemFlags_None;
+            const ImGuiTabItemFlags eventsFlags =
+                selectedPage == app::TelemetryPage::Events
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
 
             const bool overviewOpen = ImGui::BeginTabItem(
                 "Обзор",
@@ -1424,6 +1384,15 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             }
             if (gtOpen) {
                 drawGtPanel();
+                ImGui::EndTabItem();
+            }
+            const bool eventsOpen = ImGui::BeginTabItem(
+                "События", nullptr, eventsFlags);
+            if (ImGui::IsItemClicked()) {
+                app::setTelemetryPage(app::TelemetryPage::Events);
+            }
+            if (eventsOpen) {
+                drawEvents(snapshot.events, now);
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
