@@ -92,18 +92,22 @@ void TelemetryModel::setTargets(
 void TelemetryModel::observeGtRange(
     const media::GtMetadata& gt,
     std::chrono::steady_clock::time_point when) {
-    std::scoped_lock lock(mutex_);
-    gtRanges_.observeGt(gt, when);
+    // Best-effort UI data; never stall the decoder for a diagnostic chart.
+    std::unique_lock lock(gtRangeMutex_, std::try_to_lock);
+    if (lock.owns_lock())
+        gtRanges_.observeGt(gt, when);
 }
 
 void TelemetryModel::observeCvForGt(
     const metadata::FrameMetadata& metadata) {
-    std::scoped_lock lock(mutex_);
-    gtRanges_.observeCv(metadata);
+    // Accepted CVM1 remains in its authoritative store even if UI skips it.
+    std::unique_lock lock(gtRangeMutex_, std::try_to_lock);
+    if (lock.owns_lock())
+        gtRanges_.observeCv(metadata);
 }
 
 void TelemetryModel::resetGtRanges() {
-    std::scoped_lock lock(mutex_);
+    std::scoped_lock lock(gtRangeMutex_);
     gtRanges_.clear();
 }
 
@@ -154,19 +158,20 @@ void TelemetryModel::log(
 }
 
 Snapshot TelemetryModel::snapshot() const {
-    std::scoped_lock lock(mutex_);
-
-    return Snapshot{
-        .counters = counters_,
-        .samples = std::vector<Sample>(
-            samples_.begin(),
-            samples_.end()),
-        .events = std::vector<Event>(
-            events_.begin(),
-            events_.end()),
-        .targets = targets_,
-        .gtRangeTracks = gtRanges_.snapshot(std::chrono::steady_clock::now()),
-    };
+    Snapshot snapshot;
+    {
+        std::scoped_lock lock(mutex_);
+        snapshot.counters = counters_;
+        snapshot.samples.assign(samples_.begin(), samples_.end());
+        snapshot.events.assign(events_.begin(), events_.end());
+        snapshot.targets = targets_;
+    }
+    {
+        std::scoped_lock lock(gtRangeMutex_);
+        snapshot.gtRangeTracks =
+            gtRanges_.snapshot(std::chrono::steady_clock::now());
+    }
+    return snapshot;
 }
 
 void TelemetryModel::pruneLocked(
