@@ -348,6 +348,7 @@ int runApplication(
                             steadyNowNs(),
                             std::memory_order_release);
                         exactSyncDiagnostics.metadataAccepted(metadata);
+                        telemetryModel.observeCvForGt(metadata);
 
                         if (blackboxRecorder) {
                             static_cast<void>(
@@ -411,6 +412,7 @@ int runApplication(
                                         std::memory_order_relaxed);
                                     overlayFrames.clear();
                                     metadataStore.clear();
+                                    telemetryModel.resetGtRanges();
                                     exactSyncDiagnostics.clearPending();
                                     lastDecodedFrameNs.store(
                                         0,
@@ -506,6 +508,8 @@ int runApplication(
                                         steadyNowNs(),
                                         std::memory_order_release);
                                     reg::app::observeGt(frame->gt().status);
+                                    telemetryModel.observeGtRange(
+                                        frame->gt(), frame->decodedAt());
                                     rawMailbox.publish(frame);
 
                                     if (options.overlayEnabled) {
