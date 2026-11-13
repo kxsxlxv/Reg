@@ -331,7 +331,8 @@ int runApplication(
         std::atomic<std::int64_t> lastAcceptedMetadataNs{0};
 
         std::unique_ptr<reg::metadata::MetadataReceiver> metadataReceiver;
-        if (options.overlayEnabled) {
+        // The GT/CV timeline uses accepted CVM1 even when Overlay is hidden.
+        if (options.overlayEnabled || options.telemetryEnabled) {
             metadataReceiver =
                 std::make_unique<reg::metadata::MetadataReceiver>(
                     metadataStore,
