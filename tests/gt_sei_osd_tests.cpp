@@ -23,7 +23,7 @@ void check(bool condition, const char* why) {
 }
 
 std::string readyJson() {
-    return R"({"type":"KGT1","version":1,"stream_epoch":18446744073709551614,"frame_id":9007199254740993,"source_time_ns":18446744073709551615,"status":"ready","video_size":[1920,1080],"surface_size":[2112,1188],"objects":[{"id":"npc-01","visible":true,"pixels":1000,"xyxy_surface":[973,578,1139,604],"xyxy_video":[884.5454545454545,525.4545454545455,1035.4545454545455,549.0909090909091]},{"id":"npc-02","visible":false,"pixels":0,"xyxy_video":null},{"id":"npc-03","visible":true,"xyxy_video":[960.5,500.25,1100.75,575.125]}]})";
+    return R"({"type":"KGT1","version":1,"stream_epoch":18446744073709551614,"frame_id":9007199254740993,"source_time_ns":18446744073709551615,"status":"ready","video_size":[1920,1080],"surface_size":[2112,1188],"objects":[{"id":"npc-01","visible":true,"pixels":1000,"xyxy_surface":[973,578,1139,604],"xyxy_video":[884.5454545454545,525.4545454545455,1035.4545454545455,549.0909090909091],\"range_m\":1234.5},{"id":"npc-02","visible":false,"pixels":0,"xyxy_video":null},{"id":"npc-03","visible":true,"xyxy_video":[960.5,500.25,1100.75,575.125]}]})";
 }
 
 reg::media::GtMetadata parse(std::string_view text) {
@@ -47,6 +47,23 @@ void testPayloads() {
     check(gt.source.key.frameId == 9007199254740993ULL, "frame_id >2^53");
     check(gt.source.sourceTimeNs == UINT64_MAX, "source_time_ns UINT64_MAX");
     check(gt.objects.size() == 3U && !gt.objects[1].visible, "invisible object");
+    check(gt.objects[0].validRange && gt.objects[0].rangeM == 1234.5,
+          "valid range_m was not parsed");
+    check(!gt.objects[1].validRange && !gt.objects[2].validRange,
+          "missing range was invented");
+    auto nullRange = readyJson();
+    const auto rangeStart = nullRange.find("\"range_m\":1234.5");
+    check(rangeStart != std::string::npos, "range fixture");
+    nullRange.replace(rangeStart, std::string("\"range_m\":1234.5").size(),
+                      "\"range_m\":null");
+    check(!parse(nullRange).objects[0].validRange,
+          "null range must not turn into zero");
+    auto negativeRange = readyJson();
+    const auto negativeStart = negativeRange.find("\"range_m\":1234.5");
+    negativeRange.replace(negativeStart, std::string("\"range_m\":1234.5").size(),
+                          "\"range_m\":-1");
+    check(!parse(negativeRange).objects[0].validRange,
+          "negative range must be rejected");
     check(std::fabs(gt.objects[0].xyxyVideo[0] - 884.5454545454545) < 1e-8,
           "fractional position");
     check(parse(R"({"type":"KGT1","version":1,"status":"not_ready"})").status ==
