@@ -80,6 +80,18 @@ std::filesystem::path settingsPath() {
     return "config/gt-range-ui.json";
 }
 
+std::size_t styleIndex(const ChartSettings& settings, std::uint16_t flags) {
+    for (std::size_t i = 0; i < settings.markers.size(); ++i) {
+        const auto& rule = settings.markers[i];
+        if (rule.mask != 0 && (flags & rule.mask) == rule.value)
+            return i;
+    }
+    for (std::size_t i = 0; i < settings.markers.size(); ++i) {
+        if (settings.markers[i].mask == 0) return i;
+    }
+    return settings.markers.size(); // Built-in unmatched-CV fallback.
+}
+
 const MarkerStyle& styleFor(const ChartSettings& settings,
                             std::uint16_t flags) {
     // More specific masks take priority; fallback mask=0 matches any CVM1 hit.
@@ -198,16 +210,19 @@ struct GtRangeDashboard::Impl {
                 std::vector<double> xs, ys;
                 xs.reserve(track.points.size());
                 ys.reserve(track.points.size());
+                std::size_t segment = 0;
                 auto flush = [&]() {
+                    const std::string name =
+                        "##distance_" + std::to_string(segment++);
                     if (xs.size() > 1) {
-                        ImPlot::PlotLine("##distance",
+                        ImPlot::PlotLine(name.c_str(),
                             xs.data(), ys.data(),
                             static_cast<int>(xs.size()), lineSpec);
                     } else if (xs.size() == 1) {
                         ImPlotSpec single = lineSpec;
                         single.Marker = ImPlotMarker_Circle;
                         single.MarkerSize = 3.0F;
-                        ImPlot::PlotScatter("##single", xs.data(),
+                        ImPlot::PlotScatter(name.c_str(), xs.data(),
                             ys.data(), 1, single);
                     }
                     xs.clear();
@@ -230,25 +245,21 @@ struct GtRangeDashboard::Impl {
                 flush();
 
                 for (std::size_t group = 0;
-                     group < settings.markers.size() + 1U; ++group) {
+                     group <= settings.markers.size(); ++group) {
                     std::vector<double> mx, my;
                     for (const auto& m : track.matches) {
                         const double x = secondsBetween(m.time, anchor);
-                        if (!visible(x, settings)) continue;
-                        const auto& chosen = styleFor(settings, m.flags);
-                        if (group < settings.markers.size() &&
-                            &chosen != &settings.markers[group]) continue;
-                        if (group == settings.markers.size() &&
-                            &chosen != &styleFor(settings, 0xffffU)) {
-                            // No extra fallback group if a configured rule matched.
+                        if (!visible(x, settings) ||
+                            styleIndex(settings, m.flags) != group)
                             continue;
-                        }
-                        if (group == settings.markers.size()) continue;
                         mx.push_back(x);
                         my.push_back(m.meters);
                     }
-                    if (mx.empty() || group >= settings.markers.size()) continue;
-                    const auto& style = settings.markers[group];
+                    if (mx.empty()) continue;
+                    const MarkerStyle& style =
+                        group < settings.markers.size()
+                            ? settings.markers[group]
+                            : styleFor(settings, 0);
                     ImPlotSpec marker;
                     marker.LineColor = style.color;
                     marker.MarkerLineColor = style.color;
@@ -256,7 +267,9 @@ struct GtRangeDashboard::Impl {
                     marker.Marker = ImPlotMarker_Diamond;
                     marker.MarkerSize = style.size;
                     marker.Flags = ImPlotItemFlags_NoLegend;
-                    ImPlot::PlotScatter("##cv",
+                    const std::string label =
+                        "##cv_group_" + std::to_string(group);
+                    ImPlot::PlotScatter(label.c_str(),
                         mx.data(), my.data(), static_cast<int>(mx.size()), marker);
                 }
 
