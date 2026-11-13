@@ -109,6 +109,8 @@ void TelemetryModel::observeCvForGt(
 void TelemetryModel::resetGtRanges() {
     std::scoped_lock lock(gtRangeMutex_);
     gtRanges_.clear();
+    gtRangeSnapshot_.reset();
+    gtRangeSnapshotAt_ = {};
 }
 
 void TelemetryModel::clearTargets() {
@@ -168,8 +170,15 @@ Snapshot TelemetryModel::snapshot() const {
     }
     {
         std::scoped_lock lock(gtRangeMutex_);
-        snapshot.gtRangeTracks =
-            gtRanges_.snapshot(std::chrono::steady_clock::now());
+        const auto now = std::chrono::steady_clock::now();
+        if (!gtRangeSnapshot_ ||
+            now - gtRangeSnapshotAt_ >= std::chrono::milliseconds(100)) {
+            gtRangeSnapshot_ =
+                std::make_shared<const std::vector<GtRangeTrack>>(
+                    gtRanges_.snapshot(now));
+            gtRangeSnapshotAt_ = now;
+        }
+        snapshot.gtRangeTracks = gtRangeSnapshot_;
     }
     return snapshot;
 }
