@@ -219,6 +219,7 @@ add_executable(reg_probe
     src/render/ImGuiOverlayRenderer.cpp
     src/render/ImGuiTelemetryRenderer.cpp
     src/render/GtRangeDashboard.cpp
+    src/render/Cvm1SemanticStyleConfig.cpp
     src/telemetry/TelemetryModel.cpp
     src/recorder/SegmentedMkvWriter.cpp
     src/recorder/MetadataJournal.cpp
@@ -516,6 +517,18 @@ if(REG_BUILD_TESTS)
     endif()
     add_test(NAME gt_range_history COMMAND reg_gt_range_history_tests)
 
+    add_executable(reg_cvm1_semantic_tests tests/cvm1_semantic_style_tests.cpp)
+    target_include_directories(reg_cvm1_semantic_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        target_compile_options(reg_cvm1_semantic_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_cvm1_semantic_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME cvm1_semantics COMMAND reg_cvm1_semantic_tests)
+
+
     add_executable(reg_replay_foundation_tests
         tests/replay_foundation_tests.cpp
         src/metadata/Protocol.cpp
@@ -573,6 +586,27 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(nlohmann_json)
+
+if(REG_BUILD_TESTS)
+
+    add_executable(reg_cvm1_style_config_tests
+        tests/cvm1_style_config_tests.cpp
+        src/render/Cvm1SemanticStyleConfig.cpp)
+    target_include_directories(reg_cvm1_style_config_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_cvm1_style_config_tests PRIVATE
+        nlohmann_json::nlohmann_json SDL3::SDL3)
+    add_test(NAME cvm1_style_hot_reload COMMAND reg_cvm1_style_config_tests)
+    if(WIN32)
+        # CTest executes before the runtime-DLL deployment step. Keep the
+        # shared SDL3 runtime next to this standalone test executable.
+        add_custom_command(TARGET reg_cvm1_style_config_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:SDL3::SDL3>"
+                "$<TARGET_FILE_DIR:reg_cvm1_style_config_tests>"
+            VERBATIM)
+    endif()
+endif()
 
 # Graph styles/labels are user-editable at runtime, without rebuilding REG.
 target_link_libraries(reg_probe PRIVATE nlohmann_json::nlohmann_json)

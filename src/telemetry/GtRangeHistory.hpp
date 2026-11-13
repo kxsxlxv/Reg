@@ -44,6 +44,17 @@ struct GtRangeTrack {
     std::deque<GtCvMatch> matches;
 };
 
+struct GtCvDiagnostics {
+    std::uint64_t gtReadyFrames{};
+    std::uint64_t gtUnavailableFrames{};
+    std::uint64_t joinedFrames{};
+    std::uint64_t matchedTargets{};
+    std::uint64_t unmatchedCvFrames{};
+    std::uint64_t unmatchedCvTargets{};
+    std::uint64_t expiredCvFrames{};
+    std::uint64_t pendingCvFrames{};
+};
+
 class GtRangeHistory final {
 public:
     using Clock = std::chrono::steady_clock;
@@ -54,19 +65,33 @@ public:
     void clear() {
         tracks_.clear();
         pending_.clear();
+        stats_ = {};
+    }
+
+    GtCvDiagnostics diagnostics() const noexcept {
+        auto result = stats_;
+        for (const auto& [key, frame] : pending_) {
+            static_cast<void>(key);
+            if (frame.cvSeen && !frame.gtSeen) ++result.pendingCvFrames;
+        }
+        return result;
     }
 
     void observeGt(const media::GtMetadata& gt, Clock::time_point when) {
         // GtMetadata must already have been validated against RGF1. Invalid,
         // absent and busy SEI do not create samples, including zero samples.
-        if (gt.status != media::GtStatus::Ready)
+        if (gt.status != media::GtStatus::Ready) {
+            ++stats_.gtUnavailableFrames;
             return;
+        }
+        ++stats_.gtReadyFrames;
 
         auto& frame = pending_[gt.source.key];
         if (frame.gtSeen)
             return;
         frame.gtSeen = true;
-        frame.firstSeen = when;
+        frame.gtAt = when;
+        if (frame.firstSeen == Clock::time_point{}) frame.firstSeen = when;
         frame.sourceTimeNs = gt.source.sourceTimeNs;
 
         for (const auto& object : gt.objects) {
@@ -150,6 +175,7 @@ private:
         bool gtSeen{};
         bool cvSeen{};
         Clock::time_point firstSeen{};
+        Clock::time_point gtAt{};
         std::uint64_t sourceTimeNs{};
         std::vector<Candidate> objects;
         std::vector<metadata::TargetMetadata> targets;
@@ -183,6 +209,8 @@ private:
     }
 
     void matchAndRemove(const media::FrameKey& key, const Pending& frame) {
+        ++stats_.joinedFrames;
+        std::uint64_t matched = 0;
         std::vector<Pair> pairs;
         for (std::size_t g = 0; g < frame.objects.size(); ++g) {
             if (!frame.objects[g].hasRange)
@@ -204,6 +232,7 @@ private:
                 continue;
             usedGt[pair.gt] = true;
             usedCv[pair.cv] = true;
+            ++matched;
             const auto& gt = frame.objects[pair.gt];
             const auto& cv = frame.targets[pair.cv];
             auto it = tracks_.find(gt.id);
@@ -211,10 +240,16 @@ private:
                 continue;
             // A matched marker is a GT measurement at the exact CVM1 FrameKey.
             it->second.matches.push_back(GtCvMatch{
-                frame.firstSeen, key, frame.sourceTimeNs, cv.id, cv.flags,
+                frame.gtAt, key, frame.sourceTimeNs, cv.id, cv.flags,
                 cv.classId, gt.rangeM, pair.overlap, cv.confidence});
             if (it->second.matches.size() > 6000U)
                 it->second.matches.pop_front();
+        }
+        stats_.matchedTargets += matched;
+        const auto total = static_cast<std::uint64_t>(frame.targets.size());
+        if (total > matched) {
+            ++stats_.unmatchedCvFrames;
+            stats_.unmatchedCvTargets += total - matched;
         }
         pending_.erase(key);
     }
@@ -234,9 +269,11 @@ private:
         }
         for (auto it = pending_.begin(); it != pending_.end();) {
             if (now >= it->second.firstSeen &&
-                now - it->second.firstSeen > std::chrono::seconds(3))
+                now - it->second.firstSeen > std::chrono::seconds(3)) {
+                if (it->second.cvSeen && !it->second.gtSeen)
+                    ++stats_.expiredCvFrames;
                 it = pending_.erase(it);
-            else
+            } else
                 ++it;
         }
         // Bounded even with a stream of CV-only frames.
@@ -246,10 +283,13 @@ private:
                 [](const auto& a, const auto& b) {
                     return a.second.firstSeen < b.second.firstSeen;
                 });
+            if (oldest->second.cvSeen && !oldest->second.gtSeen)
+                ++stats_.expiredCvFrames;
             pending_.erase(oldest);
         }
     }
 
+    GtCvDiagnostics stats_{};
     std::chrono::seconds retention_;
     double minimumIou_{0.30};
     std::map<std::string, GtRangeTrack> tracks_;

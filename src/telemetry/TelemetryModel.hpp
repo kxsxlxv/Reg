@@ -43,7 +43,11 @@ struct Counters {
     std::uint64_t overlayBufferEvictions{};
     std::uint64_t overlayMissingIdentity{};
 
+    std::uint64_t identityMissingFrames{};
     std::uint64_t metadataPackets{};
+    std::uint64_t metadataValidFrames{};
+    std::uint64_t metadataAcceptedFrames{};
+    std::uint64_t metadataTargets{};
     std::uint64_t metadataInvalid{};
     std::uint64_t metadataDuplicates{};
     std::uint64_t metadataSequenceGaps{};
@@ -83,6 +87,7 @@ struct Snapshot {
     std::vector<Event> events;
     std::vector<Target> targets;
     std::shared_ptr<const std::vector<GtRangeTrack>> gtRangeTracks;
+    GtCvDiagnostics gtCvDiagnostics{};
 };
 
 class TelemetryModel final {

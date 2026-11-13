@@ -1,6 +1,6 @@
 #pragma once
 
-#include "telemetry/GtRangeHistory.hpp"
+#include "telemetry/TelemetryModel.hpp"
 
 #include <chrono>
 #include <memory>
@@ -20,6 +20,8 @@ public:
     // Uses the entire remaining Overview height. No vertical scrolling: if
     // too many objects are visible, horizontal paging exposes the rest.
     void draw(const std::vector<telemetry::GtRangeTrack>& tracks,
+              const telemetry::Counters& counters,
+              const telemetry::GtCvDiagnostics& diagnostics,
               std::chrono::steady_clock::time_point anchor,
               bool paused);
 

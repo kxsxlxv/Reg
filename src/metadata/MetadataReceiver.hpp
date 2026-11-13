@@ -19,6 +19,9 @@ struct MetadataReceiverConfig {
 struct MetadataReceiverStats {
     std::uint64_t packetsReceived{};
     std::uint64_t packetsInvalid{};
+    std::uint64_t framesDecoded{};
+    std::uint64_t framesAccepted{};
+    std::uint64_t targetsAccepted{};
     std::uint64_t packetDuplicates{};
     std::uint64_t packetsOutOfOrder{};
     std::uint64_t sequenceGaps{};
@@ -49,6 +52,9 @@ private:
 
     std::atomic_uint64_t packetsReceived_{0};
     std::atomic_uint64_t packetsInvalid_{0};
+    std::atomic_uint64_t framesDecoded_{0};
+    std::atomic_uint64_t framesAccepted_{0};
+    std::atomic_uint64_t targetsAccepted_{0};
     std::atomic_uint64_t packetDuplicates_{0};
     std::atomic_uint64_t packetsOutOfOrder_{0};
     std::atomic_uint64_t sequenceGaps_{0};

@@ -13,6 +13,7 @@
 #include "render/ImGuiOverlayRenderer.hpp"
 #include "render/ImGuiTelemetryRenderer.hpp"
 #include "render/TargetOverlayBuilder.hpp"
+#include "render/Cvm1SemanticStyleConfig.hpp"
 #include "recorder/BlackboxRecorder.hpp"
 #include "telemetry/TelemetryModel.hpp"
 #include "video/FrameSynchronizer.hpp"
@@ -840,6 +841,8 @@ int runApplication(
                 if (gStopSignal != 0 || platform.pollQuitRequested()) {
                     break;
                 }
+                // One style configuration for Overlay and GT chart markers.
+                reg::render::cvm1::refreshConfig();
 
                 if (platform.takeRawScreenshotRequested()) {
                     const auto path =
@@ -1486,8 +1489,13 @@ int runApplication(
                                     std::memory_order_relaxed),
                             .overlayBufferEvictions = overlayBufferEvictions.load(std::memory_order_relaxed),
                             .overlayMissingIdentity = overlayMissingIdentity.load(std::memory_order_relaxed),
+                            .identityMissingFrames =
+                                identityMissingFrames.load(std::memory_order_relaxed),
                             .metadataPackets =
                                 receiverStats.packetsReceived,
+                            .metadataValidFrames = receiverStats.framesDecoded,
+                            .metadataAcceptedFrames = receiverStats.framesAccepted,
+                            .metadataTargets = receiverStats.targetsAccepted,
                             .metadataInvalid =
                                 receiverStats.packetsInvalid,
                             .metadataDuplicates =

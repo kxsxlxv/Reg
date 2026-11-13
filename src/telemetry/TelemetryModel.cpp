@@ -179,6 +179,7 @@ Snapshot TelemetryModel::snapshot() const {
             gtRangeSnapshotAt_ = now;
         }
         snapshot.gtRangeTracks = gtRangeSnapshot_;
+        snapshot.gtCvDiagnostics = gtRanges_.diagnostics();
     }
     return snapshot;
 }
