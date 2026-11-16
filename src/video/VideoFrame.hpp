@@ -2,6 +2,7 @@
 
 #include "media/FrameIdentity.hpp"
 #include "media/GtSei.hpp"
+#include "media/GtAccessUnit.hpp"
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -16,7 +17,9 @@ namespace reg::video {
 
 class VideoFrame final {
 public:
-    static std::shared_ptr<const VideoFrame> cloneFrom(const AVFrame* source);
+    static std::shared_ptr<const VideoFrame> cloneFrom(
+        const AVFrame* source,
+        std::shared_ptr<media::FrameGtParts> fromPacket = {});
 
     ~VideoFrame();
 
@@ -30,18 +33,21 @@ public:
 
     int width() const noexcept { return frame_->width; }
     int height() const noexcept { return frame_->height; }
-    std::optional<media::SourceFrameIdentity> identity() const noexcept { return identity_; }
-    const media::GtMetadata& gt() const noexcept { return gt_; }
-    // Parsed once during frame creation. Consumers must not reparse the SEI.
-    const media::CameraImuMetadata& cameraImu() const noexcept { return gt_.cameraImu; }
+    std::optional<media::SourceFrameIdentity> identity() const noexcept { return parts_->source; }
+    const media::GtMetadata& gt() const noexcept { return parts_->bbox; }
+    const media::CameraImuMetadata& cameraImu() const noexcept {
+        return parts_->bbox.cameraImu;
+    }
+    const media::GtMapMetadata& skyGt() const noexcept { return parts_->sky; }
+    const media::GtMapMetadata& depthGt() const noexcept { return parts_->depth; }
+    const media::FrameGtParts& allGt() const noexcept { return *parts_; }
     std::chrono::steady_clock::time_point decodedAt() const noexcept { return decodedAt_; }
 
 private:
-    explicit VideoFrame(AVFrame* frame);
+    VideoFrame(AVFrame* frame, std::shared_ptr<media::FrameGtParts> fromPacket);
 
     AVFrame* frame_{nullptr};
-    std::optional<media::SourceFrameIdentity> identity_;
-    media::GtMetadata gt_;
+    std::shared_ptr<const media::FrameGtParts> parts_;
     std::chrono::steady_clock::time_point decodedAt_{};
 };
 
