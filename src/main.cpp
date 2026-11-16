@@ -518,6 +518,7 @@ int runApplication(
                                         std::memory_order_release);
                                     reg::app::observeGt(frame->gt().status);
                                     gtIngestStats.observe(frame->gt());
+                                    gtIngestStats.observeMaps(frame->allGt());
                                     // Compressed GT is independent of AVVkFrame
                                     // lifetime. Never decompress on decoder thread.
                                     static_cast<void>(gtMapWorker.submit(frame->gtParts()));
@@ -1472,6 +1473,7 @@ int runApplication(
                     }
 
                     const auto gtStats = gtIngestStats.snapshot();
+                    const auto mapStats = gtMapWorker.stats();
                     telemetryModel.updateCounters(
                         reg::telemetry::Counters{
                             .rtspConnected =
@@ -1499,6 +1501,29 @@ int runApplication(
                             .gtParseTotalUs = gtStats.gtParseTotalUs,
                             .gtParseMaxUs = gtStats.gtParseMaxUs,
                             .gtMaxJsonBytes = gtStats.gtJsonMaxBytes,
+                            .skyMissingFrames = gtStats.skyMissing,
+                            .skyEncodedFrames = gtStats.skyEncoded,
+                            .skyNonReadyFrames = gtStats.skyNonReady,
+                            .skyInvalidFrames = gtStats.skyInvalid,
+                            .depthMissingFrames = gtStats.depthMissing,
+                            .depthEncodedFrames = gtStats.depthEncoded,
+                            .depthNonReadyFrames = gtStats.depthNonReady,
+                            .depthInvalidFrames = gtStats.depthInvalid,
+                            .gtMalformedAu = gtStats.auMalformed,
+                            .gtConflictingSei = gtStats.auConflicts,
+                            .gtIdenticalDuplicates = gtStats.auIdenticalDuplicates,
+                            .gtWorkerQueueDrops = mapStats.queueDrops,
+                            .gtWorkerLockDrops = mapStats.lockDrops,
+                            .gtWorkerSkyReady = mapStats.decodedSky,
+                            .gtWorkerDepthReady = mapStats.decodedDepth,
+                            .gtWorkerInvalidSky = mapStats.invalidSky,
+                            .gtWorkerInvalidDepth = mapStats.invalidDepth,
+                            .gtWorkerChecksumFailures = mapStats.checksumFailures,
+                            .gtWorkerTotalUs = mapStats.durationUs,
+                            .gtWorkerMaxUs = mapStats.longestUs,
+                            .gtWorkerQueueBytes = mapStats.pendingBytes,
+                            .gtWorkerQueueFrames = mapStats.pendingFrames,
+                            .gtWorkerQueueAgeMs = mapStats.oldestPendingAgeMs,
                             .decodedFrames =
                                 decodedFrames.load(
                                     std::memory_order_relaxed),
