@@ -1,4 +1,5 @@
 #include "media/GtMapWorker.hpp"
+#include "media/GtDisplaySelection.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -50,6 +51,43 @@ int main() {
         worker.reset();
         check(!worker.find(key) && worker.stats().sessionResets==1U,
               "new session evicts prior decoded maps");
+        // A decoded GPU texture must never migrate to another video frame.
+        FrameGtParts frame;
+        frame.source=SourceFrameIdentity{.key={7U,42U},.sourceTimeNs=123456789U};
+        frame.sky.kind=GtMapKind::Sky;
+        frame.sky.status=GtMapStatus::Encoded;
+        frame.sky.sourceValid=true;
+        frame.sky.source=*frame.source;
+        frame.sky.sourceWidth=1920;frame.sky.sourceHeight=1080;
+        frame.sky.width=480;frame.sky.height=270;
+        frame.depth.kind=GtMapKind::Depth;
+        frame.depth.status=GtMapStatus::Encoded;
+        frame.depth.sourceValid=true;
+        frame.depth.source=*frame.source;
+        frame.depth.sourceWidth=1920;frame.depth.sourceHeight=1080;
+        frame.depth.width=480;frame.depth.height=270;
+        GtDecodedBundle decoded;
+        decoded.identity=*frame.source;
+        decoded.sky.kind=GtMapKind::Sky;
+        decoded.sky.status=GtMapStatus::Ready;
+        decoded.sky.width=480;decoded.sky.height=270;
+        decoded.sky.raw=std::make_shared<const std::vector<std::uint8_t>>(16200U,0xffU);
+        decoded.depth.kind=GtMapKind::Depth;
+        decoded.depth.status=GtMapStatus::Ready;
+        decoded.depth.width=480;decoded.depth.height=270;
+        decoded.depth.raw=std::make_shared<const std::vector<std::uint8_t>>(518400U,0U);
+        auto selected=selectGtDisplayLayers(frame,decoded,1920,1080,true,true);
+        check(selected.sky && selected.depth,"both independent scalar maps");
+        decoded.identity.sourceTimeNs++;
+        selected=selectGtDisplayLayers(frame,decoded,1920,1080,true,true);
+        check(!selected.sky && !selected.depth,"no source timestamp reuse");
+        decoded.identity=*frame.source;
+        frame.sky.sourceWidth=1280U;
+        selected=selectGtDisplayLayers(frame,decoded,1920,1080,true,true);
+        check(!selected.sky && selected.depth,"sky raster mismatch must not suppress depth");
+        frame.sky.sourceWidth=1920U;
+        selected=selectGtDisplayLayers(frame,decoded,1920,1080,false,true);
+        check(!selected.sky && selected.depth,"UI toggles are per-layer");
         std::cout<<"gt_map_worker_tests: PASS\n";
     } catch(const std::exception& ex) {
         std::cerr<<"gt_map_worker_tests: FAIL "<<ex.what()<<'\n';
