@@ -466,6 +466,31 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
            c.gtBenchmarkEnabled ? std::optional{c.gtBenchmarkFailed} :
                                   std::nullopt,
            c.gtBenchmarkEnabled ? state : api::Availability::Unavailable);
+    // Benchmark-only journal metrics: disabled/unsupported is unavailable,
+    // never zero. The running failed=false status is not final completeness.
+    const auto archiveState = c.gtBenchmarkEnabled
+        ? state : api::Availability::Unavailable;
+    counter(video,"gt.archive_packets_accepted_total",c.gtArchiveAccepted,
+            "compressed_packets_queued_for_rgau1", "process",process,archiveState);
+    counter(video,"gt.archive_packets_written_total",c.gtArchiveWritten,
+            "complete_crc_checked_rgau1_records", "process",process,archiveState);
+    counter(video,"gt.archive_packets_dropped_total",c.gtArchiveDropped,
+            "benchmark_queue_submission_rejections", "process",process,archiveState);
+    counter(video,"gt.archive_write_errors_total",c.gtArchiveFileErrors,
+            "benchmark_io_or_quota_failures", "process",process,archiveState);
+    counter(video,"gt.archive_bytes_written_total",c.gtArchiveBytesWritten,
+            "benchmark_data_and_headers_written_bytes","process",process,archiveState);
+    gauge(video,"gt.archive_pending_bytes",
+          c.gtBenchmarkEnabled
+            ? std::optional<double>(static_cast<double>(c.gtArchivePendingBytes))
+            : std::nullopt,
+          "bytes","benchmark_queue_pending_bytes","process",process,archiveState);
+    gauge(video,"gt.archive_pending_packets",
+          c.gtBenchmarkEnabled
+            ? std::optional<double>(static_cast<double>(c.gtArchivePendingPackets))
+            : std::nullopt,
+          "packets","benchmark_queue_pending_packets","process",process,archiveState);
+
     videoCounter("decoder.decoded_frames_total", c.decodedFrames, "decoded_frames");
     videoCounter("raw.presented_frames_total", c.rawPresentedFrames, "raw_present_decisions_not_scanout");
     videoCounter("overlay.presented_decisions_total", c.overlayPresentedFrames,
