@@ -1223,11 +1223,33 @@ int runApplication(
                                 identityScene,
                                 rawWindow.swapchain());
 
+                            // The asynchronous worker may be late: never
+                            // reuse a map from another FrameKey or timestamp.
+                            std::shared_ptr<const reg::media::GtDecodedBundle> gtMaps;
+                            const reg::vulkan::GtMapStyle mapStyle{
+                                .sky=reg::app::showGtSky(),
+                                .depth=reg::app::showGtDepth(),
+                                .skyOpacity=reg::app::gGtSkyOpacity.load(),
+                                .depthOpacity=reg::app::gGtDepthOpacity.load(),
+                                .nearM=reg::app::gGtDepthNearM.load(),
+                                .farM=reg::app::gGtDepthFarM.load(),
+                            };
+                            if (mapStyle.sky || mapStyle.depth) {
+                                if (const auto id=latest->identity()) {
+                                    gtMaps=gtMapWorker.find(id->key);
+                                    if (gtMaps &&
+                                        (gtMaps->identity.key!=id->key ||
+                                         gtMaps->identity.sourceTimeNs!=id->sourceTimeNs))
+                                        gtMaps.reset();
+                                }
+                            }
                             const bool renderSucceeded =
                                 rawRenderer.renderRaw(
                                     latest,
                                     rawWindow.swapchain(),
-                                    rawSignalRenderer.get());
+                                    rawSignalRenderer.get(),
+                                    gtMaps,
+                                    mapStyle);
                             const auto renderEnd =
                                 std::chrono::steady_clock::now();
                             const double renderAttemptMs =
@@ -1241,6 +1263,16 @@ int runApplication(
                                 lastRawPresented = latest;
                                 reg::app::gPresentedGtStatus.store(
                                     latest->gt().status,
+                                    std::memory_order_relaxed);
+                                reg::app::gPresentedSkyStatus.store(
+                                    latest->skyGt().status,std::memory_order_relaxed);
+                                reg::app::gPresentedDepthStatus.store(
+                                    latest->depthGt().status,std::memory_order_relaxed);
+                                reg::app::gPresentedSkyMapReady.store(
+                                    gtMaps && gtMaps->sky.status==reg::media::GtMapStatus::Ready,
+                                    std::memory_order_relaxed);
+                                reg::app::gPresentedDepthMapReady.store(
+                                    gtMaps && gtMaps->depth.status==reg::media::GtMapStatus::Ready,
                                     std::memory_order_relaxed);
                                 didWork = true;
 
