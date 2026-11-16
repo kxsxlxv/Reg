@@ -5,6 +5,12 @@ on:
     paths:
       - '.github/workflows/diagnostics-headless.yml'
       - 'src/diagnostics/**'
+      - 'src/media/GtSei.hpp'
+      - 'src/media/CameraImuDedup.hpp'
+      - 'tests/gt_ingest_stats_tests.cpp'
+      - 'src/media/GtSei.hpp'
+      - 'src/media/CameraImuDedup.hpp'
+      - 'tests/gt_ingest_stats_tests.cpp'
       - 'src/media/FrameIdentity.hpp'
       - 'src/metadata/FrameMetadata.hpp'
       - 'tools/diagnostic_scenarios/**'
@@ -74,6 +80,7 @@ jobs:
           g++ $flags tests/diagnostic_api_contract_tests.cpp -o build-headless/reg_diag_api_contract
           g++ $flags tests/gt_range_history_tests.cpp -o build-headless/reg_gt_range_history
           g++ $flags tests/cvm1_semantic_style_tests.cpp -o build-headless/reg_cvm1_semantics
+          g++ $flags tests/gt_ingest_stats_tests.cpp -o build-headless/reg_gt_ingest_stats
           g++ $flags tests/telemetry_model_tests.cpp src/telemetry/TelemetryModel.cpp -o build-headless/reg_telemetry_model
 
       - name: Execute C++ statistical and Exact Sync regressions
@@ -83,6 +90,7 @@ jobs:
           ./build-headless/reg_diag_api_contract
           ./build-headless/reg_gt_range_history
           ./build-headless/reg_cvm1_semantics
+          ./build-headless/reg_gt_ingest_stats
           ./build-headless/reg_telemetry_model
 
       - name: Verify B fixture oracle through A and C C++ implementations
