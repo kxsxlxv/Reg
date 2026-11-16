@@ -75,6 +75,8 @@ private:
         lockDrops_{0},sessionResets_{0},decodedSky_{0},decodedDepth_{0},
         invalidSky_{0},invalidDepth_{0},checksumFailures_{0},durationUs_{0},
         longestUs_{0};
+    // Start after all state used by run() has been initialized.
+    std::jthread worker_;
 };
 
 } // namespace reg::media
