@@ -318,7 +318,7 @@ void GtMapCompositor::ensurePipeline(VkFormat format) {
                                    VK_COLOR_COMPONENT_G_BIT|
                                    VK_COLOR_COMPONENT_B_BIT|
                                    VK_COLOR_COMPONENT_A_BIT;
-        VkPipelineColorBlendState blend{
+        VkPipelineColorBlendStateCreateInfo blend{
             VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
         blend.attachmentCount=1;
         blend.pAttachments=&attachment;
