@@ -17,6 +17,7 @@
 #include "render/TargetOverlayBuilder.hpp"
 #include "render/Cvm1SemanticStyleConfig.hpp"
 #include "recorder/BlackboxRecorder.hpp"
+#include "recorder/GtAuJournal.hpp"
 #include "telemetry/TelemetryModel.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
@@ -254,6 +255,19 @@ int runApplication(
                     });
         }
 
+        std::unique_ptr<reg::recorder::GtAuJournal> benchmarkAuJournal;
+        if (options.gtCapturePolicy ==
+                reg::app::GtCapturePolicy::Benchmark) {
+            // A fresh non-rolling, byte-exact archive per process/test run.
+            const auto fileName = "reg-gt-benchmark-" +
+                std::to_string(steadyNowNs()) + ".rgau";
+            benchmarkAuJournal = std::make_unique<reg::recorder::GtAuJournal>(
+                reg::recorder::GtAuJournalConfig{
+                    .path = std::filesystem::path(options.recordDirectory) /
+                             fileName,
+                });
+        }
+
         reg::video::RawFrameMailbox rawMailbox;
         reg::render::GtOverlayBuilder gtOverlayBuilder;
         reg::video::OverlayFrameBuffer overlayFrames(
@@ -463,6 +477,15 @@ int runApplication(
                                 [&](reg::media::CompressedVideoPacketPtr packet) {
                                     demuxedVideoPackets.fetch_add(1U, std::memory_order_relaxed);
                                     frameTimingLog.logPacket(*packet);
+                                    if (benchmarkAuJournal) {
+                                        // Reference-counted AVPacket: no payload copy
+                                        // or file I/O in the decoder callback.
+                                        static_cast<void>(
+                                            benchmarkAuJournal->submit(
+                                                packet,
+                                                decoderSessionGeneration.load(
+                                                    std::memory_order_relaxed)));
+                                    }
 
                                     if (blackboxRecorder) {
                                         static_cast<void>(
@@ -815,6 +838,9 @@ int runApplication(
 
             if (blackboxRecorder) {
                 blackboxRecorder->stop();
+            }
+            if (benchmarkAuJournal) {
+                benchmarkAuJournal->stop();
             }
         };
 
@@ -1461,6 +1487,10 @@ int runApplication(
                     reg::recorder::BlackboxRecorderStats
                         recorderStats{};
 
+                    reg::recorder::GtAuJournalStats archiveStats{};
+                    if (benchmarkAuJournal) {
+                        archiveStats = benchmarkAuJournal->stats();
+                    }
                     if (blackboxRecorder) {
                         recorderStats =
                             blackboxRecorder->stats();
@@ -1468,7 +1498,11 @@ int runApplication(
                                 reg::app::GtCapturePolicy::Benchmark &&
                             (recorderStats.packetsDroppedQueueFull != 0U ||
                              recorderStats.failed ||
-                             recorderStats.failures != 0U)) {
+                             recorderStats.failures != 0U ||
+                             recorderStats.packetsWaitingForKeyframe != 0U ||
+                             archiveStats.failed ||
+                             archiveStats.dropped != 0U ||
+                             archiveStats.fileErrors != 0U)) {
                             gtBenchmarkLossObserved = true;
                             if (!gtBenchmarkLossLogged) {
                                 gtBenchmarkLossLogged = true;
@@ -1545,6 +1579,13 @@ int runApplication(
                             .gtBenchmarkEnabled = options.gtCapturePolicy ==
                                 reg::app::GtCapturePolicy::Benchmark,
                             .gtBenchmarkFailed = gtBenchmarkLossObserved,
+                            .gtArchiveAccepted = archiveStats.accepted,
+                            .gtArchiveWritten = archiveStats.written,
+                            .gtArchiveDropped = archiveStats.dropped,
+                            .gtArchiveFileErrors = archiveStats.fileErrors,
+                            .gtArchiveBytesWritten = archiveStats.bytesWritten,
+                            .gtArchivePendingBytes = archiveStats.queuedBytes,
+                            .gtArchivePendingPackets = archiveStats.queuedPackets,
                             .decodedFrames =
                                 decodedFrames.load(
                                     std::memory_order_relaxed),
