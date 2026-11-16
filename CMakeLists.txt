@@ -275,6 +275,7 @@ add_executable(reg_replay
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
     src/vulkan/VideoRenderer.cpp
+    src/vulkan/GtMapCompositor.cpp
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
     src/media/FrameIdentityAvFrame.cpp
