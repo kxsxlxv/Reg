@@ -71,6 +71,8 @@ struct CameraImuCameraGt {
     std::optional<std::array<double, 3>> velocityWorldMS;
     std::optional<std::array<double, 3>> accelerationWorldMS2;
     std::optional<std::array<double, 3>> gravityWorldMS2;
+    // Actual producer field name: rotation_optical_to_world_wxyz.
+    std::optional<std::array<double, 4>> rotationOpticalToWorldWxyz;
 };
 
 struct CameraImuMetadata {
@@ -82,6 +84,14 @@ struct CameraImuMetadata {
     std::string state;
     std::string sourceStatus;
     std::string axes; // camera convention (right_down_forward)
+    std::optional<std::array<double, 16>> projectionRowMajor;
+    std::string quaternionOrder;
+    std::string shutter;
+    std::string imuModel;
+    std::uint64_t imuRateHz{};
+    bool imuGap{};
+    double exposureS{};
+    std::optional<std::uint64_t> imuHistoryStartNs;
     std::optional<std::array<double, 9>> K; // row-major 3x3
     std::optional<std::array<double, 16>> tCameraImu; // row-major 4x4
     std::optional<std::array<double, 3>> extrinsicTranslationM;
@@ -95,6 +105,7 @@ struct CameraImuMetadata {
 struct GtMetadata {
     GtStatus status{GtStatus::Missing};
     SourceFrameIdentity source{};
+    bool sourceValid{};  // non-ready KGT1 can still carry independently valid IMU
     std::uint32_t videoWidth{};
     std::uint32_t videoHeight{};
     std::vector<GtObject> objects;
@@ -102,6 +113,44 @@ struct GtMetadata {
     std::size_t jsonBytes{};
     std::uint64_t parseDurationUs{};
 };
+
+
+// Binary KSM1/KDM1 have independent readiness and errors; "Encoded" means the
+// header and compressed length are valid, not that checksum/decode passed.
+enum class GtMapKind : std::uint8_t { Sky, Depth };
+enum class GtMapStatus : std::uint8_t {
+    Missing, NotReady, AmbiguousViewport, Unavailable, Encoded,
+    Ready, Invalid, FrameMismatch,
+};
+
+struct GtMapMetadata {
+    GtMapKind kind{GtMapKind::Sky};
+    GtMapStatus status{GtMapStatus::Missing};
+    SourceFrameIdentity source{};
+    bool sourceValid{};
+    std::uint32_t width{}, height{}, sourceWidth{}, sourceHeight{};
+    std::uint64_t readyNs{};
+    std::uint64_t rawBytes{};
+    std::uint32_t checksum{};
+    std::uint64_t validPixels{}; // depth
+    std::uint64_t unknownPixels{}; // sky
+    bool validityPlane{};
+    std::uint32_t policy{}; // sky sampling policy 0..2
+    std::string codec;
+    std::string quantity; // depth = optical_z
+    std::optional<std::array<double, 16>> projectionRowMajor;
+    double minimumM{}, maximumM{};
+    // Compressed or bit-packed untrusted bytes. Validate/decompress away from
+    // the hardware-decoded AVFrame lifetime before GPU texture upload.
+    std::vector<std::uint8_t> encoded;
+};
+
+GtMapMetadata parseGtMapBinary(
+    std::span<const std::uint8_t> payloadAfterUuid,
+    GtMapKind kind) noexcept;
+void validateGtMapForFrame(
+    GtMapMetadata& map,
+    const std::optional<SourceFrameIdentity>& rgf1) noexcept;
 
 // Does not require FFmpeg and never throws, including on malformed input.
 // JSON integer fields are parsed directly to uint64_t, never via double.
