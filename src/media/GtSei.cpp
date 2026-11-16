@@ -366,6 +366,14 @@ CameraImuMetadata parseCameraImu(const Json* value,
     if (const auto* status = value->member("status")) {
         if (status->type != Json::Type::String || status->scalar.size() > 128U) return imu;
         imu.sourceStatus = status->scalar;
+        if (imu.sourceStatus == "not_ready") {
+            imu.status = CameraImuStatus::NotReady;
+            return imu;
+        }
+        if (imu.sourceStatus != "ready") {
+            imu.status = CameraImuStatus::Unavailable;
+            return imu;
+        }
     }
     const auto* axes = firstOf(value, {"axes", "camera_axes"});
     if (axes) {
@@ -802,7 +810,9 @@ void validateGtForFrame(
          (gt.videoWidth != static_cast<std::uint32_t>(decodedWidth) ||
           gt.videoHeight != static_cast<std::uint32_t>(decodedHeight)))) {
         gt.objects.clear();
-        if (gt.cameraImu.status == CameraImuStatus::Ready) {
+        if (gt.cameraImu.status == CameraImuStatus::Ready ||
+            gt.cameraImu.status == CameraImuStatus::NotReady ||
+            gt.cameraImu.status == CameraImuStatus::Unavailable) {
             gt.cameraImu.status = CameraImuStatus::FrameMismatch;
             gt.cameraImu.imu.clear();
         }
