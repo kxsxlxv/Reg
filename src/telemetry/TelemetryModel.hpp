@@ -61,6 +61,9 @@ struct Counters {
     std::uint64_t gtWorkerQueueAgeMs{};
     bool gtBenchmarkEnabled{};
     bool gtBenchmarkFailed{};
+    std::uint64_t gtArchiveAccepted{},gtArchiveWritten{},gtArchiveDropped{},
+                  gtArchiveFileErrors{},gtArchiveBytesWritten{};
+    std::size_t gtArchivePendingBytes{},gtArchivePendingPackets{};
     std::uint64_t decodedFrames{};
     std::uint64_t rawPresentedFrames{};
     std::uint64_t overlayPresentedFrames{};
