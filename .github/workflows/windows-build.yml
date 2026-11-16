@@ -44,6 +44,7 @@ jobs:
             mingw-w64-ucrt-x86_64-vulkan-headers
             mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-shaderc
+            mingw-w64-ucrt-x86_64-zstd
 
       # Reuse FFmpeg for code-only edits. The key includes workflow flags.
       - name: Restore FFmpeg build
