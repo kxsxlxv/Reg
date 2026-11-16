@@ -207,6 +207,7 @@ add_executable(reg_probe
     src/media/FrameIdentityAvFrame.cpp
     src/media/GtSei.cpp
     src/media/GtMapDecode.cpp
+    src/media/GtMapWorker.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
