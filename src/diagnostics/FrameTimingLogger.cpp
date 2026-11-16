@@ -28,7 +28,7 @@ namespace reg::diagnostics {
 namespace {
 
 using Clock = std::chrono::steady_clock;
-constexpr std::size_t kFieldCount = 38U;
+constexpr std::size_t kFieldCount = 42U;
 constexpr std::size_t kMaxPendingRows = 16384U;
 
 enum Field : std::size_t {
@@ -70,6 +70,10 @@ enum Field : std::size_t {
     DecodeToPresentMs,
     PresentSourceFrameDelta,
     PresentMissing,
+    GtJsonBytes,
+    GtParseUs,
+    CameraImuState,
+    CameraImuSamples,
 };
 
 using Row = std::array<std::string, kFieldCount>;
@@ -219,7 +223,8 @@ struct FrameTimingLogger::Impl {
             << "decode_arrival_delta_ms,since_last_packet_ms,present_total,"
             << "decoded_since_present,present_interval_ms,render_call_ms,"
             << "render_not_ready_attempts,render_attempt_total_ms,"
-            << "decode_to_present_ms,present_source_frame_delta,present_missing\n";
+            << "decode_to_present_ms,present_source_frame_delta,present_missing,"
+            << "gt_json_bytes,gt_parse_us,camera_imu_state,camera_imu_samples\n";
         stream.flush();
 
         isEnabled = true;
@@ -456,6 +461,11 @@ void FrameTimingLogger::logDecodedFrame(
         const Clock::time_point now = frame.decodedAt();
         row = impl_->baseRow("DECODE", now);
         row[DecodedTotal] = std::to_string(decodedTotal);
+        row[GtJsonBytes] = std::to_string(frame.gt().jsonBytes);
+        row[GtParseUs] = std::to_string(frame.gt().parseDurationUs);
+        row[CameraImuState] = std::to_string(
+            static_cast<unsigned>(frame.cameraImu().status));
+        row[CameraImuSamples] = std::to_string(frame.cameraImu().imu.size());
 
         if (avFrame->pts != AV_NOPTS_VALUE) {
             row[FramePts] = std::to_string(avFrame->pts);
