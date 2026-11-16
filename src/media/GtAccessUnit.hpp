@@ -37,19 +37,19 @@ inline std::shared_ptr<FrameGtParts> makeGtParts(H264AuSei au) {
     if (au.malformed || au.oversized) return result;
     if (au.get(AuSeiKind::Rgf1)) {
         const auto& payload=*au.get(AuSeiKind::Rgf1);
-        if (payload->size()==kFrameIdentityPayloadSize)
-            result->source=decodeFrameIdentityPayload(*payload);
+        if (payload.size()==kFrameIdentityPayloadSize)
+            result->source=decodeFrameIdentityPayload(payload);
     }
     if (au.get(AuSeiKind::Kgt1)) {
-        const auto& payload=**au.get(AuSeiKind::Kgt1);
+        const auto& payload=*au.get(AuSeiKind::Kgt1);
         result->bbox=parseGtJson(payload);
     }
     if (au.get(AuSeiKind::Ksm1)) {
-        result->sky=parseGtMapBinary(**au.get(AuSeiKind::Ksm1),
+        result->sky=parseGtMapBinary(*au.get(AuSeiKind::Ksm1),
                                      GtMapKind::Sky);
     }
     if (au.get(AuSeiKind::Kdm1)) {
-        result->depth=parseGtMapBinary(**au.get(AuSeiKind::Kdm1),
+        result->depth=parseGtMapBinary(*au.get(AuSeiKind::Kdm1),
                                        GtMapKind::Depth);
     }
     if (au.conflicts[1]) result->bbox.status=GtStatus::ParseError;
