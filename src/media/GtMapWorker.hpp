@@ -71,7 +71,6 @@ private:
     std::map<FrameKey,Cached> ready_;
     std::size_t pendingBytes_{},readyBytes_{};
     std::uint64_t generation_{};
-    std::jthread worker_;
     std::atomic_uint64_t submitted_{0},duplicate_{0},skipped_{0},queueDrops_{0},
         lockDrops_{0},sessionResets_{0},decodedSky_{0},decodedDepth_{0},
         invalidSky_{0},invalidDepth_{0},checksumFailures_{0},durationUs_{0},
