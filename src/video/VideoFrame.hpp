@@ -41,6 +41,7 @@ public:
     const media::GtMapMetadata& skyGt() const noexcept { return parts_->sky; }
     const media::GtMapMetadata& depthGt() const noexcept { return parts_->depth; }
     const media::FrameGtParts& allGt() const noexcept { return *parts_; }
+    std::shared_ptr<const media::FrameGtParts> gtParts() const noexcept { return parts_; }
     std::chrono::steady_clock::time_point decodedAt() const noexcept { return decodedAt_; }
 
 private:
