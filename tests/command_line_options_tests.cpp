@@ -24,6 +24,7 @@ bool fails(std::vector<std::string> inputs) {
 
 int main() {
     const auto defaults = parse({"probe", "--url", "rtsp://localhost/stream"});
+    assert(defaults.gtCapturePolicy == reg::app::GtCapturePolicy::Live);
     assert(defaults.rawDisplay == 0);
     assert(defaults.overlayDisplay == 0);
     assert(defaults.telemetryDisplay == 0);
@@ -47,6 +48,15 @@ int main() {
     assert(!selected.netImguiEnabled);
     assert(selected.diagnosticApiEnabled);
     assert(selected.diagnosticApiPort == 9711);
+
+    const auto benchmark=parse({"probe","--url","rtsp://localhost/stream",
+        "--gt-capture-policy","benchmark"});
+    assert(benchmark.gtCapturePolicy==reg::app::GtCapturePolicy::Benchmark &&
+           benchmark.recorderEnabled);
+    assert(fails({"probe","--url","rtsp://localhost/stream",
+                  "--gt-capture-policy","benchmark","--disable-recorder"}));
+    assert(fails({"probe","--url","rtsp://localhost/stream",
+                  "--gt-capture-policy","invalid"}));
 
     const auto portOnly = parse({"probe", "--url", "rtsp://localhost/stream",
         "--diagnostic-api-port", "9911"});
