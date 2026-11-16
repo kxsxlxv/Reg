@@ -101,6 +101,13 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
                 requireValue(i, argc, argv, "--overlay-delay-ms"), "--overlay-delay-ms");
         } else if (arg == "--disable-overlay") {
             options.overlayEnabled = false;
+        } else if (arg == "--gt-capture-policy") {
+            const auto value=requireValue(i,argc,argv,"--gt-capture-policy");
+            if (value=="live") options.gtCapturePolicy=GtCapturePolicy::Live;
+            else if (value=="benchmark")
+                options.gtCapturePolicy=GtCapturePolicy::Benchmark;
+            else throw std::runtime_error(
+                "--gt-capture-policy must be live or benchmark");
         } else if (arg == "--record-dir") {
             options.recordDirectory =
                 requireValue(i, argc, argv, "--record-dir");
@@ -157,6 +164,10 @@ CommandLineOptions parseCommandLine(int argc, char** argv) {
     if (options.overlayDelayMs < 0) {
         throw std::runtime_error("--overlay-delay-ms must be >= 0");
     }
+    if (options.gtCapturePolicy==GtCapturePolicy::Benchmark &&
+        !options.recorderEnabled) {
+        throw std::runtime_error("benchmark capture requires recorder");
+    }
     if (options.recordDirectory.empty()) {
         throw std::runtime_error("--record-dir must not be empty");
     }
@@ -205,6 +216,7 @@ void printUsage(const char* executableName) {
         << "  --metadata-port N        UDP metadata port (default: 50010)\n"
         << "  --overlay-delay-ms N     Exact-overlay playout delay (default: 150)\n"
         << "  --disable-overlay        Disable metadata receiver and overlay window\n"
+        << "  --gt-capture-policy MODE Live or benchmark archive (default: live)\n"
         << "  --record-dir PATH        Rolling MKV directory (default: blackbox)\n"
         << "  --record-segment-ms N    Target segment duration (default: 5000)\n"
         << "  --record-retention-sec N Rolling retention duration (default: 300)\n"
