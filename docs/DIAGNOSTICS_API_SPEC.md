@@ -433,3 +433,18 @@ Existing `decoder.demuxed_video_packet_rate_*`, `decoder.decoded_fps_*`, `raw.pr
 **Availability:** these new metrics require the corresponding development runtime. Prior Reg releases mark fields unsupported/unavailable, not zero. Benchmark capture mode `--gt-capture-policy benchmark` is explicit, and `gtBenchmarkEnabled` / `gtBenchmarkFailed` are read-only status booleans; failure is sticky within the process if recorder reports packet queue loss or writing failure. A nonfailed rolling recorder is not evidence of a lossless non-rolling benchmark archive.
 
 See `docs/SIMULATOR_GT_INTEGRATION_STAGES.md` for stage status, limits and pending hardware gates.
+
+
+### Benchmark RGAU1 archive (draft PR #53 addition)
+
+An explicitly enabled `--gt-capture-policy benchmark` also creates a separate non-rolling `RGAU1` archive of original compressed H264 AUs before Raw's latest-frame mailbox; the existing rolling MKV recorder continues unchanged. The archive worker is asynchronous and bounded (64 MiB queued / 1024 records / 8 GiB file quota). On clean shutdown, a sibling `.manifest.json` includes complete/accepted/written/dropped/io-failed/byte-count fields with decimal-string unsigned 64-bit values; the raw AU records contain exact signed PTS/DTS/timebase and CRC32 over the payload. A verified clean local journal does not establish that the producer delivered every frame.
+
+Additive **video-section** metrics, process lifetime, Reg-measured:
+- `gt.archive_packets_accepted_total` counter / packets, successfully enqueued AU.
+- `gt.archive_packets_written_total` counter / packets, successfully written complete AU record, not proof of flush-to-disk durability.
+- `gt.archive_packets_dropped_total` counter / packets, queue, source or bound rejection; any nonzero value invalidates Benchmark.
+- `gt.archive_write_errors_total` counter / errors, quota/disk/IO failure, nonzero invalidates Benchmark.
+- `gt.archive_bytes_written_total` counter / bytes, complete RGAU1 headers and records written since run start.
+- `gt.archive_pending_bytes` gauge / bytes and `gt.archive_pending_packets` gauge / packets, current worker backlog.
+
+These are **unavailable** (null, not zero) when Benchmark is disabled. `gtBenchmarkEnabled` and `gtBenchmarkFailed` remain read-only statuses. `failed=false` during an active run means only *no failure observed yet*, not verified final capture completeness; a completed manifest/reader/producer comparison are required. All metrics inherit Reg TelemetryModel freshness, lack frame/run high-cardinality labels and never expose arbitrary raw camera metadata through HTTP.
