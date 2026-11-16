@@ -157,7 +157,7 @@ set(REG_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${REG_SHADER_OUTPUT_DIR}")
 
 set(REG_SHADER_OUTPUTS)
-foreach(_shader IN ITEMS video.vert video.frag)
+foreach(_shader IN ITEMS video.vert video.frag gt_map.frag)
     set(_source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${_shader}")
     set(_output "${REG_SHADER_OUTPUT_DIR}/${_shader}.spv")
 
@@ -201,6 +201,7 @@ add_executable(reg_probe
     src/vulkan/Swapchain.cpp
     src/vulkan/VulkanVideoFrameAccess.cpp
     src/vulkan/VideoRenderer.cpp
+    src/vulkan/GtMapCompositor.cpp
     src/vulkan/VideoRendererBlank.cpp
     src/media/CompressedVideoPacket.cpp
     src/media/FrameIdentity.cpp
