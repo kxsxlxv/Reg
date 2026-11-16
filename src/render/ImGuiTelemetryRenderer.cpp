@@ -1275,6 +1275,11 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         if (ImGui::Checkbox("Показывать ID объектов", &showIds)) {
             app::setShowGtIds(showIds);
         }
+        bool showRanges=app::showGtRanges();
+        if (ImGui::Checkbox("Показывать root range_m (метры)", &showRanges))
+            app::setShowGtRanges(showRanges);
+        ImGui::TextDisabled(
+            "range_m = расстояние до корня объекта, НЕ optical Z.");
         ImGui::TextDisabled(
             "Локальный OSD Raw: запись и вход CV остаются без изменений.");
         ImGui::SeparatorText("GT / ТЕКУЩИЙ ОТОБРАЖЁННЫЙ КАДР");
