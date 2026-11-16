@@ -6,6 +6,7 @@ extern "C" {
 
 #include <algorithm>
 #include <chrono>
+#include <initializer_list>
 #include <unordered_set>
 #include <charconv>
 #include <cmath>
@@ -462,8 +463,9 @@ CameraImuMetadata parseCameraImu(const Json* value,
     return imu;
 }
 
-GtMetadata failed() {
+GtMetadata failed(std::size_t bytes = 0U) {
     GtMetadata gt;
+    gt.jsonBytes = bytes;
     gt.status = GtStatus::ParseError;
     return gt;
 }
@@ -485,25 +487,26 @@ const char* gtStatusName(GtStatus status) noexcept {
 }
 
 GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
-    if (json.empty() || json.size() > kMaxGtJsonBytes) return failed();
+    if (json.empty() || json.size() > kMaxGtJsonBytes) return failed(json.size());
     const auto started = std::chrono::steady_clock::now();
     try {
         Json root;
         const auto bytes = std::string_view(
             reinterpret_cast<const char*>(json.data()), json.size());
-        if (!Parser(bytes).parse(root) || root.type != Json::Type::Object) return failed();
+        if (!Parser(bytes).parse(root) || root.type != Json::Type::Object) return failed(json.size());
 
         const Json* type = root.member("type");
         const Json* version = root.member("version");
         std::uint64_t versionNumber = 0;
         if (type == nullptr || type->type != Json::Type::String ||
             type->scalar != "KGT1" ||
-            !asUint64(version, versionNumber) || versionNumber != 1U) return failed();
+            !asUint64(version, versionNumber) || versionNumber != 1U) return failed(json.size());
 
         const Json* status = root.member("status");
-        if (status == nullptr || status->type != Json::Type::String) return failed();
+        if (status == nullptr || status->type != Json::Type::String) return failed(json.size());
 
         GtMetadata gt;
+        gt.jsonBytes = json.size();
         if (status->scalar == "not_ready") gt.status = GtStatus::NotReady;
         else if (status->scalar == "busy") gt.status = GtStatus::Busy;
         else if (status->scalar == "ambiguous_viewport") gt.status = GtStatus::AmbiguousViewport;
@@ -520,16 +523,16 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
             videoSize->array.size() != 2U ||
             !asDimension(&videoSize->array[0], gt.videoWidth) ||
             !asDimension(&videoSize->array[1], gt.videoHeight) ||
-            objects == nullptr || objects->type != Json::Type::Array) return failed();
+            objects == nullptr || objects->type != Json::Type::Array) return failed(json.size());
 
-        if (objects->array.size() > 256U) return failed();
+        if (objects->array.size() > 256U) return failed(json.size());
         gt.objects.reserve(objects->array.size());
         for (const auto& item : objects->array) {
             const Json* id = item.member("id");
             const Json* visible = item.member("visible");
             if (id == nullptr || id->type != Json::Type::String ||
                 id->scalar.size() > 128U ||
-                visible == nullptr || visible->type != Json::Type::Boolean) return failed();
+                visible == nullptr || visible->type != Json::Type::Boolean) return failed(json.size());
             GtObject object;
             object.id = id->scalar;
             object.visible = visible->boolean;
@@ -552,7 +555,7 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
         return gt;
     } catch (...) {
         // Never let a malformed SEI or allocation failure stop video decoding.
-        return failed();
+        return failed(json.size());
     }
 }
 
