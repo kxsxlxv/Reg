@@ -460,6 +460,12 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
           c.gtWorkerQueueFrames ? std::optional<double>(
               static_cast<double>(c.gtWorkerQueueAgeMs)) : std::nullopt,
           "ms", "age_oldest_pending_map_task", "process", process, state);
+    status(video, "gtBenchmarkEnabled",
+           std::optional{c.gtBenchmarkEnabled}, state);
+    status(video, "gtBenchmarkFailed",
+           c.gtBenchmarkEnabled ? std::optional{c.gtBenchmarkFailed} :
+                                  std::nullopt,
+           c.gtBenchmarkEnabled ? state : api::Availability::Unavailable);
     videoCounter("decoder.decoded_frames_total", c.decodedFrames, "decoded_frames");
     videoCounter("raw.presented_frames_total", c.rawPresentedFrames, "raw_present_decisions_not_scanout");
     videoCounter("overlay.presented_decisions_total", c.overlayPresentedFrames,
