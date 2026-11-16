@@ -59,10 +59,11 @@ private:
     std::condition_variable_any changed_;
     std::deque<Entry> pending_;
     std::size_t pendingBytes_{};
-    std::jthread worker_;
     std::atomic_uint64_t accepted_{0},written_{0},dropped_{0},
                          fileErrors_{0},bytesWritten_{0};
     std::atomic_bool failed_{false},stopped_{false};
+    // Worker may access these atomics immediately after starting.
+    std::jthread worker_;
 };
 
 // Read-only streaming replay: verifies RGAU1 records, size bounds, and CRC
