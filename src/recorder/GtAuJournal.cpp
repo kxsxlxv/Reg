@@ -8,6 +8,7 @@ extern "C" {
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -116,7 +117,8 @@ void GtAuJournal::fail() noexcept {
 
 void GtAuJournal::run(std::stop_token token) noexcept {
     try {
-        std::filesystem::create_directories(config_.path.parent_path());
+        if(!config_.path.parent_path().empty())
+            std::filesystem::create_directories(config_.path.parent_path());
         std::ofstream output(config_.path,std::ios::binary|std::ios::trunc);
         if(!output) {fail();return;}
         output.write(kMagic.data(),static_cast<std::streamsize>(kMagic.size()));
@@ -148,8 +150,8 @@ void GtAuJournal::run(std::stop_token token) noexcept {
             }
             output.write(kRecord.data(),static_cast<std::streamsize>(kRecord.size()));
             write64(output,entry.decoderSession);
-            write64(output,static_cast<std::uint64_t>(raw->pts));
-            write64(output,static_cast<std::uint64_t>(raw->dts));
+            write64(output,std::bit_cast<std::uint64_t>(raw->pts));
+            write64(output,std::bit_cast<std::uint64_t>(raw->dts));
             const auto timeBase=entry.packet->timeBase();
             write32(output,static_cast<std::uint32_t>(timeBase.num));
             write32(output,static_cast<std::uint32_t>(timeBase.den));
@@ -209,7 +211,11 @@ void GtAuJournal::manifest() noexcept {
 }
 
 void GtAuJournal::stop() noexcept {
-    if(stopped_.exchange(true,std::memory_order_acq_rel))return;
+    {
+        // Serialize shutdown against an in-flight submit under its queue lock.
+        std::scoped_lock lock(mutex_);
+        if(stopped_.exchange(true,std::memory_order_acq_rel))return;
+    }
     worker_.request_stop();
     changed_.notify_all();
     if(worker_.joinable())worker_.join();
@@ -235,7 +241,7 @@ std::optional<GtAuJournalRecord> GtAuJournalReader::next() {
         throw std::runtime_error("Invalid or truncated RGAU1 record tag");
     GtAuJournalRecord record;
     record.decoderSession=read64(input_);
-    record.pts=static_cast<std::int64_t>(read64(input_));
+    record.pts=std::bit_cast<std::int64_t>(read64(input_));
     record.dts=static_cast<std::int64_t>(read64(input_));
     record.timeBaseNum=static_cast<std::int32_t>(read32(input_));
     record.timeBaseDen=static_cast<std::int32_t>(read32(input_));
