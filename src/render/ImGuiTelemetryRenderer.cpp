@@ -1266,7 +1266,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                          paused ? pausedRangeAt : now, paused);
     }
 
-    static void drawGtPanel() {
+    static void drawGtPanel(const telemetry::Counters& counters) {
         bool showBoxes = app::showGtBoxes();
         if (ImGui::Checkbox("Показывать GT bbox (T / Е)", &showBoxes)) {
             app::setShowGtBoxes(showBoxes);
@@ -1292,6 +1292,21 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             static_cast<unsigned long long>(app::gGtParseErrors.load()));
         ImGui::Text("frame_mismatch: %llu",
             static_cast<unsigned long long>(app::gGtMismatchedFrames.load()));
+        ImGui::SeparatorText("KGT1 / CAMERA-IMU (c начала процесса)");
+        ImGui::Text("KGT1: %llu | size >256KiB: %llu",
+                    static_cast<unsigned long long>(counters.gtKgt1Frames),
+                    static_cast<unsigned long long>(counters.gtOversizePackets));
+        ImGui::Text("IMU ready / invalid / null: %llu / %llu / %llu",
+                    static_cast<unsigned long long>(counters.imuReadyFrames),
+                    static_cast<unsigned long long>(counters.imuInvalidFrames),
+                    static_cast<unsigned long long>(counters.imuNullFrames));
+        ImGui::Text("IMU samples (overlapping windows): %llu",
+                    static_cast<unsigned long long>(counters.imuSamplesParsed));
+        ImGui::Text("KGT1 parse total / max: %llu / %llu us | JSON max: %llu bytes",
+                    static_cast<unsigned long long>(counters.gtParseTotalUs),
+                    static_cast<unsigned long long>(counters.gtParseMaxUs),
+                    static_cast<unsigned long long>(counters.gtMaxJsonBytes));
+        ImGui::TextDisabled("FPS: packets != frames; GT parse_error is NOT an FPS diagnosis.");
         ImGui::Spacing();
         ImGui::TextDisabled(
             "GT наносится только на кадр с идентичными epoch, frame_id и source_time_ns.");
@@ -1389,7 +1404,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 app::setTelemetryPage(app::TelemetryPage::Gt);
             }
             if (gtOpen) {
-                drawGtPanel();
+                drawGtPanel(snapshot.counters);
                 ImGui::EndTabItem();
             }
             const bool eventsOpen = ImGui::BeginTabItem(
