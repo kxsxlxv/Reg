@@ -97,7 +97,11 @@ public:
         if (auto it=entries_.find(pts);it!=entries_.end()) {
             // A PTS collision cannot be resolved by packet arrival order.
             ++stats_.duplicatePts;
-            if (it->second.gt->source==gt->source && !it->second.conflict &&
+            if ((!it->second.gt->source && !gt->source ||
+                 it->second.gt->source && gt->source &&
+                 it->second.gt->source->key==gt->source->key &&
+                 it->second.gt->source->sourceTimeNs==gt->source->sourceTimeNs) &&
+                !it->second.conflict &&
                 it->second.bytes==packetGtBytes) return;
             it->second.conflict=true;
             ++stats_.conflictingPts;
