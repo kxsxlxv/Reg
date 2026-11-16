@@ -1,6 +1,6 @@
 # Simulator GT ingest integration — stages and acceptance
 
-**Status:** development / draft PR #53; not a production release. Based on `ba147d67`. Source of truth is the user-supplied 2026-11-16 simulator handoff package (`PROTOCOL.md`, actual binary fixtures, reference decoders). The implementation does **not** change the simulator protocol or CVM1.
+**Status:** experimental sky/depth GPU display feature branch on top of draft PR #53; not a production release. Based on `ba147d67`. Source of truth is the user-supplied 2026-11-16 simulator handoff package (`PROTOCOL.md`, actual binary fixtures, reference decoders). The implementation does **not** change the simulator protocol or CVM1.
 
 ## Stage 1: compressed-AU and packet-PTS association (implemented, CI pending)
 
@@ -24,14 +24,18 @@
 
 **Known gaps:** full independent golden byte-for-byte C++ fixtures are not yet checked into GitHub; the archived binary fixtures were verified separately using the supplied Python reference decoder. The RGAU1 archive preserves each compressed AU and packet timing, allowing FrameKey recovery from the original SEIs; an independently verified source-manifest completeness oracle, crash-durable journal finalization and record-level permanent GT-by-PTS query index are still outstanding. A clean per-process archive manifest is only a local record of accepted/written packets, not a proof of producer completeness.
 
-## Stage 3: Raw GT inspection UI (not yet implemented)
+## Stage 3: Raw GT inspection UI (sky/depth overlays implemented in feature branch)
 
-- Current Raw bbox+ID OSD and GT telemetry panel remain unchanged.
-- **Not implemented yet:** GPU scalar texture upload and multi-view sky/depth comparison, independent display toggles for every GT layer, world pose/IMU time-series UI, cursor readout in metric depth, and freeze-locked RGB+GT inspection. These must not be advertised in a release.
+- The GT telemetry page now exposes **independent** Raw display toggles for BBox, KSM1 sky and KDM1 depth, with sky/depth alpha sliders. Depth uses a fixed editable **optical Z metre** interval (near/far) for shader colour mapping, distinct from root \`range_m\`. Near = warm red/orange, mid = yellow, far = blue. Invalid depth (Z=0) is transparent; no per-frame min/max auto-normalization that would make colours incomparable.
+- Vulkan fragment shader \`shaders/gt_map.frag\` composites both layers between the existing video pass and ImGui BBox, using two GPU scalar images per in-flight slot. It samples sky's original checksum-verified LSB0 bit-packed mask including optional validity plane, and KDM1 canonical little-endian float32 \`R32_SFLOAT\` optical Z. The compressed map worker owns no AVFrame or VkImage; there is **no decoded-video CPU readback** and no one-rectangle-per-pixel rendering.
+- \`GtDisplaySelection\` enforces exact \`stream_epoch, frame_id, source_time_ns\` and source visible raster for **each layer independently**. The compositor uploads only worker-validated maps; missing/late/not-ready masks do **not** show a cached texture from an adjacent frame. OSD remains disabled by default and regular RGB rendering is untouched until a layer is explicitly toggled.
+- GPU resource reuse is fence-scoped for two presentation frame slots; dynamic swapchain color formats rebuild the dedicated blend pipeline; reconnect destroys old GT textures on the render thread. Vulkan errors in optional map setup log a warning and leave RGB + BBox rendering active.
+
+**Still outstanding:** side-by-side depth/RGB/sky comparison, cursor optical-Z readout, freeze-locked RGB+GT inspection, world pose/IMU time-series UI, actual GPU validation/performance/FPS on the Windows test bench. Shader compilation and Windows CI are not a substitute for an actual Vulkan RTSP smoke test.
 
 ## Stage 4: verification, release (not yet satisfied)
 
-Required: deterministic parser/worker tests, real producer fixture hashes and negative cases, 1/10/60s domain statistics/contract, Windows CTest, Windows live Vulcan/RTSP/GT smoke, source-vs-Reg video pacing and CPU allocations, Jetson consumer parity. Compare performance versus RGB-only in a common replay, report median/P95/P99 for each observed population. No physical Reg-host or Jetson measurements available here; simulator RTSP/TCP 3174/3174 completeness is **not** Windows Reg FPS. **Do not publish a development release of this integration until acceptance.**
+Required: deterministic parser/worker tests, real producer fixture hashes and negative cases, 1/10/60s domain statistics/contract, Windows CTest, Windows live Vulcan/RTSP/GT smoke, source-vs-Reg video pacing and CPU allocations, Jetson consumer parity. Compare performance versus RGB-only in a common replay, report median/P95/P99 for each observed population. No physical Reg-host or Jetson measurements available here; simulator RTSP/TCP 3174/3174 completeness is **not** Windows Reg FPS. Development preview binaries are for manual bench validation only; do not designate a stable release until hardware smoke and performance acceptance.
 
 ## Observability impact
 
