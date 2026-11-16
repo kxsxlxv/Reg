@@ -130,7 +130,7 @@ std::string cameraImuJson(std::size_t count = 100U, bool broken = false) {
     json.insert(json.size() - 1U, ",\"camera_imu\":" + camera);
     if (json.size() < 23790U) {
         json.insert(json.size() - 1U,
-                    ",\\\"padding\\\":\\\"" + std::string(23790U - json.size() - 15U, 'p') + "\\\"");
+                    ",\"padding\":\"" + std::string(23790U - json.size() - 15U, 'p') + "\"");
     }
     return json;
 }
