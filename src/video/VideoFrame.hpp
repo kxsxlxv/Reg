@@ -32,6 +32,8 @@ public:
     int height() const noexcept { return frame_->height; }
     std::optional<media::SourceFrameIdentity> identity() const noexcept { return identity_; }
     const media::GtMetadata& gt() const noexcept { return gt_; }
+    // Parsed once during frame creation. Consumers must not reparse the SEI.
+    const media::CameraImuMetadata& cameraImu() const noexcept { return gt_.cameraImu; }
     std::chrono::steady_clock::time_point decodedAt() const noexcept { return decodedAt_; }
 
 private:
