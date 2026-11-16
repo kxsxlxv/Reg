@@ -120,6 +120,8 @@ private:
     }
     static bool decoderDecreased(const telemetry::Counters& a, const telemetry::Counters& b) {
         return a.decodedFrames < b.decodedFrames ||
+            a.demuxedVideoPackets < b.demuxedVideoPackets ||
+            a.gtKgt1Frames < b.gtKgt1Frames ||
             a.rawPresentedFrames < b.rawPresentedFrames ||
             a.overlayPresentedFrames < b.overlayPresentedFrames ||
             a.overlayMissingMetadataDrops < b.overlayMissingMetadataDrops ||
@@ -381,6 +383,20 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     const auto videoCounter = [&](std::string name, std::uint64_t value, std::string population) {
         counter(video, std::move(name), value, std::move(population), "decoder_session", decoder, state);
     };
+    videoCounter("decoder.demuxed_video_packets_total", c.demuxedVideoPackets, "compressed_video_packets_not_frames");
+    videoCounter("gt.kgt1_frames_total", c.gtKgt1Frames, "decoded_video_frames_containing_kgt1");
+    videoCounter("gt.ready_frames_total", c.gtReadyFrames, "kgt1_ready_frames");
+    videoCounter("gt.parse_errors_total", c.gtParseErrors, "kgt1_parse_errors");
+    videoCounter("gt.oversize_packets_total", c.gtOversizePackets, "kgt1_payloads_over_262144_bytes");
+    videoCounter("gt.imu_ready_frames_total", c.imuReadyFrames, "kgt1_frames_with_valid_imu");
+    videoCounter("gt.imu_invalid_frames_total", c.imuInvalidFrames, "kgt1_frames_with_semantically_invalid_imu");
+    videoCounter("gt.imu_null_frames_total", c.imuNullFrames, "kgt1_frames_with_null_imu");
+    videoCounter("gt.imu_samples_parsed_total", c.imuSamplesParsed, "imu_samples_in_overlapping_frame_windows");
+    videoCounter("gt.parse_total_us", c.gtParseTotalUs, "ready_kgt1_parse_microseconds_total");
+    gauge(video, "gt.parse_max_us", static_cast<double>(c.gtParseMaxUs), "us",
+          "ready_kgt1_parse_max", "process", process, state);
+    gauge(video, "gt.max_json_bytes", static_cast<double>(c.gtMaxJsonBytes), "bytes",
+          "largest_observed_kgt1_json", "process", process, state);
     videoCounter("decoder.decoded_frames_total", c.decodedFrames, "decoded_frames");
     videoCounter("raw.presented_frames_total", c.rawPresentedFrames, "raw_present_decisions_not_scanout");
     videoCounter("overlay.presented_decisions_total", c.overlayPresentedFrames,
@@ -392,6 +408,10 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
           "overlay_buffer", "decoder_session", decoder, state);
     gauge(video, "overlay.configured_delay_ms", static_cast<double>(c.configuredOverlayDelayMs),
           "ms", "overlay_configuration", "process", process, state);
+    rates(video, input, ctx, "decoder.demuxed_video_packet_rate",
+          "compressed_video_packets_not_frames", "decoder_session", decoder,
+          [](const auto& x) { return x.demuxedVideoPackets; },
+          [](const auto& x) { return x.decoderSessions; }, decoderStable, resets.decoderResetAtNs());
     rates(video, input, ctx, "decoder.decoded_fps", "decoded_frames", "decoder_session", decoder,
           [](const auto& x) { return x.decodedFrames; },
           [](const auto& x) { return x.decoderSessions; }, decoderStable, resets.decoderResetAtNs());
