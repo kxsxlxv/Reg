@@ -182,3 +182,16 @@ Read [Telemetry Analytics Responsibilities](TELEMETRY_ANALYTICS_RESPONSIBILITIES
 Reg owns Reg video/Exact Sync statistical definitions; Jetson owns inference/queue/sender latency and CV rates; UNIGINE/MediaMTX own source/transport boundaries; the lab analyzer owns cross-host comparison and deterministic verification; the agent owns hypotheses and explanation. MCP is a thin wrapper over these functions, not a numerical computation engine.
 
 Do not calculate basic avg/min/max/P95 via one-off agent shell scripts against text logs. If a novel calculation is needed, operate offline against an evidence export, validate it and promote it into a reusable typed deterministic query. Never average P95 from separate windows. Preserve sample_count, population, reset scope and censored/timeout cases in conclusions.
+
+
+## 13. KGT1 Camera–IMU and low-FPS diagnosis (2026-11-16)
+
+Reg's new KGT1 `camera_imu` extension remains within KGT1 v1 and the same SEI UUID, with a sender/receiver JSON cap of 262144 bytes. A **semantic** IMU error does not erase valid bbox; malformed whole JSON still causes GT ParseError without disabling video. Old KGT1 (missing/null camera_imu) remains supported.
+
+Use `/v1/snapshot?sections=video` to inspect process-lifetime `gt.kgt1_frames_total`, `gt.parse_errors_total`, `gt.oversize_packets_total`, `gt.imu_ready_frames_total`, `gt.imu_invalid_frames_total`, `gt.parse_total_us`, `gt.parse_max_us` and `gt.max_json_bytes`. A healthy GT parse is **not** a video FPS measurement. Every metric carries a population, owner, reset scope and availability. Compare with `decoder.demuxed_video_packet_rate_1s/10s/60s`, `decoder.decoded_fps_*`, `raw.presented_fps_*` and `overlay.presented_decisions_rate_*` on *complete* windows only. The packet rate has units packets/s, not frames/s.
+
+For low FPS, inspect the existing Reg-host `logs/frame_timing_*.csv` events PACKET -> DECODE -> PRESENT and new columns `gt_json_bytes,gt_parse_us,camera_imu_state,camera_imu_samples`. Identify whether arrival gaps precede decode gaps, whether parse time accounts for any delay, and whether Raw newest-frame-wins drops frame IDs or Vulkan present fails. Do not interpret presentation-call success as confirmed physical scanout. If available, compare matching simulator/MediaMTX measurements with explicit FrameKey and scoped windows; do not subtract unrelated host-local monotonic clocks. Treat missing or disabled telemetry as unavailable, not zero.
+
+Simulator operator reported **10792 decoded frames in 180 seconds** at a *simulator-side TCP receiver*, no omissions and up to **96.5 ms** local delivery pauses. An **80 ms** GT wait could contribute to burstiness but has **not** been proven to limit Windows Reg FPS. A ~25 Hz pose update is never an estimate of video FPS. Record a controlled A/B run with and without IMU, keeping other load and capture settings fixed, before declaring a causal diagnosis.
+
+Detailed schema and bounded parser behavior: [CAMERA_IMU_KGT1_AND_FPS_DIAGNOSTICS.md](CAMERA_IMU_KGT1_AND_FPS_DIAGNOSTICS.md). End-to-end contract approval requires a captured sanitized full KGT1 payload from the simulator, Reg-host trace and hardware test; passing synthetic CTest is necessary but insufficient.

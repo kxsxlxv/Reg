@@ -14,8 +14,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-build-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: false # Keep the prior build/test result while a new push queues
+  group: windows-build-${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true # Supersede intermediate commits on the same branch
 
 jobs:
   build:

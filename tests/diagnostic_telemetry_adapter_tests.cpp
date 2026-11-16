@@ -333,9 +333,59 @@ void uint64AndIsolation() {
             "physical scanout not inferred");
     require(metric(section(out,"cv"),"cv.packets_total").owner=="reg", "no Jetson invention");
 }
+
+void cameraImuObservabilityAndFpsSeparation() {
+    Snapshot history;
+    for (int second = 0; second <= 10; ++second) {
+        Counters c;
+        c.decoderSessions = 2;
+        c.videoSignalPresent = true;
+        c.rtspConnected = true;
+        c.demuxedVideoPackets = static_cast<std::uint64_t>(70 * second);
+        c.decodedFrames = static_cast<std::uint64_t>(60 * second);
+        c.rawPresentedFrames = static_cast<std::uint64_t>(45 * second);
+        c.gtKgt1Frames = static_cast<std::uint64_t>(50 * second);
+        c.gtReadyFrames = static_cast<std::uint64_t>(49 * second);
+        c.gtParseErrors = static_cast<std::uint64_t>(second);
+        c.gtOversizePackets = static_cast<std::uint64_t>(second / 2);
+        c.imuReadyFrames = static_cast<std::uint64_t>(40 * second);
+        c.imuInvalidFrames = static_cast<std::uint64_t>(9 * second);
+        c.imuSamplesParsed = static_cast<std::uint64_t>(4000 * second);
+        c.gtParseTotalUs = static_cast<std::uint64_t>(8000 * second);
+        c.gtParseMaxUs = 600;
+        c.gtMaxJsonBytes = 23790;
+        sample(history, second, c);
+    }
+    const auto out = makeSnapshot(history, context(10));
+    const auto& video = section(out, "video");
+    require(metric(video, "decoder.demuxed_video_packets_total").counter == 700,
+            "packet count is independent of decoded frames");
+    require(metric(video, "decoder.demuxed_video_packet_rate_10s").value == 70,
+            "compressed video packet rate is not FPS");
+    require(metric(video, "decoder.decoded_fps_10s").value == 60 &&
+            metric(video, "raw.presented_fps_10s").value == 45,
+            "independent decode and presentation rates");
+    require(metric(video, "gt.oversize_packets_total").counter == 5,
+            "oversize KGT1 diagnostic counter");
+    require(metric(video, "gt.imu_invalid_frames_total").counter == 90 &&
+            metric(video, "gt.imu_ready_frames_total").counter == 400,
+            "valid IMU counts independent from GT bbox");
+    require(metric(video, "gt.imu_samples_parsed_total").counter == 40000,
+            "overlapping history sample count");
+    require(metric(video, "gt.parse_total_us").unit == "us" &&
+            metric(video, "gt.parse_total_us").resetScope == "process" &&
+            metric(video, "gt.parse_total_us").counter == 80000,
+            "parse duration units and scope");
+    require(metric(video, "gt.parse_max_us").value == 600 &&
+            metric(video, "gt.max_json_bytes").value == 23790,
+            "correct max gauges");
+    require(metric(video, "gt.parse_errors_total").counter == 10 &&
+            metric(video, "decoder.decoded_fps_10s").value == 60,
+            "GT parse error does not redefine decode FPS");
+}
 int main(){
  try {unknownAndZero();measuredRates();insufficientAndResets();staleAndSparse();
-      exactPopulationAndIdentity();uint64AndIsolation();resetIdentityCodecAndRetention();siblingDomainResetDoesNotBridgeRate();
+      cameraImuObservabilityAndFpsSeparation();exactPopulationAndIdentity();uint64AndIsolation();resetIdentityCodecAndRetention();siblingDomainResetDoesNotBridgeRate();
       std::cout<<"diagnostic_telemetry_adapter_tests: PASS\n";return 0;}
  catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}
 }

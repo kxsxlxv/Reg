@@ -380,3 +380,30 @@ The normative responsibility model is in [Telemetry Analytics Responsibilities](
 Future contract additions must include typed, budgeted operations: lab.overview, lab.list_episodes, lab.metric_stats, lab.compare_windows and lab.frame_lifecycle. Legacy logs should be grouped into episodes with evidence handles before LLM access. The default overview target is <=2 KiB JSON with <=5 episodes. A normal drilldown target is <=8 KiB and log excerpt <=20 lines, adjustable after validation. These bounds prevent agent-context flooding but MUST NOT destroy bounded local diagnostic evidence.
 
 Require count, sum, sample population, freshness, reset domain, time window and histogram accuracy alongside reported quantiles. It is mathematically invalid to average P95 values from disjoint hosts/windows. Missing, late and incomplete CV workloads are separately accounted for rather than dropped from every latency population.
+
+
+## Addendum — 2026-11-16: KGT1 Camera–IMU / video-ingest measurement contract
+
+**Implemented** in the development branch `feat/kgt1-camera-imu-fps-diagnostics-20261116`. The existing opt-in, loopback-only read-only `/v1/snapshot?sections=video` route is unchanged; only additive metrics in its `video` section are emitted. No source identifier, run_id, IMU vector, camera pose or GT bbox is exported.
+
+| Metric (prefix `gt.` except packet count) | Kind / unit | Population, provenance and reset |
+|---|---|---|
+| `decoder.demuxed_video_packets_total` | counter / count | video packets delivered by FFmpeg demux callback, Reg measured, **process** |
+| `gt.kgt1_frames_total` | counter / count | decoded frames carrying KGT1 (including invalid), measured, **process** |
+| `gt.ready_frames_total` | counter / count | RGF1-validated KGT1 ready frames, measured, **process** |
+| `gt.parse_errors_total` | counter / count | syntactically/structurally invalid KGT1, measured, **process** |
+| `gt.oversize_packets_total` | counter / count | KGT1 JSON >262144 bytes, measured, **process** |
+| `gt.imu_ready_frames_total` | counter / count | typed camera_imu valid on KGT1 frames, measured, **process** |
+| `gt.imu_invalid_frames_total` | counter / count | camera_imu semantic failure with otherwise accepted KGT1, measured, **process** |
+| `gt.imu_null_frames_total` | counter / count | explicit camera_imu:null, measured, **process** |
+| `gt.imu_samples_parsed_total` | counter / count | samples per parsed KGT1; **overlapping windows counted more than once**, measured, **process** |
+| `gt.parse_total_us` | counter / us | successful KGT1 parsing time, Reg-local steady clock, measured, **process** |
+| `gt.parse_max_us` | gauge / us | maximum successful KGT1 parse time since process start, measured, **process** |
+| `gt.max_json_bytes` | gauge / bytes | maximum observed KGT1 JSON size since process start, measured, **process** |
+| `decoder.demuxed_video_packet_rate_1s/10s/60s` | rate / count/s | packet arrival rate computed from process counter in complete sampled windows; **decoder_session** rate reset, derived |
+
+**Freshness**: sourced from 250-ms TelemetryModel periodic samples, published at DiagnosticRuntime 1-Hz cadence when enabled; stale/unavailable data stay marked rather than substituted with zero. These are all local observations; they neither establish receipt by other hosts nor physical scanout. Frame IDs and epochs are never metric labels. JSON `uint64` counters remain decimal strings. An apparent GT ParseError does **not** prove an FPS degradation. Compressed packet rate is **not** video frame rate. Historical maxima are not frame-interval percentiles.
+
+The existing `decoder.decoded_fps_*`, `raw.presented_fps_*` and `overlay.presented_decisions_rate_*` form separate pipeline rates and can diverge by design (Raw newest-frame-wins, disabled outputs, overlay synchronization). Physical display refresh/scanout is not measured. The existing asynchronous per-frame CSV trace adds `gt_json_bytes`, `gt_parse_us`, `camera_imu_state`, `camera_imu_samples` columns to DECODE rows; no raw IMU arrays are logged. CSV writer drops may cause missing rows and must not be confused with video drops.
+
+See [KGT1 Camera–IMU and FPS Diagnostics](CAMERA_IMU_KGT1_AND_FPS_DIAGNOSTICS.md) for validation, consumer-facing typed fields, test coverage, and a causal-hypothesis ladder.

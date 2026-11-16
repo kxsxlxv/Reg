@@ -5,6 +5,9 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <chrono>
+#include <initializer_list>
+#include <unordered_set>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -90,6 +93,7 @@ public:
 private:
     std::string_view text_;
     std::size_t pos_{};
+    std::size_t nodes_{};
 
     void skipSpace() noexcept {
         while (pos_ < text_.size() &&
@@ -179,7 +183,7 @@ private:
         return true;
     }
     bool value(Json& out, unsigned depth) {
-        if (depth > 24U) return false;
+        if (depth > 24U || ++nodes_ > 8192U) return false;
         skipSpace();
         if (pos_ == text_.size()) return false;
         if (text_[pos_] == '"') {
@@ -198,7 +202,8 @@ private:
                 if (!take(':')) return false;
                 Json next;
                 if (!value(next, depth + 1U)) return false;
-                if (!out.object.emplace(std::move(key), std::move(next)).second) return false;
+                if (out.object.size() >= 512U || key.size() > 256U ||
+                    !out.object.emplace(std::move(key), std::move(next)).second) return false;
                 skipSpace();
                 if (take('}')) return true;
             } while (take(','));
@@ -211,6 +216,7 @@ private:
             do {
                 Json next;
                 if (!value(next, depth + 1U)) return false;
+                if (out.array.size() >= 1024U) return false;
                 out.array.push_back(std::move(next));
                 skipSpace();
                 if (take(']')) return true;
@@ -260,8 +266,206 @@ bool asBox(const Json* node, std::array<double, 4>& xyxy) noexcept {
     return xyxy[2] > xyxy[0] && xyxy[3] > xyxy[1];
 }
 
-GtMetadata failed() {
+
+template<std::size_t N>
+bool asVector(const Json* node, std::array<double, N>& result) noexcept {
+    if (node == nullptr || node->type != Json::Type::Array ||
+        node->array.size() != N) return false;
+    for (std::size_t i = 0; i < N; ++i) {
+        if (!asDouble(node->array[i], result[i])) return false;
+    }
+    return true;
+}
+
+template<std::size_t N>
+bool optionalVector(const Json* node,
+                    std::optional<std::array<double, N>>& result) noexcept {
+    if (node == nullptr || node->type == Json::Type::Null) return true;
+    std::array<double, N> values{};
+    if (!asVector(node, values)) return false;
+    result = values;
+    return true;
+}
+
+const Json* firstOf(const Json* object,
+                    std::initializer_list<std::string_view> names) noexcept {
+    if (!object) return nullptr;
+    for (const auto name : names) {
+        if (const auto* found = object->member(name)) return found;
+    }
+    return nullptr;
+}
+
+bool matrix(const Json* node, std::size_t side, double* out) noexcept {
+    if (!node || node->type != Json::Type::Array) return false;
+    if (node->array.size() == side * side) {
+        for (std::size_t i = 0; i < side * side; ++i)
+            if (!asDouble(node->array[i], out[i])) return false;
+        return true;
+    }
+    if (node->array.size() != side) return false;
+    for (std::size_t row = 0; row < side; ++row) {
+        const auto& line = node->array[row];
+        if (line.type != Json::Type::Array || line.array.size() != side) return false;
+        for (std::size_t col = 0; col < side; ++col)
+            if (!asDouble(line.array[col], out[row * side + col])) return false;
+    }
+    return true;
+}
+
+bool stringId(const Json* node, std::string& out) {
+    if (!node) return false;
+    if (node->type == Json::Type::String) out = node->scalar;
+    else if (node->type == Json::Type::Number) {
+        std::uint64_t value{};
+        if (!asUint64(node, value)) return false;
+        out = node->scalar; // decimal, never round-tripped through double
+    } else return false;
+    return !out.empty() && out.size() <= 128U;
+}
+
+bool optionalQuat(const Json* node,
+                  std::optional<std::array<double, 4>>& result) noexcept {
+    if (!optionalVector(node, result)) return false;
+    if (!result) return true;
+    double norm = 0;
+    for (double x : *result) norm += x * x;
+    return norm >= 0.25 && norm <= 2.25;
+}
+
+CameraImuMetadata parseCameraImu(const Json* value,
+                                 const SourceFrameIdentity& source) {
+    CameraImuMetadata imu;
+    if (!value) return imu;
+    if (value->type == Json::Type::Null) {
+        imu.status = CameraImuStatus::Null;
+        return imu;
+    }
+    imu.status = CameraImuStatus::Invalid;
+    if (value->type != Json::Type::Object) return imu;
+
+    if (!asUint64(value->member("version"), imu.version) || imu.version != 1U ||
+        !stringId(value->member("run_id"), imu.runId) ||
+        !asUint64(value->member("simulation_epoch"), imu.simulationEpoch) ||
+        !asUint64(value->member("timestamp_ns"), imu.timestampNs)) return imu;
+
+    // simulation_epoch is not stream_epoch; simulation timestamps may repeat
+    // across distinct video frames. Never use either as a FrameKey substitute.
+    if (const auto* keyEpoch = value->member("stream_epoch")) {
+        std::uint64_t parsed{};
+        if (!asUint64(keyEpoch, parsed) || parsed != source.key.streamEpoch) return imu;
+    }
+    if (const auto* keyFrame = value->member("frame_id")) {
+        std::uint64_t parsed{};
+        if (!asUint64(keyFrame, parsed) || parsed != source.key.frameId) return imu;
+    }
+    if (const auto* state = value->member("state")) {
+        if (state->type != Json::Type::String || state->scalar.size() > 128U) return imu;
+        imu.state = state->scalar;
+    }
+    if (const auto* status = value->member("status")) {
+        if (status->type != Json::Type::String || status->scalar.size() > 128U) return imu;
+        imu.sourceStatus = status->scalar;
+    }
+    const auto* axes = firstOf(value, {"axes", "camera_axes"});
+    if (axes) {
+        if (axes->type == Json::Type::String) imu.axes = axes->scalar;
+        else if (axes->type == Json::Type::Object) {
+            const auto* cameraAxes = axes->member("camera");
+            if (!cameraAxes || cameraAxes->type != Json::Type::String) return imu;
+            imu.axes = cameraAxes->scalar;
+        } else return imu;
+        if (imu.axes != "right_down_forward") return imu;
+    }
+
+    if (const auto* k = value->member("K")) {
+        std::array<double, 9> values{};
+        if (!matrix(k, 3U, values.data()) ||
+            values[0] <= 0.0 || values[4] <= 0.0) return imu;
+        imu.K = values;
+    }
+    if (const auto* extrinsic = value->member("T_camera_imu")) {
+        if (extrinsic->type == Json::Type::Array) {
+            std::array<double, 16> values{};
+            if (!matrix(extrinsic, 4U, values.data())) return imu;
+            imu.tCameraImu = values;
+        } else if (extrinsic->type == Json::Type::Object) {
+            if (!optionalVector<3>(
+                    firstOf(extrinsic, {"translation_m", "position_m"}),
+                    imu.extrinsicTranslationM) ||
+                !optionalQuat(firstOf(extrinsic,
+                    {"quaternion_wxyz", "rotation_wxyz"}),
+                    imu.extrinsicQuaternionWxyz)) return imu;
+            if (!imu.extrinsicTranslationM || !imu.extrinsicQuaternionWxyz) return imu;
+        } else return imu;
+    }
+    if (const auto* exposure = value->member("exposure")) {
+        if (exposure->type != Json::Type::Object) return imu;
+        std::uint64_t timestamp{};
+        if (const auto* t = exposure->member("timestamp_ns")) {
+            if (!asUint64(t, timestamp)) return imu;
+            imu.exposureTimestampNs = timestamp;
+        }
+        std::uint64_t duration{};
+        if (const auto* d = exposure->member("duration_ns")) {
+            if (!asUint64(d, duration) || duration > 1000000000ULL) return imu;
+            imu.exposureDurationNs = duration;
+        }
+    }
+
+    if (const auto* gt = value->member("camera_gt")) {
+        if (gt->type != Json::Type::Object) return imu;
+        auto& pose = imu.cameraGt;
+        if (!optionalVector<3>(firstOf(gt, {"position_world_m", "position_m", "position"}),
+                               pose.positionWorldM) ||
+            !optionalQuat(firstOf(gt, {"orientation_wxyz", "quaternion_wxyz"}),
+                          pose.orientationWxyz) ||
+            !optionalVector<3>(firstOf(gt, {"velocity_world_m_s", "velocity_m_s"}),
+                               pose.velocityWorldMS) ||
+            !optionalVector<3>(firstOf(gt, {"acceleration_world_m_s2", "accel_m_s2"}),
+                               pose.accelerationWorldMS2) ||
+            !optionalVector<3>(firstOf(gt, {"gravity_world_m_s2", "gravity_m_s2"}),
+                               pose.gravityWorldMS2)) return imu;
+    }
+
+    const auto* samples = value->member("imu");
+    if (!samples || samples->type != Json::Type::Array ||
+        samples->array.size() > kMaxCameraImuSamples) return imu;
+    imu.imu.reserve(samples->array.size());
+    std::unordered_set<std::uint64_t> sequences;
+    std::uint64_t previousTimestamp{};
+    bool first = true;
+    for (const auto& row : samples->array) {
+        if (row.type != Json::Type::Object) return imu;
+        CameraImuSample sample;
+        if (!asUint64(row.member("timestamp_ns"), sample.timestampNs) ||
+            !asUint64(row.member("interval_start_ns"), sample.intervalStartNs) ||
+            !asUint64(row.member("sequence"), sample.sequence) ||
+            !stringId(row.member("sensor_id"), sample.sensorId) ||
+            !asVector<3>(row.member("gyro_rad_s"), sample.gyroRadS) ||
+            !asVector<3>(row.member("accel_m_s2"), sample.accelMS2) ||
+            !asUint64(row.member("status_flags"), sample.statusFlags) ||
+            sample.intervalStartNs > sample.timestampNs ||
+            sample.timestampNs - sample.intervalStartNs > 260000000ULL ||
+            (!first && sample.timestampNs < previousTimestamp) ||
+            !sequences.insert(sample.sequence).second) return imu;
+
+        // 250 ms history + one 2.5 ms sampling interval and modest tolerances.
+        if ((sample.timestampNs <= imu.timestampNs &&
+             imu.timestampNs - sample.timestampNs > 260000000ULL) ||
+            (sample.timestampNs > imu.timestampNs &&
+             sample.timestampNs - imu.timestampNs > 20000000ULL)) return imu;
+        first = false;
+        previousTimestamp = sample.timestampNs;
+        imu.imu.push_back(std::move(sample));
+    }
+    imu.status = CameraImuStatus::Ready;
+    return imu;
+}
+
+GtMetadata failed(std::size_t bytes = 0U) {
     GtMetadata gt;
+    gt.jsonBytes = bytes;
     gt.status = GtStatus::ParseError;
     return gt;
 }
@@ -283,24 +487,26 @@ const char* gtStatusName(GtStatus status) noexcept {
 }
 
 GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
-    if (json.empty() || json.size() > kMaxGtJsonBytes) return failed();
+    if (json.empty() || json.size() > kMaxGtJsonBytes) return failed(json.size());
+    const auto started = std::chrono::steady_clock::now();
     try {
         Json root;
         const auto bytes = std::string_view(
             reinterpret_cast<const char*>(json.data()), json.size());
-        if (!Parser(bytes).parse(root) || root.type != Json::Type::Object) return failed();
+        if (!Parser(bytes).parse(root) || root.type != Json::Type::Object) return failed(json.size());
 
         const Json* type = root.member("type");
         const Json* version = root.member("version");
         std::uint64_t versionNumber = 0;
         if (type == nullptr || type->type != Json::Type::String ||
             type->scalar != "KGT1" ||
-            !asUint64(version, versionNumber) || versionNumber != 1U) return failed();
+            !asUint64(version, versionNumber) || versionNumber != 1U) return failed(json.size());
 
         const Json* status = root.member("status");
-        if (status == nullptr || status->type != Json::Type::String) return failed();
+        if (status == nullptr || status->type != Json::Type::String) return failed(json.size());
 
         GtMetadata gt;
+        gt.jsonBytes = json.size();
         if (status->scalar == "not_ready") gt.status = GtStatus::NotReady;
         else if (status->scalar == "busy") gt.status = GtStatus::Busy;
         else if (status->scalar == "ambiguous_viewport") gt.status = GtStatus::AmbiguousViewport;
@@ -317,16 +523,16 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
             videoSize->array.size() != 2U ||
             !asDimension(&videoSize->array[0], gt.videoWidth) ||
             !asDimension(&videoSize->array[1], gt.videoHeight) ||
-            objects == nullptr || objects->type != Json::Type::Array) return failed();
+            objects == nullptr || objects->type != Json::Type::Array) return failed(json.size());
 
-        if (objects->array.size() > 256U) return failed();
+        if (objects->array.size() > 256U) return failed(json.size());
         gt.objects.reserve(objects->array.size());
         for (const auto& item : objects->array) {
             const Json* id = item.member("id");
             const Json* visible = item.member("visible");
             if (id == nullptr || id->type != Json::Type::String ||
                 id->scalar.size() > 128U ||
-                visible == nullptr || visible->type != Json::Type::Boolean) return failed();
+                visible == nullptr || visible->type != Json::Type::Boolean) return failed(json.size());
             GtObject object;
             object.id = id->scalar;
             object.visible = visible->boolean;
@@ -341,10 +547,15 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
             }
             gt.objects.push_back(std::move(object));
         }
+        gt.cameraImu = parseCameraImu(root.member("camera_imu"), gt.source);
+        gt.jsonBytes = json.size();
+        gt.parseDurationUs = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - started).count());
         return gt;
     } catch (...) {
         // Never let a malformed SEI or allocation failure stop video decoding.
-        return failed();
+        return failed(json.size());
     }
 }
 
@@ -382,6 +593,10 @@ void validateGtForFrame(
         gt.videoWidth != static_cast<std::uint32_t>(decodedWidth) ||
         gt.videoHeight != static_cast<std::uint32_t>(decodedHeight)) {
         gt.objects.clear();
+        if (gt.cameraImu.status == CameraImuStatus::Ready) {
+            gt.cameraImu.status = CameraImuStatus::FrameMismatch;
+            gt.cameraImu.imu.clear();
+        }
         gt.status = GtStatus::FrameMismatch;
     }
 }

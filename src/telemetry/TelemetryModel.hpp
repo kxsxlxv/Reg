@@ -36,6 +36,19 @@ struct Counters {
     std::uint64_t decoderSessions{};
     std::uint64_t reconnects{};
 
+    // Per-process counters, published independently of the Telemetry window.
+    std::uint64_t demuxedVideoPackets{}; // compressed packets, never FPS
+    std::uint64_t gtKgt1Frames{};
+    std::uint64_t gtReadyFrames{};
+    std::uint64_t gtParseErrors{};
+    std::uint64_t gtOversizePackets{};
+    std::uint64_t imuReadyFrames{};
+    std::uint64_t imuInvalidFrames{};
+    std::uint64_t imuNullFrames{};
+    std::uint64_t imuSamplesParsed{}; // overlapping per-frame history
+    std::uint64_t gtParseTotalUs{}; // successful GT only
+    std::uint64_t gtParseMaxUs{};
+    std::uint64_t gtMaxJsonBytes{};
     std::uint64_t decodedFrames{};
     std::uint64_t rawPresentedFrames{};
     std::uint64_t overlayPresentedFrames{};

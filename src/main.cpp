@@ -3,6 +3,7 @@
 #include "render/GtOverlayBuilder.hpp"
 #include "diagnostics/ExactSyncDiagnostics.hpp"
 #include "diagnostics/FrameTimingLogger.hpp"
+#include "diagnostics/GtIngestStats.hpp"
 #include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
 #include "media/RtspDecoder.hpp"
 #include "media/VulkanHwDevice.hpp"
@@ -129,6 +130,7 @@ int runApplication(
     const reg::app::CommandLineOptions& options) {
         reg::platform::SDLPlatform platform;
         reg::diagnostics::FrameTimingLogger frameTimingLog;
+        reg::diagnostics::GtIngestStats gtIngestStats;
 
         SDL_Window* rawSdlWindow = platform.createVulkanWindow(
             "Reg - Raw",
@@ -360,6 +362,7 @@ int runApplication(
                     });
         }
 
+        std::atomic_uint64_t demuxedVideoPackets{0};
         std::atomic_uint64_t decodedFrames{0};
         std::atomic_uint64_t identityPresentFrames{0};
         std::atomic_uint64_t identityMissingFrames{0};
@@ -455,6 +458,7 @@ int runApplication(
                                 },
                             .onCompressedPacket =
                                 [&](reg::media::CompressedVideoPacketPtr packet) {
+                                    demuxedVideoPackets.fetch_add(1U, std::memory_order_relaxed);
                                     frameTimingLog.logPacket(*packet);
 
                                     if (blackboxRecorder) {
@@ -510,6 +514,7 @@ int runApplication(
                                         steadyNowNs(),
                                         std::memory_order_release);
                                     reg::app::observeGt(frame->gt().status);
+                                    gtIngestStats.observe(frame->gt());
                                     telemetryModel.observeGtRange(
                                         frame->gt(), frame->decodedAt());
                                     rawMailbox.publish(frame);
@@ -1460,6 +1465,7 @@ int runApplication(
                         }
                     }
 
+                    const auto gtStats = gtIngestStats.snapshot();
                     telemetryModel.updateCounters(
                         reg::telemetry::Counters{
                             .rtspConnected =
@@ -1475,6 +1481,18 @@ int runApplication(
                             .reconnects =
                                 decoderReconnects.load(
                                     std::memory_order_relaxed),
+                            .demuxedVideoPackets = demuxedVideoPackets.load(std::memory_order_relaxed),
+                            .gtKgt1Frames = gtStats.framesWithKgt1,
+                            .gtReadyFrames = gtStats.gtReady,
+                            .gtParseErrors = gtStats.gtParseErrors,
+                            .gtOversizePackets = gtStats.gtTooLarge,
+                            .imuReadyFrames = gtStats.imuReady,
+                            .imuInvalidFrames = gtStats.imuInvalid,
+                            .imuNullFrames = gtStats.imuNull,
+                            .imuSamplesParsed = gtStats.imuSamplesParsed,
+                            .gtParseTotalUs = gtStats.gtParseTotalUs,
+                            .gtParseMaxUs = gtStats.gtParseMaxUs,
+                            .gtMaxJsonBytes = gtStats.gtJsonMaxBytes,
                             .decodedFrames =
                                 decodedFrames.load(
                                     std::memory_order_relaxed),

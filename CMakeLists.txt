@@ -517,6 +517,17 @@ if(REG_BUILD_TESTS)
     endif()
     add_test(NAME gt_range_history COMMAND reg_gt_range_history_tests)
 
+    add_executable(reg_gt_ingest_stats_tests tests/gt_ingest_stats_tests.cpp)
+    target_include_directories(reg_gt_ingest_stats_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        target_compile_options(reg_gt_ingest_stats_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_gt_ingest_stats_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME gt_ingest_stats COMMAND reg_gt_ingest_stats_tests)
+
     add_executable(reg_cvm1_semantic_tests tests/cvm1_semantic_style_tests.cpp)
     target_include_directories(reg_cvm1_semantic_tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src")

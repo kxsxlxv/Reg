@@ -1,4 +1,5 @@
 #include "media/GtSei.hpp"
+#include "media/CameraImuDedup.hpp"
 #include "render/GtOverlayBuilder.hpp"
 #include "vulkan/VideoUvRegion.hpp"
 #include "remote/RemoteTextFocusGate.hpp"
@@ -13,6 +14,7 @@ extern "C" {
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <chrono>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -82,10 +84,128 @@ void testPayloads() {
           reg::media::GtStatus::ParseError, "duplicate key");
     check(parse(R"({"type":"KGT1","version":1,"status":"ready","stream_epoch":18446744073709551616})").status ==
           reg::media::GtStatus::ParseError, "uint64 overflow");
-    check(parse(std::string(16385U, 'x')).status ==
-          reg::media::GtStatus::ParseError, "16 KiB bound");
+    check(parse(std::string(reg::media::kMaxGtJsonBytes + 1U, 'x')).status ==
+          reg::media::GtStatus::ParseError, "256 KiB bound");
     check(parse(R"({"type":"KGT1","version":1,"status":"not_ready","objects":null})").status ==
           reg::media::GtStatus::NotReady, "optional fields for not_ready");
+}
+
+
+std::string cameraImuJson(std::size_t count = 100U, bool broken = false) {
+    const std::uint64_t end = 1000000000000ULL;
+    std::string records;
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto t = end - static_cast<std::uint64_t>(count - 1U - i) * 2500000ULL;
+        if (!records.empty()) records += ',';
+        records += "{\"timestamp_ns\":" + std::to_string(t) +
+            ",\"interval_start_ns\":" + std::to_string(t - 2500000ULL) +
+            ",\"sequence\":" + std::to_string(9007199254740993ULL + i) +
+            ",\"sensor_id\":\"ideal\",\"gyro_rad_s\":[0,0.1,0.2],"
+            "\"accel_m_s2\":[1.0,2.0,3.0],\"status_flags\":0}";
+    }
+    if (broken && count > 0U) {
+        const auto offset = records.find("\"gyro_rad_s\":[0,0.1,0.2]");
+        check(offset != std::string::npos, "IMU fixture");
+        records.replace(offset, sizeof("\"gyro_rad_s\":[0,0.1,0.2]") - 1U,
+                        "\"gyro_rad_s\":[0,1e999,0]");
+    }
+    const std::string camera =
+        "{\"version\":1,\"run_id\":\"run-1\","
+        "\"simulation_epoch\":18446744073709551614,"
+        "\"timestamp_ns\":1000000000000,"
+        "\"state\":\"RUNNING\",\"status\":\"ready\","
+        "\"axes\":\"right_down_forward\","
+        "\"K\":[[1000,0,960],[0,1000,540],[0,0,1]],"
+        "\"T_camera_imu\":{\"translation_m\":[0,0,0],"
+        "\"quaternion_wxyz\":[1,0,0,0]},"
+        "\"exposure\":{\"timestamp_ns\":1000000000000,"
+        "\"duration_ns\":0},"
+        "\"camera_gt\":{\"position_world_m\":[0,0,100],"
+        "\"orientation_wxyz\":[1,0,0,0],"
+        "\"velocity_world_m_s\":[5,0,0],"
+        "\"acceleration_world_m_s2\":[0,0,0],"
+        "\"gravity_world_m_s2\":[0,0,-9.81]},"
+        "\"imu\":[" + records + "]}";
+    auto json = readyJson();
+    json.insert(json.size() - 1U, ",\"camera_imu\":" + camera);
+    if (json.size() < 23790U) {
+        json.insert(json.size() - 1U,
+                    ",\"padding\":\"" + std::string(23790U - json.size() - 15U, 'p') + "\"");
+    }
+    return json;
+}
+
+void testCameraImuCompatibility() {
+    using reg::media::CameraImuStatus;
+    const auto old = parse(readyJson());
+    check(old.status == reg::media::GtStatus::Ready &&
+          old.cameraImu.status == CameraImuStatus::Missing, "legacy KGT1");
+    auto withNull = readyJson();
+    withNull.insert(withNull.size() - 1U, ",\"camera_imu\":null");
+    check(parse(withNull).cameraImu.status == CameraImuStatus::Null,
+          "null IMU is not an error");
+
+    const auto json = cameraImuJson();
+    check(json.size() > 16384U && json.size() < reg::media::kMaxGtJsonBytes,
+          "live-size regression fixture");
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto gt = parse(json);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    check(gt.status == reg::media::GtStatus::Ready &&
+          gt.objects.size() == 3U, "GT bbox survives large KGT1");
+    check(gt.jsonBytes == json.size() &&
+          gt.cameraImu.status == CameraImuStatus::Ready, "typed IMU payload");
+    const auto& imu = gt.cameraImu;
+    check(imu.imu.size() == 100U && imu.K && imu.K->at(0) == 1000.0 &&
+          imu.extrinsicQuaternionWxyz && imu.cameraGt.gravityWorldMS2,
+          "calibration and world GT");
+    check(imu.simulationEpoch == UINT64_MAX - 1U &&
+          imu.imu.front().sequence == 9007199254740993ULL,
+          "IMU identity exceeds double precision");
+    check(imu.imu.front().gyroRadS[1] == 0.1, "finite gyro sample");
+    reg::media::CameraImuDedup dedup;
+    std::uint64_t delivered = 0;
+    dedup.observe(imu, [&](const auto&) { ++delivered; });
+    dedup.observe(imu, [&](const auto&) { ++delivered; });
+    check(delivered == 100U && dedup.stats().duplicates == 100U,
+          "run_id+sequence dedup overlapping windows");
+    auto restarted = imu;
+    restarted.runId = "run-2";
+    dedup.observe(restarted, [&](const auto&) { ++delivered; });
+    check(delivered == 200U, "new run accepts reused sequences");
+
+    const auto malformed = parse(cameraImuJson(100, true));
+    check(malformed.status == reg::media::GtStatus::Ready &&
+          malformed.objects.size() == 3U &&
+          malformed.cameraImu.status == CameraImuStatus::Invalid,
+          "semantic IMU failure never removes valid bbox");
+
+    const auto tooMany = parse(cameraImuJson(101));
+    check(tooMany.status == reg::media::GtStatus::Ready &&
+          tooMany.cameraImu.status == CameraImuStatus::Invalid,
+          "sample count bound without bbox damage");
+
+    auto badKey = cameraImuJson(1);
+    const auto position = badKey.find("\"simulation_epoch\":18446744073709551614");
+    check(position != std::string::npos, "epoch fixture");
+    badKey.insert(position, "\"frame_id\":1,");
+    check(parse(badKey).cameraImu.status == CameraImuStatus::Invalid,
+          "optional embedded FrameKey verified");
+
+    // Valid JSON at the exact advertised sender bound must not be rejected.
+    auto atLimit = readyJson();
+    const std::string prefix = ",\"padding\":\"";
+    atLimit.insert(atLimit.size() - 1U, prefix + std::string(
+        reg::media::kMaxGtJsonBytes - atLimit.size() - prefix.size() - 1U, 'x') + "\"");
+    check(atLimit.size() == reg::media::kMaxGtJsonBytes, "exact cap fixture");
+    check(parse(atLimit).status == reg::media::GtStatus::Ready, "exact 256 KiB");
+    atLimit.insert(atLimit.size() - 1U, " ");
+    check(parse(atLimit).status == reg::media::GtStatus::ParseError,
+          "one byte above cap");
+
+    std::cout << "camera_imu parse " << json.size() << " bytes, " << elapsed
+              << " us (synthetic, not real Reg FPS)\n";
 }
 
 void testFrames() {
@@ -226,6 +346,7 @@ int main() {
         testRemoteTextHotkeyGate();
         testVisibleVideoSampling();
         testPayloads();
+        testCameraImuCompatibility();
         testFrames();
         testGeometry();
         std::cout << "gt_sei_osd_tests: PASS\n";
