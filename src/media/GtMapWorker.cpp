@@ -185,8 +185,12 @@ void GtMapWorker::run(std::stop_token token) {
         std::scoped_lock lock(mutex_);
         if(task.generation!=generation_) continue;
         const auto bytes=rawBytes(*decoded);
-        auto [it,inserted]=ready_.emplace(decoded->identity.key,
-            Cached{std::move(decoded),bytes,std::chrono::steady_clock::now()});
+        // Capture the key BEFORE moving decoded into the cache. Function
+        // argument evaluation order is unspecified: reading decoded->identity
+        // alongside std::move(decoded) caused a Windows CTest segfault.
+        const FrameKey key = decoded->identity.key;
+        Cached cached{std::move(decoded),bytes,std::chrono::steady_clock::now()};
+        auto [it,inserted]=ready_.emplace(key,std::move(cached));
         if(inserted) readyBytes_+=bytes;
         pruneLocked(std::chrono::steady_clock::now());
         } catch (...) {
