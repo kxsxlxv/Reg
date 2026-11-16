@@ -51,6 +51,8 @@ enum class CameraImuStatus : std::uint8_t {
     Missing,
     Null,
     Ready,
+    NotReady,
+    Unavailable,
     Invalid,
     FrameMismatch,
 };
