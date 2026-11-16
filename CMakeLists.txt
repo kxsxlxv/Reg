@@ -356,6 +356,21 @@ if(REG_BUILD_TESTS)
 
     add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
 
+    add_executable(reg_gt_map_worker_tests
+        tests/gt_map_worker_tests.cpp
+        src/media/GtMapWorker.cpp
+        src/media/GtMapDecode.cpp)
+    target_include_directories(reg_gt_map_worker_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src" "${REG_ZSTD_INCLUDE_DIR}")
+    target_link_libraries(reg_gt_map_worker_tests PRIVATE ${REG_ZSTD_LIBRARY})
+    if(MSVC)
+        target_compile_options(reg_gt_map_worker_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_gt_map_worker_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME gt_map_worker COMMAND reg_gt_map_worker_tests)
+
     add_executable(reg_gt_map_decode_tests
         tests/gt_map_decode_tests.cpp src/media/GtMapDecode.cpp)
     target_include_directories(reg_gt_map_decode_tests PRIVATE
