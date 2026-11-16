@@ -825,6 +825,8 @@ int runApplication(
             pendingOverlayFrame;
         std::uint64_t observedSessionGeneration{0};
         bool recorderFailureLogged{false};
+        bool gtBenchmarkLossLogged{false};
+        bool gtBenchmarkLossObserved{false};
         bool videoSignalStateInitialized{false};
         bool previousVideoSignalPresent{false};
         bool cvSignalStateInitialized{false};
@@ -1461,6 +1463,21 @@ int runApplication(
                     if (blackboxRecorder) {
                         recorderStats =
                             blackboxRecorder->stats();
+                        if (options.gtCapturePolicy ==
+                                reg::app::GtCapturePolicy::Benchmark &&
+                            (recorderStats.packetsDroppedQueueFull != 0U ||
+                             recorderStats.failed ||
+                             recorderStats.failures != 0U)) {
+                            gtBenchmarkLossObserved = true;
+                            if (!gtBenchmarkLossLogged) {
+                                gtBenchmarkLossLogged = true;
+                                telemetryModel.log(
+                                    reg::telemetry::Severity::Error,
+                                    "BENCHMARK CAPTURE FAILED: compressed AU "
+                                    "recorder lost packets or failed; "
+                                    "capture is not lossless");
+                            }
+                        }
 
                         if (recorderStats.failed &&
                             !recorderFailureLogged) {
@@ -1524,6 +1541,9 @@ int runApplication(
                             .gtWorkerQueueBytes = mapStats.pendingBytes,
                             .gtWorkerQueueFrames = mapStats.pendingFrames,
                             .gtWorkerQueueAgeMs = mapStats.oldestPendingAgeMs,
+                            .gtBenchmarkEnabled = options.gtCapturePolicy ==
+                                reg::app::GtCapturePolicy::Benchmark,
+                            .gtBenchmarkFailed = gtBenchmarkLossObserved,
                             .decodedFrames =
                                 decodedFrames.load(
                                     std::memory_order_relaxed),
