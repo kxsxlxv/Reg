@@ -22,7 +22,6 @@
 
 namespace reg::vulkan {
 namespace {
-constexpr std::uint32_t kSkyByteRow=1024U;
 constexpr VkImageSubresourceRange kColorRange{
     VK_IMAGE_ASPECT_COLOR_BIT,0U,1U,0U,1U};
 
@@ -34,7 +33,7 @@ VkShaderModule loadShader(const VulkanContext& context,const char* name) {
     }
     std::ifstream input(path,std::ios::binary|std::ios::ate);
     if(!input)throw std::runtime_error("GT shader not found: "+path.string());
-    const auto count=input.tellg();
+    const std::streamsize count=input.tellg();
     if(count<=0 || count%4!=0)throw std::runtime_error("Invalid GT shader SPIR-V");
     std::vector<std::uint32_t> words(static_cast<std::size_t>(count)/4U);
     input.seekg(0);
