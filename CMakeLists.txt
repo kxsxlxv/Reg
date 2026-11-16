@@ -230,6 +230,7 @@ add_executable(reg_probe
     src/recorder/SegmentedMkvWriter.cpp
     src/recorder/MetadataJournal.cpp
     src/recorder/BlackboxRecorder.cpp
+    src/recorder/GtAuJournal.cpp
 )
 
 add_dependencies(reg_probe reg_shaders)
