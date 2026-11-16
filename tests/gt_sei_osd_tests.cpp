@@ -382,6 +382,18 @@ void testGeometry() {
     check(std::fabs(box.x - 552.8409F) < 0.1F, "fractional X transformed");
     check(std::fabs(box.y - 590.9091F) < 0.2F, "fractional Y transformed");
     check(std::fabs(box.width - 94.318F) < 0.2F, "xyxy right endpoint");
+    const auto withRange = builder.build(gt,1200U,1200U,false,true);
+    check(withRange.primitives.size()==5U,
+          "visible first object range label without ID");
+    check(std::holds_alternative<reg::render::TextPrimitive>(withRange.primitives[2]),
+          "range label is text primitive");
+    const auto& rangeLabel=std::get<reg::render::TextPrimitive>(withRange.primitives[2]);
+    check(rangeLabel.utf8=="1234.5 m",
+          "range_m Euclidean root metres never optical Z");
+    const auto withIdAndRange = builder.build(gt,1200U,1200U,true,true);
+    check(std::get<reg::render::TextPrimitive>(
+          withIdAndRange.primitives[2]).utf8.find("npc-01")!=std::string::npos,
+          "bbox ID and range can be displayed together");
     const auto withoutIds = builder.build(gt, 1200U, 1200U, false);
     check(withoutIds.primitives.size() == 4U, "independent ID toggle");
     check(builder.build(parse(R"({"type":"KGT1","version":1,"status":"busy"})"),
