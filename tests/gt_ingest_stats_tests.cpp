@@ -49,6 +49,7 @@ int main() {
     frameGt.sky.status=reg::media::GtMapStatus::FrameMismatch;
     frameGt.depth.status=reg::media::GtMapStatus::Invalid;
     frameGt.conflictingFields=2;
+    frameGt.identicalDuplicates=0;
     frameGt.malformedAu=true;
     stats.observeMaps(frameGt);
     result = stats.snapshot();
