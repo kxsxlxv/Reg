@@ -16,6 +16,10 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(Vulkan 1.3 REQUIRED)
 find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
+# Standard Zstd decoder for KDM1 metric float32; a bundled runtime DLL is
+# deployed by DeployWindowsRuntime.cmake when reg_probe links this library.
+find_path(REG_ZSTD_INCLUDE_DIR NAMES zstd.h REQUIRED)
+find_library(REG_ZSTD_LIBRARY NAMES zstd libzstd REQUIRED)
 
 include(RegFonts)
 
@@ -202,6 +206,7 @@ add_executable(reg_probe
     src/media/FrameIdentity.cpp
     src/media/FrameIdentityAvFrame.cpp
     src/media/GtSei.cpp
+    src/media/GtMapDecode.cpp
     src/media/VideoStreamDescriptor.cpp
     src/media/VulkanHwDevice.cpp
     src/media/RtspDecoder.cpp
@@ -228,7 +233,7 @@ add_executable(reg_probe
 
 add_dependencies(reg_probe reg_shaders)
 
-target_include_directories(reg_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(reg_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${REG_ZSTD_INCLUDE_DIR}")
 
 target_link_libraries(reg_probe PRIVATE
     SDL3::SDL3
@@ -236,6 +241,7 @@ target_link_libraries(reg_probe PRIVATE
     FFmpeg::avcodec
     FFmpeg::avformat
     FFmpeg::avutil
+    ${REG_ZSTD_LIBRARY}
     reg_imgui
     reg_implot
     reg_diagnostic_api_v1
@@ -348,6 +354,19 @@ if(REG_BUILD_TESTS)
     endif()
 
     add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
+
+    add_executable(reg_gt_map_decode_tests
+        tests/gt_map_decode_tests.cpp src/media/GtMapDecode.cpp)
+    target_include_directories(reg_gt_map_decode_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src" "${REG_ZSTD_INCLUDE_DIR}")
+    target_link_libraries(reg_gt_map_decode_tests PRIVATE ${REG_ZSTD_LIBRARY})
+    if(MSVC)
+        target_compile_options(reg_gt_map_decode_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_gt_map_decode_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME gt_map_decode COMMAND reg_gt_map_decode_tests)
 
     add_executable(reg_h264_au_sei_tests tests/h264_au_sei_tests.cpp)
     target_include_directories(reg_h264_au_sei_tests PRIVATE
