@@ -9,7 +9,7 @@ namespace reg::diagnostics::api::codec {
 [[nodiscard]] constexpr std::string_view openapi_document() {
     return R"OPENAPI({
   "openapi": "3.1.0",
-  "info": {"title": "Reg read-only Diagnostic API", "version": "1.0.0", "description": "Loopback-only, GET-only. Unmatched paths respond 404/not_found. Liveness is not RTSP/video/CV health. Numerical identities and counters are decimal strings. A missing observation is null, never zero."},
+  "info": {"title": "Reg read-only Diagnostic API", "version": "1.0.0", "description": "Loopback-only, GET-only. Unmatched paths respond 404/not_found. Liveness is not RTSP/video/CV health. Numerical identities and counters are decimal strings. A missing observation is null, never zero. The video section includes gt.sky_*, gt.depth_*, gt.map_worker_* measurements and separate gtBenchmarkEnabled/gtBenchmarkFailed status fields in development builds; compressed/decoded/presented populations are distinct and encoded map data are not proof of display."},
   "servers": [{"url": "http://127.0.0.1:8765", "description": "Illustrative default; listener opt-in and port configurable by host"}],
   "paths": {
     "/healthz": {"get": {
