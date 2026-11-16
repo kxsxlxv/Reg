@@ -17,11 +17,12 @@ namespace reg::media {
 struct FrameGtParts final {
     std::optional<SourceFrameIdentity> source;
     GtMetadata bbox;
-    GtMapMetadata sky{.kind=GtMapKind::Sky};
-    GtMapMetadata depth{.kind=GtMapKind::Depth};
+    GtMapMetadata sky{};
+    GtMapMetadata depth{};
     std::uint32_t unknownSei{};
     std::uint32_t identicalDuplicates{};
     std::uint32_t conflictingFields{};
+    FrameGtParts() { sky.kind=GtMapKind::Sky;depth.kind=GtMapKind::Depth; }
     bool malformedAu{};
     bool oversizedAu{};
 };
@@ -97,10 +98,10 @@ public:
         if (auto it=entries_.find(pts);it!=entries_.end()) {
             // A PTS collision cannot be resolved by packet arrival order.
             ++stats_.duplicatePts;
-            if ((!it->second.gt->source && !gt->source ||
-                 it->second.gt->source && gt->source &&
+            if (((!it->second.gt->source && !gt->source) ||
+                 (it->second.gt->source && gt->source &&
                  it->second.gt->source->key==gt->source->key &&
-                 it->second.gt->source->sourceTimeNs==gt->source->sourceTimeNs) &&
+                 it->second.gt->source->sourceTimeNs==gt->source->sourceTimeNs)) &&
                 !it->second.conflict &&
                 it->second.bytes==packetGtBytes) return;
             it->second.conflict=true;
@@ -136,7 +137,7 @@ public:
 
 private:
     struct Entry {
-        std::shared_ptr<const FrameGtParts> gt;
+        std::shared_ptr<FrameGtParts> gt;
         Clock::time_point inserted;
         std::size_t bytes{};
         bool conflict{};
