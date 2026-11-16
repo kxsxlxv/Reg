@@ -38,6 +38,7 @@ bool GtMapWorker::submit(std::shared_ptr<const FrameGtParts> parts) noexcept {
         skipped_.fetch_add(1U,std::memory_order_relaxed);
         return false;
     }
+    try {
     const auto now=std::chrono::steady_clock::now();
     std::unique_lock lock(mutex_,std::try_to_lock);
     if(!lock.owns_lock()) {
@@ -70,6 +71,10 @@ bool GtMapWorker::submit(std::shared_ptr<const FrameGtParts> parts) noexcept {
     submitted_.fetch_add(1U,std::memory_order_relaxed);
     changed_.notify_one();
     return true;
+    } catch (...) {
+        queueDrops_.fetch_add(1U,std::memory_order_relaxed);
+        return false;
+    }
 }
 
 std::shared_ptr<const GtDecodedBundle>
@@ -149,6 +154,7 @@ void GtMapWorker::run(std::stop_token token) {
             pending_.pop_front();
             pendingBytes_-=task.bytes;
         }
+        try {
         // No GPU frame/surface reference exists in this task.
         auto decoded=std::make_shared<GtDecodedBundle>();
         decoded->identity=*task.parts->source;
@@ -183,6 +189,11 @@ void GtMapWorker::run(std::stop_token token) {
             Cached{std::move(decoded),bytes,std::chrono::steady_clock::now()});
         if(inserted) readyBytes_+=bytes;
         pruneLocked(std::chrono::steady_clock::now());
+        } catch (...) {
+            // Out of memory in optional diagnostic/map handling cannot
+            // terminate the process or the hardware decode thread.
+            queueDrops_.fetch_add(1U,std::memory_order_relaxed);
+        }
     }
 }
 } // namespace reg::media
