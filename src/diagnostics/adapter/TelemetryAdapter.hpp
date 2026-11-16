@@ -383,16 +383,24 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
     const auto videoCounter = [&](std::string name, std::uint64_t value, std::string population) {
         counter(video, std::move(name), value, std::move(population), "decoder_session", decoder, state);
     };
-    videoCounter("decoder.demuxed_video_packets_total", c.demuxedVideoPackets, "compressed_video_packets_not_frames");
-    videoCounter("gt.kgt1_frames_total", c.gtKgt1Frames, "decoded_video_frames_containing_kgt1");
-    videoCounter("gt.ready_frames_total", c.gtReadyFrames, "kgt1_ready_frames");
-    videoCounter("gt.parse_errors_total", c.gtParseErrors, "kgt1_parse_errors");
-    videoCounter("gt.oversize_packets_total", c.gtOversizePackets, "kgt1_payloads_over_262144_bytes");
-    videoCounter("gt.imu_ready_frames_total", c.imuReadyFrames, "kgt1_frames_with_valid_imu");
-    videoCounter("gt.imu_invalid_frames_total", c.imuInvalidFrames, "kgt1_frames_with_semantically_invalid_imu");
-    videoCounter("gt.imu_null_frames_total", c.imuNullFrames, "kgt1_frames_with_null_imu");
-    videoCounter("gt.imu_samples_parsed_total", c.imuSamplesParsed, "imu_samples_in_overlapping_frame_windows");
-    videoCounter("gt.parse_total_us", c.gtParseTotalUs, "ready_kgt1_parse_microseconds_total");
+    // KGT1 measurements are process-lifetime, never decoder-session-scoped.
+    // A malformed IMU is independent of video decoding and GT bbox success.
+    counter(video, "decoder.demuxed_video_packets_total", c.demuxedVideoPackets, "compressed_video_packets_not_frames", "process", process, state);
+    counter(video, "gt.kgt1_frames_total", c.gtKgt1Frames, "decoded_video_frames_containing_kgt1", "process", process, state);
+    counter(video, "gt.ready_frames_total", c.gtReadyFrames, "kgt1_ready_frames", "process", process, state);
+    counter(video, "gt.parse_errors_total", c.gtParseErrors, "kgt1_parse_errors", "process", process, state);
+    counter(video, "gt.oversize_packets_total", c.gtOversizePackets, "kgt1_payloads_over_262144_bytes", "process", process, state);
+    counter(video, "gt.imu_ready_frames_total", c.imuReadyFrames, "kgt1_frames_with_valid_imu", "process", process, state);
+    counter(video, "gt.imu_invalid_frames_total", c.imuInvalidFrames, "kgt1_frames_with_semantically_invalid_imu", "process", process, state);
+    counter(video, "gt.imu_null_frames_total", c.imuNullFrames, "kgt1_frames_with_null_imu", "process", process, state);
+    counter(video, "gt.imu_samples_parsed_total", c.imuSamplesParsed, "imu_samples_in_overlapping_frame_windows", "process", process, state);
+    {
+        auto m = makeMetric("gt.parse_total_us", "us", "ready_kgt1_parse_microseconds_total",
+                            "process", process, api::MetricKind::Counter,
+                            api::Provenance::Measured, state);
+        if (state != api::Availability::Unavailable) m.counter = c.gtParseTotalUs;
+        video.metrics.push_back(std::move(m));
+    }
     gauge(video, "gt.parse_max_us", static_cast<double>(c.gtParseMaxUs), "us",
           "ready_kgt1_parse_max", "process", process, state);
     gauge(video, "gt.max_json_bytes", static_cast<double>(c.gtMaxJsonBytes), "bytes",
