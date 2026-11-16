@@ -407,3 +407,29 @@ Require count, sum, sample population, freshness, reset domain, time window and 
 The existing `decoder.decoded_fps_*`, `raw.presented_fps_*` and `overlay.presented_decisions_rate_*` form separate pipeline rates and can diverge by design (Raw newest-frame-wins, disabled outputs, overlay synchronization). Physical display refresh/scanout is not measured. The existing asynchronous per-frame CSV trace adds `gt_json_bytes`, `gt_parse_us`, `camera_imu_state`, `camera_imu_samples` columns to DECODE rows; no raw IMU arrays are logged. CSV writer drops may cause missing rows and must not be confused with video drops.
 
 See [KGT1 Camera–IMU and FPS Diagnostics](CAMERA_IMU_KGT1_AND_FPS_DIAGNOSTICS.md) for validation, consumer-facing typed fields, test coverage, and a causal-hypothesis ladder.
+
+
+## Addendum — 2026-11-16 — Simulator KSM1/KDM1 and optional GT worker observability
+
+Development-only addition in draft PR #53; not a guarantee of measured Windows/Jetson behavior. Existing `/v1/snapshot?sections=video` schema remains additive and loopback/read-only. No raw map data or rig identifiers are transmitted via the diagnostic HTTP API. This is a typed metric list in the existing video section, not new HTTP endpoints.
+
+Process-lifetime **counter**, measured locally, integer encoded as a decimal string and reset on Reg restart:
+
+- `gt.sky_missing_frames_total`, `gt.sky_encoded_frames_total`, `gt.sky_nonready_frames_total`, `gt.sky_invalid_frames_total`: one classification per decoded frame; valid *compressed envelope* is not the same as fully decoded sky.
+- `gt.depth_missing_frames_total`, `gt.depth_encoded_frames_total`, `gt.depth_nonready_frames_total`, `gt.depth_invalid_frames_total`: separate depth classification; missing/not_ready are not treated as network losses without producer manifest.
+- `gt.malformed_au_total`, `gt.conflicting_sei_total`, `gt.identical_sei_duplicates_total`: malformed/oversized AU frames, conflicting UUID field records and byte-identical duplicate SEI entries, respectively.
+- `gt.map_worker_queue_drops_total`, `gt.map_worker_lock_drops_total`: optional Live map job losses from queue limits or nonblocking lock. A drop does not imply RGB decoding failure.
+- `gt.map_worker_sky_ready_total`, `gt.map_worker_depth_ready_total`: checksummed maps completed on background worker, not yet proof of GPU upload/display.
+- `gt.map_worker_invalid_sky_total`, `gt.map_worker_invalid_depth_total`, `gt.map_worker_checksum_failures_total`: off-thread map failures; CRC/FNV failures counted within invalid.
+- `gt.map_worker_total_us`: summed per-job decode wall durations, **microseconds** since process start. Population: tasks completed or rejected on worker; not physical video-decode time.
+
+Measured **gauges** using current Reg steady clock, snapshot via TelemetryModel at ~250-ms intervals and DiagnosticRuntime at ~1Hz when opted in:
+
+- `gt.map_worker_max_us`: lifetime maximum decode duration in microseconds.
+- `gt.map_worker_queue_bytes`: compressed queued bytes; `gt.map_worker_queue_frames`: pending jobs; `gt.map_worker_queue_age_ms`: age of the oldest currently pending task, **unavailable** if the queue is empty.
+
+Existing `decoder.demuxed_video_packet_rate_*`, `decoder.decoded_fps_*`, `raw.presented_fps_*` and `overlay.presented_decisions_rate_*` retain distinct denominators. A successful Vulkan present attempt does **not** prove physical scanout, and a healthy packet-level GT parse does **not** prove Reg 60 FPS. Source-local clocks are not subtracted from receiver monotonic clocks. No high-cardinality labels contain FrameKey/run_id. New compressed-AU/PTS association counters and benchmark-capture status are internal work-in-progress; exposed percentages and coverage denominators require a producer manifest before claiming 100% complete source output.
+
+**Availability:** these new metrics require the corresponding development runtime. Prior Reg releases mark fields unsupported/unavailable, not zero. Benchmark capture mode `--gt-capture-policy benchmark` is explicit, and `gtBenchmarkEnabled` / `gtBenchmarkFailed` are read-only status booleans; failure is sticky within the process if recorder reports packet queue loss or writing failure. A nonfailed rolling recorder is not evidence of a lossless non-rolling benchmark archive.
+
+See `docs/SIMULATOR_GT_INTEGRATION_STAGES.md` for stage status, limits and pending hardware gates.
