@@ -6,6 +6,7 @@
 #include "diagnostics/GtIngestStats.hpp"
 #include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
 #include "media/RtspDecoder.hpp"
+#include "media/GtMapWorker.hpp"
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
@@ -131,6 +132,7 @@ int runApplication(
         reg::platform::SDLPlatform platform;
         reg::diagnostics::FrameTimingLogger frameTimingLog;
         reg::diagnostics::GtIngestStats gtIngestStats;
+        reg::media::GtMapWorker gtMapWorker;
 
         SDL_Window* rawSdlWindow = platform.createVulkanWindow(
             "Reg - Raw",
@@ -418,6 +420,7 @@ int runApplication(
                                     overlayFrames.clear();
                                     metadataStore.clear();
                                     telemetryModel.resetGtRanges();
+                                    gtMapWorker.reset();
                                     exactSyncDiagnostics.clearPending();
                                     lastDecodedFrameNs.store(
                                         0,
@@ -515,6 +518,9 @@ int runApplication(
                                         std::memory_order_release);
                                     reg::app::observeGt(frame->gt().status);
                                     gtIngestStats.observe(frame->gt());
+                                    // Compressed GT is independent of AVVkFrame
+                                    // lifetime. Never decompress on decoder thread.
+                                    static_cast<void>(gtMapWorker.submit(frame->gtParts()));
                                     telemetryModel.observeGtRange(
                                         frame->gt(), frame->decodedAt());
                                     rawMailbox.publish(frame);
