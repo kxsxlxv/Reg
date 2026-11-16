@@ -2,6 +2,7 @@
 
 #include "media/CompressedVideoPacket.hpp"
 #include "media/IoDeadline.hpp"
+#include "media/GtAccessUnit.hpp"
 #include "media/VideoStreamDescriptor.hpp"
 #include "video/VideoFrame.hpp"
 
@@ -81,6 +82,8 @@ private:
     AVFormatContext* formatContext_{nullptr};
     AVCodecContext* codecContext_{nullptr};
     int videoStreamIndex_{-1};
+    AuNalFraming gtAuFraming_{AuNalFraming::AnnexB};
+    GtPtsAssociation gtPts_;
 
     std::atomic_bool stopRequested_{false};
     IoDeadline ioDeadline_{};

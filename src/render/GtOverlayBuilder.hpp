@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <utility>
 
@@ -21,7 +22,7 @@ public:
         const media::GtMetadata& gt,
         std::uint32_t targetWidth,
         std::uint32_t targetHeight,
-        bool showIds) const {
+        bool showIds, bool showRanges = false) const {
         OverlayScene result;
         if (gt.status != media::GtStatus::Ready ||
             gt.videoWidth == 0U || gt.videoHeight == 0U ||
@@ -34,7 +35,7 @@ public:
         const float top = viewport.y;
         const float right = left + viewport.width;
         const float bottom = top + viewport.height;
-        result.primitives.reserve(gt.objects.size() * (showIds ? 2U : 1U) + 2U);
+        result.primitives.reserve(gt.objects.size() * ((showIds || showRanges) ? 2U : 1U) + 2U);
         result.primitives.emplace_back(ClipPushPrimitive{viewport});
         constexpr Color stroke{1.0F, 0.24F, 0.82F, 1.0F};
         constexpr Color background{0.05F, 0.02F, 0.10F, 0.86F};
@@ -65,12 +66,22 @@ public:
                 .style = LineStyle{.color = stroke, .thickness = 1.5F},
             });
 
-            if (showIds && !object.id.empty()) {
+            if ((showIds && !object.id.empty()) ||
+                (showRanges && object.validRange)) {
                 constexpr float fontSize = 16.0F;
                 constexpr float pad = 3.0F;
                 constexpr float gap = 4.0F;
                 const float labelHeight = fontSize + pad * 2.0F;
-                const float labelWidth = static_cast<float>(object.id.size()) *
+                std::string label;
+                if (showIds) label=object.id;
+                if (showRanges && object.validRange) {
+                    char rangeText[64]{};
+                    std::snprintf(rangeText,sizeof(rangeText),"%.1f m",
+                                  object.rangeM);
+                    if (!label.empty()) label += "  ";
+                    label += rangeText;
+                }
+                const float labelWidth = static_cast<float>(label.size()) *
                     fontSize * 0.60F + pad * 2.0F;
                 const float labelX = std::clamp(
                     clipped.x, left, std::max(left, right - labelWidth));
@@ -82,7 +93,7 @@ public:
                 else continue;
                 result.primitives.emplace_back(TextPrimitive{
                     .position = video::Vec2{labelX, labelY},
-                    .utf8 = object.id,
+                    .utf8 = std::move(label),
                     .textColor = Color{1.0F, 1.0F, 1.0F, 1.0F},
                     .backgroundColor = background,
                     .fontSizePx = fontSize,

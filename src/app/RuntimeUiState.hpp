@@ -54,6 +54,7 @@ inline void toggleRangeTimelinePaused() noexcept {
 // Shared between the telemetry checkbox and the physical Raw-window T key.
 inline std::atomic_bool gShowGtBoxes{false};
 inline std::atomic_bool gShowGtIds{false};
+inline std::atomic_bool gShowGtRanges{false};
 inline std::atomic<media::GtStatus> gPresentedGtStatus{media::GtStatus::Missing};
 inline std::atomic_uint64_t gGtReadyFrames{0};
 inline std::atomic_uint64_t gGtNotReadyFrames{0};
@@ -63,6 +64,12 @@ inline std::atomic_uint64_t gGtMismatchedFrames{0};
 
 inline bool showGtBoxes() noexcept {
     return gShowGtBoxes.load(std::memory_order_relaxed);
+}
+inline bool showGtRanges() noexcept {
+    return gShowGtRanges.load(std::memory_order_relaxed);
+}
+inline void setShowGtRanges(bool value) noexcept {
+    gShowGtRanges.store(value, std::memory_order_relaxed);
 }
 inline bool showGtIds() noexcept {
     return gShowGtIds.load(std::memory_order_relaxed);

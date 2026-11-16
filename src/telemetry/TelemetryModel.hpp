@@ -49,6 +49,21 @@ struct Counters {
     std::uint64_t gtParseTotalUs{}; // successful GT only
     std::uint64_t gtParseMaxUs{};
     std::uint64_t gtMaxJsonBytes{};
+    std::uint64_t skyMissingFrames{},skyEncodedFrames{},skyNonReadyFrames{},skyInvalidFrames{};
+    std::uint64_t depthMissingFrames{},depthEncodedFrames{},depthNonReadyFrames{},depthInvalidFrames{};
+    std::uint64_t gtMalformedAu{},gtConflictingSei{},gtIdenticalDuplicates{};
+    std::uint64_t gtWorkerQueueDrops{},gtWorkerLockDrops{};
+    std::uint64_t gtWorkerSkyReady{},gtWorkerDepthReady{};
+    std::uint64_t gtWorkerInvalidSky{},gtWorkerInvalidDepth{};
+    std::uint64_t gtWorkerChecksumFailures{};
+    std::uint64_t gtWorkerTotalUs{},gtWorkerMaxUs{};
+    std::size_t gtWorkerQueueBytes{},gtWorkerQueueFrames{};
+    std::uint64_t gtWorkerQueueAgeMs{};
+    bool gtBenchmarkEnabled{};
+    bool gtBenchmarkFailed{};
+    std::uint64_t gtArchiveAccepted{},gtArchiveWritten{},gtArchiveDropped{},
+                  gtArchiveFileErrors{},gtArchiveBytesWritten{};
+    std::size_t gtArchivePendingBytes{},gtArchivePendingPackets{};
     std::uint64_t decodedFrames{};
     std::uint64_t rawPresentedFrames{};
     std::uint64_t overlayPresentedFrames{};

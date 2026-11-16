@@ -12,6 +12,7 @@ extern "C" {
 
 #include <cerrno>
 #include <chrono>
+#include <span>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -93,6 +94,7 @@ void RtspDecoder::run(
         const VideoStreamDescriptorPtr descriptor =
             openInput();
         openDecoder();
+        gtPts_.reset();
 
         if (callbacks.onStreamOpened) {
             callbacks.onStreamOpened(descriptor);
@@ -357,6 +359,17 @@ void RtspDecoder::openDecoder() {
 
     const AVCodecParameters* parameters = formatContext_->streams[videoStreamIndex_]->codecpar;
     checkFfmpeg(avcodec_parameters_to_context(codecContext_, parameters), "avcodec_parameters_to_context");
+    // FFmpeg demuxers commonly provide Annex-B AUs, while avcC sets an
+    // explicit length-prefix size. Never infer framing by scanning payloads.
+    gtAuFraming_ = AuNalFraming::AnnexB;
+    if (codecContext_->extradata && codecContext_->extradata_size >= 5 &&
+        codecContext_->extradata[0] == 1U) {
+        const unsigned width=(codecContext_->extradata[4] & 0x03U)+1U;
+        if (width==1U) gtAuFraming_=AuNalFraming::Avcc1;
+        else if (width==2U) gtAuFraming_=AuNalFraming::Avcc2;
+        else if (width==4U) gtAuFraming_=AuNalFraming::Avcc4;
+        else throw std::runtime_error("Unsupported avcC NAL length prefix");
+    }
 
     codecContext_->hw_device_ctx = av_buffer_ref(vulkanDevice_);
     if (codecContext_->hw_device_ctx == nullptr) {
@@ -389,6 +402,7 @@ void RtspDecoder::close() noexcept {
         ioDeadline_.disarm();
     }
     videoStreamIndex_ = -1;
+    gtPts_.reset();
 }
 
 void RtspDecoder::decodePacket(
@@ -408,11 +422,35 @@ void RtspDecoder::decodePacket(
                     "Decoder returned a non-Vulkan frame. CPU/software decode fallback is forbidden.");
             }
 
-            onFrame(video::VideoFrame::cloneFrom(frame));
+            // AVFrame is presentation ordered; packet order is not.
+            // Match by exact decoder PTS, never FIFO or latest metadata.
+            const std::int64_t pts=frame->pts != AV_NOPTS_VALUE ?
+                frame->pts : frame->best_effort_timestamp;
+            auto gt=gtPts_.take(pts);
+            onFrame(video::VideoFrame::cloneFrom(frame, std::move(gt)));
             av_frame_unref(frame);
         }
     };
 
+    if (packet != nullptr && packet->size > 0 && packet->data != nullptr) {
+        // Do this before hardware decode strips extra unregistered-SEI entries.
+        // Parsing owns compressed bytes only; never maps an AVVkFrame to CPU.
+        const auto bytes=std::span<const std::uint8_t>(
+            packet->data,static_cast<std::size_t>(packet->size));
+        auto au=parseH264AccessUnitSei(bytes,gtAuFraming_);
+        bool hasGt=au.malformed || au.oversized;
+        for(const auto& entry:au.payloads) hasGt=hasGt || entry.has_value();
+        for(bool conflict:au.conflicts) hasGt=hasGt || conflict;
+        if (hasGt) {
+            try {
+                gtPts_.remember(packet->pts,makeGtParts(std::move(au)),
+                                bytes.size());
+            } catch (...) {
+                // Optional GT metadata must not abort RGB decoding.
+                gtPts_.reset();
+            }
+        }
+    }
     int sendResult = avcodec_send_packet(codecContext_, packet);
     if (sendResult == AVERROR(EAGAIN)) {
         drainFrames();

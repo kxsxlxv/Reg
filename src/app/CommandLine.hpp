@@ -5,6 +5,8 @@
 
 namespace reg::app {
 
+enum class GtCapturePolicy { Live, Benchmark };
+
 struct CommandLineOptions {
     std::string rtspUrl;
     std::int64_t maxDelayUs{0};
@@ -30,6 +32,9 @@ struct CommandLineOptions {
     int overlayDelayMs{150};
     bool overlayEnabled{true};
 
+    // Live keeps newest-frame display. Benchmark retains all original
+    // compressed H264 AUs/SEI before leaky display queues, if recorder succeeds.
+    GtCapturePolicy gtCapturePolicy{GtCapturePolicy::Live};
     bool recorderEnabled{true};
     std::string recordDirectory{"blackbox"};
     int recordSegmentMs{5000};

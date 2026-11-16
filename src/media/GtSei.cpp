@@ -366,6 +366,14 @@ CameraImuMetadata parseCameraImu(const Json* value,
     if (const auto* status = value->member("status")) {
         if (status->type != Json::Type::String || status->scalar.size() > 128U) return imu;
         imu.sourceStatus = status->scalar;
+        if (imu.sourceStatus == "not_ready") {
+            imu.status = CameraImuStatus::NotReady;
+            return imu;
+        }
+        if (imu.sourceStatus != "ready") {
+            imu.status = CameraImuStatus::Unavailable;
+            return imu;
+        }
     }
     const auto* axes = firstOf(value, {"axes", "camera_axes"});
     if (axes) {
@@ -378,6 +386,42 @@ CameraImuMetadata parseCameraImu(const Json* value,
         if (imu.axes != "right_down_forward") return imu;
     }
 
+    if (const auto* convention = value->member("quaternion_order")) {
+        if (convention->type != Json::Type::String ||
+            convention->scalar != "wxyz") return imu;
+        imu.quaternionOrder = convention->scalar;
+    }
+    if (const auto* shutter = value->member("shutter")) {
+        if (shutter->type != Json::Type::String ||
+            shutter->scalar != "instantaneous") return imu;
+        imu.shutter = shutter->scalar;
+    }
+    if (const auto* exposureS = value->member("exposure_s")) {
+        if (!asDouble(*exposureS, imu.exposureS) || imu.exposureS < 0.0 ||
+            imu.exposureS > 1.0) return imu;
+    }
+    if (const auto* rate = value->member("imu_rate_hz")) {
+        if (!asUint64(rate, imu.imuRateHz) || imu.imuRateHz > 10000U) return imu;
+    }
+    if (const auto* model = value->member("imu_model")) {
+        if (model->type != Json::Type::String || model->scalar.size() > 128U)
+            return imu;
+        imu.imuModel = model->scalar;
+    }
+    if (const auto* gap = value->member("imu_gap")) {
+        if (gap->type != Json::Type::Boolean) return imu;
+        imu.imuGap = gap->boolean;
+    }
+    if (const auto* history = value->member("imu_history_start_ns")) {
+        std::uint64_t start{};
+        if (!asUint64(history, start) || start > imu.timestampNs) return imu;
+        imu.imuHistoryStartNs = start;
+    }
+    if (const auto* projection = value->member("projection_row_major")) {
+        std::array<double,16> values{};
+        if (!asVector<16>(projection, values)) return imu;
+        imu.projectionRowMajor = values;
+    }
     if (const auto* k = value->member("K")) {
         std::array<double, 9> values{};
         if (!matrix(k, 3U, values.data()) ||
@@ -425,7 +469,9 @@ CameraImuMetadata parseCameraImu(const Json* value,
             !optionalVector<3>(firstOf(gt, {"acceleration_world_m_s2", "accel_m_s2"}),
                                pose.accelerationWorldMS2) ||
             !optionalVector<3>(firstOf(gt, {"gravity_world_m_s2", "gravity_m_s2"}),
-                               pose.gravityWorldMS2)) return imu;
+                               pose.gravityWorldMS2) ||
+            !optionalQuat(gt->member("rotation_optical_to_world_wxyz"),
+                          pose.rotationOpticalToWorldWxyz)) return imu;
     }
 
     const auto* samples = value->member("imu");
@@ -512,13 +558,34 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
         else if (status->scalar == "ambiguous_viewport") gt.status = GtStatus::AmbiguousViewport;
         else if (status->scalar != "ready") gt.status = GtStatus::Unavailable;
         else gt.status = GtStatus::Ready;
-        if (gt.status != GtStatus::Ready) return gt;
+
+        // The parent identity is present in all actual simulator KGT1 states.
+        // Legacy non-ready KGT1 without an identity is still accepted.
+        const auto* epoch = root.member("stream_epoch");
+        const auto* frameId = root.member("frame_id");
+        const auto* sourceNs = root.member("source_time_ns");
+        const bool anyId = epoch || frameId || sourceNs;
+        if (anyId) {
+            if (!asUint64(epoch, gt.source.key.streamEpoch) ||
+                !asUint64(frameId, gt.source.key.frameId) ||
+                !asUint64(sourceNs, gt.source.sourceTimeNs)) return failed(json.size());
+            gt.sourceValid = true;
+        }
+        // Critical: bbox status is independent of the camera/IMU status.
+        gt.cameraImu = parseCameraImu(root.member("camera_imu"), gt.source);
+        const auto duration = [&]() {
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now()-started).count());
+        };
+        if (gt.status != GtStatus::Ready) {
+            gt.parseDurationUs = duration();
+            return gt;
+        }
 
         const Json* videoSize = root.member("video_size");
         const Json* objects = root.member("objects");
-        if (!asUint64(root.member("stream_epoch"), gt.source.key.streamEpoch) ||
-            !asUint64(root.member("frame_id"), gt.source.key.frameId) ||
-            !asUint64(root.member("source_time_ns"), gt.source.sourceTimeNs) ||
+        if (!gt.sourceValid ||
             videoSize == nullptr || videoSize->type != Json::Type::Array ||
             videoSize->array.size() != 2U ||
             !asDimension(&videoSize->array[0], gt.videoWidth) ||
@@ -547,7 +614,6 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
             }
             gt.objects.push_back(std::move(object));
         }
-        gt.cameraImu = parseCameraImu(root.member("camera_imu"), gt.source);
         gt.jsonBytes = json.size();
         gt.parseDurationUs = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
@@ -556,6 +622,153 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
     } catch (...) {
         // Never let a malformed SEI or allocation failure stop video decoding.
         return failed(json.size());
+    }
+}
+
+GtMapMetadata parseGtMapBinary(
+    std::span<const std::uint8_t> bytes, GtMapKind kind) noexcept {
+    GtMapMetadata map;
+    map.kind = kind;
+    map.status = GtMapStatus::Invalid;  // independent from RGB/KGT1
+    try {
+        // After the 16-byte UUID: magic[4], JSON length:u32LE, JSON, bytes.
+        if (bytes.size() < 8U || bytes.size() > 8U * 1024U * 1024U) return map;
+        const std::string_view magic(kind == GtMapKind::Sky ? "KSM1" : "KDM1");
+        if (!std::equal(magic.begin(),magic.end(),bytes.begin())) return map;
+        const std::uint64_t headerLen =
+            std::uint64_t(bytes[4]) | (std::uint64_t(bytes[5])<<8U) |
+            (std::uint64_t(bytes[6])<<16U) | (std::uint64_t(bytes[7])<<24U);
+        if (headerLen > 65536U || headerLen > bytes.size()-8U) return map;
+        const auto headerText=std::string_view(
+            reinterpret_cast<const char*>(bytes.data()+8U),
+            static_cast<std::size_t>(headerLen));
+        Json header;
+        if (!Parser(headerText).parse(header) ||
+            header.type != Json::Type::Object) return map;
+        std::uint64_t version=0;
+        if (!asUint64(header.member("version"),version) || version!=1U ||
+            !asUint64(header.member("stream_epoch"), map.source.key.streamEpoch) ||
+            !asUint64(header.member("frame_id"), map.source.key.frameId) ||
+            !asUint64(header.member("source_time_ns"),map.source.sourceTimeNs))
+            return map;
+        map.sourceValid=true;
+        const auto* state=header.member("status");
+        if (!state || state->type!=Json::Type::String) return map;
+        if (state->scalar=="not_ready") map.status=GtMapStatus::NotReady;
+        else if (state->scalar=="ambiguous_viewport") map.status=GtMapStatus::AmbiguousViewport;
+        else if (state->scalar=="ready") map.status=GtMapStatus::Encoded;
+        else map.status=GtMapStatus::Unavailable;
+        const std::size_t dataOffset=8U+static_cast<std::size_t>(headerLen);
+        const auto compressed=bytes.subspan(dataOffset);
+        if (map.status!=GtMapStatus::Encoded) {
+            // Not-ready SEI must never smuggle stale bitmap data.
+            if (!compressed.empty()) map.status=GtMapStatus::Invalid;
+            return map;
+        }
+        const auto* size=header.member("size");
+        const auto* sourceSize=header.member("source_size");
+        if (!size || size->type!=Json::Type::Array || size->array.size()!=2U ||
+            !sourceSize || sourceSize->type!=Json::Type::Array ||
+            sourceSize->array.size()!=2U ||
+            !asDimension(&size->array[0],map.width) ||
+            !asDimension(&size->array[1],map.height) ||
+            !asDimension(&sourceSize->array[0],map.sourceWidth) ||
+            !asDimension(&sourceSize->array[1],map.sourceHeight) ||
+            map.width<32U || map.width>1920U ||
+            map.height<16U || map.height>1080U ||
+            map.width>map.sourceWidth || map.height>map.sourceHeight ||
+            !asUint64(header.member("raw_bytes"),map.rawBytes))
+            {map.status=GtMapStatus::Invalid;return map;}
+        const auto* codec=header.member("codec");
+        if (!codec || codec->type!=Json::Type::String) {
+            map.status=GtMapStatus::Invalid;return map;
+        }
+        map.codec=codec->scalar;
+        if (const auto* ready=header.member("ready_ns")) {
+            if (!asUint64(ready,map.readyNs)) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+        }
+        std::uint64_t checksum{};
+        const auto pixels=std::uint64_t(map.width)*map.height;
+        if (kind==GtMapKind::Sky) {
+            const auto* bitOrder=header.member("bit_order");
+            const auto* validity=header.member("validity_plane");
+            std::uint64_t policy{};
+            if (!bitOrder || bitOrder->type!=Json::Type::String ||
+                bitOrder->scalar!="lsb0_row_major" ||
+                !validity || validity->type!=Json::Type::Boolean ||
+                !asUint64(header.member("policy"),policy) || policy>2U ||
+                !asUint64(header.member("unknown_pixels"),map.unknownPixels) ||
+                !asUint64(header.member("checksum_fnv1a32"),checksum) ||
+                checksum>UINT32_MAX || map.unknownPixels>pixels) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+            map.validityPlane=validity->boolean;
+            map.policy=static_cast<std::uint32_t>(policy);
+            const auto plane=(pixels+7U)/8U;
+            if (map.rawBytes!=plane*(map.validityPlane?2U:1U) ||
+                (!map.validityPlane && map.unknownPixels!=0U) ||
+                (map.codec!="rle8" && map.codec!="bitpack") ||
+                (map.codec=="bitpack" && compressed.size()!=map.rawBytes) ||
+                (map.codec=="rle8" && (compressed.size()%2U!=0U ||
+                                       compressed.size()>map.rawBytes*2U))) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+        } else {
+            const auto* quantity=header.member("quantity");
+            const auto* units=header.member("units");
+            const auto* dtype=header.member("dtype");
+            const auto* invalid=header.member("invalid_value");
+            const auto* sky=header.member("sky");
+            const auto* sampling=header.member("sampling");
+            std::array<double,16> projection{};
+            double invalidValue{};
+            if (!quantity || quantity->type!=Json::Type::String ||
+                quantity->scalar!="optical_z" ||
+                !units || units->type!=Json::Type::String || units->scalar!="m" ||
+                !dtype || dtype->type!=Json::Type::String ||
+                dtype->scalar!="float32_le" ||
+                !invalid || !asDouble(*invalid,invalidValue) || invalidValue!=0.0 ||
+                !sky || sky->type!=Json::Type::String || sky->scalar!="invalid" ||
+                !sampling || sampling->type!=Json::Type::String ||
+                sampling->scalar!="integer_block_center" ||
+                !asVector<16>(header.member("projection_row_major"),projection) ||
+                !asUint64(header.member("valid_pixels"),map.validPixels) ||
+                map.validPixels>pixels ||
+                !asUint64(header.member("checksum_crc32"),checksum) ||
+                checksum>UINT32_MAX || map.rawBytes!=pixels*4U ||
+                (map.codec!="raw" && map.codec!="zstd_shuffle4") ||
+                (map.codec=="raw" && compressed.size()!=map.rawBytes) ||
+                !header.member("minimum_m") || !header.member("maximum_m") ||
+                !asDouble(*header.member("minimum_m"),map.minimumM) ||
+                !asDouble(*header.member("maximum_m"),map.maximumM) ||
+                map.minimumM<0.0 || map.maximumM<map.minimumM) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+            map.quantity=quantity->scalar;
+            map.projectionRowMajor=projection;
+        }
+        map.checksum=static_cast<std::uint32_t>(checksum);
+        map.encoded.assign(compressed.begin(),compressed.end());
+        return map;
+    } catch (...) {
+        map.status=GtMapStatus::Invalid;
+        map.encoded.clear();
+        return map;
+    }
+}
+
+void validateGtMapForFrame(
+    GtMapMetadata& map,
+    const std::optional<SourceFrameIdentity>& rgf1) noexcept {
+    if (map.status==GtMapStatus::Missing || map.status==GtMapStatus::Invalid)
+        return;
+    if (!map.sourceValid || !rgf1 ||
+        map.source.key!=rgf1->key ||
+        map.source.sourceTimeNs!=rgf1->sourceTimeNs) {
+        map.status=GtMapStatus::FrameMismatch;
+        map.encoded.clear();
     }
 }
 
@@ -585,15 +798,21 @@ void validateGtForFrame(
     const std::optional<SourceFrameIdentity>& rgf1,
     int decodedWidth,
     int decodedHeight) noexcept {
-    if (gt.status != GtStatus::Ready) return;
+    if (gt.status == GtStatus::Missing ||
+        gt.status == GtStatus::ParseError ||
+        (!gt.sourceValid && gt.status != GtStatus::Ready)) return;
     if (!rgf1 ||
+        !gt.sourceValid ||
         gt.source.key != rgf1->key ||
         gt.source.sourceTimeNs != rgf1->sourceTimeNs ||
         decodedWidth <= 0 || decodedHeight <= 0 ||
-        gt.videoWidth != static_cast<std::uint32_t>(decodedWidth) ||
-        gt.videoHeight != static_cast<std::uint32_t>(decodedHeight)) {
+        (gt.status == GtStatus::Ready &&
+         (gt.videoWidth != static_cast<std::uint32_t>(decodedWidth) ||
+          gt.videoHeight != static_cast<std::uint32_t>(decodedHeight)))) {
         gt.objects.clear();
-        if (gt.cameraImu.status == CameraImuStatus::Ready) {
+        if (gt.cameraImu.status == CameraImuStatus::Ready ||
+            gt.cameraImu.status == CameraImuStatus::NotReady ||
+            gt.cameraImu.status == CameraImuStatus::Unavailable) {
             gt.cameraImu.status = CameraImuStatus::FrameMismatch;
             gt.cameraImu.imu.clear();
         }

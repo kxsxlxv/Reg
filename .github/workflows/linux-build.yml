@@ -35,6 +35,7 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
+            libzstd-dev \
             nasm \
             glslc \
             libvulkan-dev \

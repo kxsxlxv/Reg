@@ -405,6 +405,92 @@ void rates(api::Section& sec, const telemetry::Snapshot& src, const Context& ctx
           "ready_kgt1_parse_max", "process", process, state);
     gauge(video, "gt.max_json_bytes", static_cast<double>(c.gtMaxJsonBytes), "bytes",
           "largest_observed_kgt1_json", "process", process, state);
+    counter(video, "gt.sky_missing_frames_total", c.skyMissingFrames,
+            "decoded_frames_without_sky", "process", process, state);
+    counter(video, "gt.sky_encoded_frames_total", c.skyEncodedFrames,
+            "decoded_frames_with_valid_sky_envelope", "process", process, state);
+    counter(video, "gt.sky_nonready_frames_total", c.skyNonReadyFrames,
+            "sky_not_ready_or_unavailable", "process", process, state);
+    counter(video, "gt.sky_invalid_frames_total", c.skyInvalidFrames,
+            "sky_invalid_or_wrong_frame", "process", process, state);
+    counter(video, "gt.depth_missing_frames_total", c.depthMissingFrames,
+            "decoded_frames_without_depth", "process", process, state);
+    counter(video, "gt.depth_encoded_frames_total", c.depthEncodedFrames,
+            "decoded_frames_with_valid_depth_envelope", "process", process, state);
+    counter(video, "gt.depth_nonready_frames_total", c.depthNonReadyFrames,
+            "depth_not_ready_or_unavailable", "process", process, state);
+    counter(video, "gt.depth_invalid_frames_total", c.depthInvalidFrames,
+            "depth_invalid_or_wrong_frame", "process", process, state);
+    counter(video, "gt.malformed_au_total", c.gtMalformedAu,
+            "decoded_frames_with_malformed_or_oversized_au", "process", process, state);
+    counter(video, "gt.conflicting_sei_total", c.gtConflictingSei,
+            "per_field_conflicting_sei_duplicates", "process", process, state);
+    counter(video, "gt.identical_sei_duplicates_total", c.gtIdenticalDuplicates,
+            "accepted_identical_sei_duplicates", "process", process, state);
+    counter(video, "gt.map_worker_queue_drops_total", c.gtWorkerQueueDrops,
+            "map_tasks_evicted_or_unaccepted", "process", process, state);
+    counter(video, "gt.map_worker_lock_drops_total", c.gtWorkerLockDrops,
+            "map_tasks_rejected_by_nonblocking_lock", "process", process, state);
+    counter(video, "gt.map_worker_sky_ready_total", c.gtWorkerSkyReady,
+            "fully_checksum_validated_sky_maps", "process", process, state);
+    counter(video, "gt.map_worker_depth_ready_total", c.gtWorkerDepthReady,
+            "fully_checksum_validated_depth_maps", "process", process, state);
+    counter(video, "gt.map_worker_invalid_sky_total", c.gtWorkerInvalidSky,
+            "sky_maps_failing_worker_validation", "process", process, state);
+    counter(video, "gt.map_worker_invalid_depth_total", c.gtWorkerInvalidDepth,
+            "depth_maps_failing_worker_validation", "process", process, state);
+    counter(video, "gt.map_worker_checksum_failures_total", c.gtWorkerChecksumFailures,
+            "map_checksum_failures", "process", process, state);
+    {
+        auto t=makeMetric("gt.map_worker_total_us", "us", "map_worker_decompression_microseconds",
+                          "process", process, api::MetricKind::Counter,
+                          api::Provenance::Measured, state);
+        if (state!=api::Availability::Unavailable) t.counter=c.gtWorkerTotalUs;
+        video.metrics.push_back(std::move(t));
+    }
+    gauge(video, "gt.map_worker_max_us", static_cast<double>(c.gtWorkerMaxUs), "us",
+          "maximum_map_decompression_time", "process", process, state);
+    gauge(video, "gt.map_worker_queue_bytes",
+          static_cast<double>(c.gtWorkerQueueBytes), "bytes",
+          "pending_encoded_gt_bytes", "process", process, state);
+    gauge(video, "gt.map_worker_queue_frames",
+          static_cast<double>(c.gtWorkerQueueFrames), "frames",
+          "pending_gt_map_tasks", "process", process, state);
+    gauge(video, "gt.map_worker_queue_age_ms",
+          c.gtWorkerQueueFrames ? std::optional<double>(
+              static_cast<double>(c.gtWorkerQueueAgeMs)) : std::nullopt,
+          "ms", "age_oldest_pending_map_task", "process", process, state);
+    status(video, "gtBenchmarkEnabled",
+           std::optional{c.gtBenchmarkEnabled}, state);
+    status(video, "gtBenchmarkFailed",
+           c.gtBenchmarkEnabled ? std::optional{c.gtBenchmarkFailed} :
+                                  std::nullopt,
+           c.gtBenchmarkEnabled ? state : api::Availability::Unavailable);
+    // Benchmark-only journal metrics: disabled/unsupported is unavailable,
+    // never zero. The running failed=false status is not final completeness.
+    const auto archiveState = c.gtBenchmarkEnabled
+        ? state : api::Availability::Unavailable;
+    counter(video,"gt.archive_packets_accepted_total",c.gtArchiveAccepted,
+            "compressed_packets_queued_for_rgau1", "process",process,archiveState);
+    counter(video,"gt.archive_packets_written_total",c.gtArchiveWritten,
+            "complete_crc_checked_rgau1_records", "process",process,archiveState);
+    counter(video,"gt.archive_packets_dropped_total",c.gtArchiveDropped,
+            "benchmark_queue_submission_rejections", "process",process,archiveState);
+    counter(video,"gt.archive_write_errors_total",c.gtArchiveFileErrors,
+            "benchmark_io_or_quota_failures", "process",process,archiveState);
+    counter(video,"gt.archive_bytes_written_total",c.gtArchiveBytesWritten,
+            "benchmark_data_and_headers_written_bytes","process",process,archiveState);
+    gauge(video,"gt.archive_pending_bytes",
+          c.gtBenchmarkEnabled
+            ? std::optional<double>(static_cast<double>(c.gtArchivePendingBytes))
+            : std::nullopt,
+          "bytes","benchmark_queue_pending_bytes","process",process,archiveState);
+    gauge(video,"gt.archive_pending_packets",
+          c.gtBenchmarkEnabled
+            ? std::optional<double>(static_cast<double>(c.gtArchivePendingPackets))
+            : std::nullopt,
+          "packets","benchmark_queue_pending_packets","process",process,archiveState);
+
     videoCounter("decoder.decoded_frames_total", c.decodedFrames, "decoded_frames");
     videoCounter("raw.presented_frames_total", c.rawPresentedFrames, "raw_present_decisions_not_scanout");
     videoCounter("overlay.presented_decisions_total", c.overlayPresentedFrames,

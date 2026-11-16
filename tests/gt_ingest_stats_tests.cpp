@@ -41,11 +41,26 @@ int main() {
     tooLarge.jsonBytes = reg::media::kMaxGtJsonBytes + 1U;
     stats.observe(tooLarge);
 
+    reg::media::FrameGtParts frameGt;
+    frameGt.sky.status=reg::media::GtMapStatus::Encoded;
+    frameGt.depth.status=reg::media::GtMapStatus::NotReady;
+    frameGt.identicalDuplicates=1;
+    stats.observeMaps(frameGt);
+    frameGt.sky.status=reg::media::GtMapStatus::FrameMismatch;
+    frameGt.depth.status=reg::media::GtMapStatus::Invalid;
+    frameGt.conflictingFields=2;
+    frameGt.identicalDuplicates=0;
+    frameGt.malformedAu=true;
+    stats.observeMaps(frameGt);
     result = stats.snapshot();
     check(result.framesWithKgt1 == 4U && result.gtReady == 3U &&
           result.gtParseErrors == 1U && result.gtTooLarge == 1U &&
           result.imuReady == 2U && result.imuInvalid == 1U &&
           result.imuSamplesParsed == 200U &&
           result.gtParseTotalUs == 1260U && result.gtParseMaxUs == 420U &&
-          result.gtJsonMaxBytes == reg::media::kMaxGtJsonBytes + 1U);
+          result.gtJsonMaxBytes == reg::media::kMaxGtJsonBytes + 1U &&
+          result.skyEncoded == 1U && result.skyInvalid == 1U &&
+          result.depthNonReady == 1U && result.depthInvalid == 1U &&
+          result.auIdenticalDuplicates == 1U &&
+          result.auConflicts == 2U && result.auMalformed == 1U);
 }

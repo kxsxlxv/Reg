@@ -195,3 +195,14 @@ For low FPS, inspect the existing Reg-host `logs/frame_timing_*.csv` events PACK
 Simulator operator reported **10792 decoded frames in 180 seconds** at a *simulator-side TCP receiver*, no omissions and up to **96.5 ms** local delivery pauses. An **80 ms** GT wait could contribute to burstiness but has **not** been proven to limit Windows Reg FPS. A ~25 Hz pose update is never an estimate of video FPS. Record a controlled A/B run with and without IMU, keeping other load and capture settings fixed, before declaring a causal diagnosis.
 
 Detailed schema and bounded parser behavior: [CAMERA_IMU_KGT1_AND_FPS_DIAGNOSTICS.md](CAMERA_IMU_KGT1_AND_FPS_DIAGNOSTICS.md). End-to-end contract approval requires a captured sanitized full KGT1 payload from the simulator, Reg-host trace and hardware test; passing synthetic CTest is necessary but insufficient.
+
+
+## 14. Simulator sky/depth GT diagnostics (development, 2026-11-16)
+
+Draft PR #53 adds per-field parsing of KSM1/KDM1 (and existing KGT1/RGF1) from compressed H264 access units before the hardware decoder, using bounded PTS association. A field can be `missing`, `not_ready`, `invalid`, `encoded` or `ready`; **encoded is not decoded/displayed**. Errors of one field never assert errors of other fields or RGB.
+
+On a Reg development build with `--enable-diagnostic-api`, consult `/v1/snapshot?sections=video` for `gt.sky_*`, `gt.depth_*`, `gt.malformed_au_total`, `gt.conflicting_sei_total` and `gt.map_worker_*` metrics. Distinguish the ingress denominator (all decoded frames), encoded-map population, completed worker jobs, visible Raw presentation and independently recorded benchmark AUs. The GPU-upload/display portion of sky/depth is not implemented in Stage 1/2 and cannot be inferred from `gt.map_worker_*_ready_total`. Use completeness of actual producer manifest to compute cross-host coverage; absence of an optional GT field is not packet loss.
+
+For low FPS, compare Reg's own PACKET/DECODE/PRESENT trace, map worker backlog and decode costs with the RGB-only baseline on identical replay. Do **not** subtract simulator/Reg monotonic clocks, diagnose based on GUI-only counters, or infer 60 FPS from simulator-side TCP capture. External producer results (3174/3174 complete initialized bundles, 59.77 FPS) are separate from the Windows Reg observation population. Operator authorization and resource caps remain necessary for any benchmark/recorder mode.
+
+Full integration acceptance, original independent fixtures and reviewable stages are described in `docs/SIMULATOR_GT_INTEGRATION_STAGES.md`.

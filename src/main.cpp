@@ -6,6 +6,7 @@
 #include "diagnostics/GtIngestStats.hpp"
 #include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
 #include "media/RtspDecoder.hpp"
+#include "media/GtMapWorker.hpp"
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
@@ -16,6 +17,7 @@
 #include "render/TargetOverlayBuilder.hpp"
 #include "render/Cvm1SemanticStyleConfig.hpp"
 #include "recorder/BlackboxRecorder.hpp"
+#include "recorder/GtAuJournal.hpp"
 #include "telemetry/TelemetryModel.hpp"
 #include "video/FrameSynchronizer.hpp"
 #include "video/OverlayFrameBuffer.hpp"
@@ -131,6 +133,7 @@ int runApplication(
         reg::platform::SDLPlatform platform;
         reg::diagnostics::FrameTimingLogger frameTimingLog;
         reg::diagnostics::GtIngestStats gtIngestStats;
+        reg::media::GtMapWorker gtMapWorker;
 
         SDL_Window* rawSdlWindow = platform.createVulkanWindow(
             "Reg - Raw",
@@ -250,6 +253,19 @@ int runApplication(
                             static_cast<std::size_t>(
                                 options.recordQueueCapacity),
                     });
+        }
+
+        std::unique_ptr<reg::recorder::GtAuJournal> benchmarkAuJournal;
+        if (options.gtCapturePolicy ==
+                reg::app::GtCapturePolicy::Benchmark) {
+            // A fresh non-rolling, byte-exact archive per process/test run.
+            const auto fileName = "reg-gt-benchmark-" +
+                std::to_string(steadyNowNs()) + ".rgau";
+            benchmarkAuJournal = std::make_unique<reg::recorder::GtAuJournal>(
+                reg::recorder::GtAuJournalConfig{
+                    .path = std::filesystem::path(options.recordDirectory) /
+                             fileName,
+                });
         }
 
         reg::video::RawFrameMailbox rawMailbox;
@@ -418,6 +434,7 @@ int runApplication(
                                     overlayFrames.clear();
                                     metadataStore.clear();
                                     telemetryModel.resetGtRanges();
+                                    gtMapWorker.reset();
                                     exactSyncDiagnostics.clearPending();
                                     lastDecodedFrameNs.store(
                                         0,
@@ -460,6 +477,15 @@ int runApplication(
                                 [&](reg::media::CompressedVideoPacketPtr packet) {
                                     demuxedVideoPackets.fetch_add(1U, std::memory_order_relaxed);
                                     frameTimingLog.logPacket(*packet);
+                                    if (benchmarkAuJournal) {
+                                        // Reference-counted AVPacket: no payload copy
+                                        // or file I/O in the decoder callback.
+                                        static_cast<void>(
+                                            benchmarkAuJournal->submit(
+                                                packet,
+                                                decoderSessionGeneration.load(
+                                                    std::memory_order_relaxed)));
+                                    }
 
                                     if (blackboxRecorder) {
                                         static_cast<void>(
@@ -515,6 +541,10 @@ int runApplication(
                                         std::memory_order_release);
                                     reg::app::observeGt(frame->gt().status);
                                     gtIngestStats.observe(frame->gt());
+                                    gtIngestStats.observeMaps(frame->allGt());
+                                    // Compressed GT is independent of AVVkFrame
+                                    // lifetime. Never decompress on decoder thread.
+                                    static_cast<void>(gtMapWorker.submit(frame->gtParts()));
                                     telemetryModel.observeGtRange(
                                         frame->gt(), frame->decodedAt());
                                     rawMailbox.publish(frame);
@@ -809,6 +839,9 @@ int runApplication(
             if (blackboxRecorder) {
                 blackboxRecorder->stop();
             }
+            if (benchmarkAuJournal) {
+                benchmarkAuJournal->stop();
+            }
         };
 
         reg::video::VideoFramePtr lastRawPresented;
@@ -818,6 +851,8 @@ int runApplication(
             pendingOverlayFrame;
         std::uint64_t observedSessionGeneration{0};
         bool recorderFailureLogged{false};
+        bool gtBenchmarkLossLogged{false};
+        bool gtBenchmarkLossObserved{false};
         bool videoSignalStateInitialized{false};
         bool previousVideoSignalPresent{false};
         bool cvSignalStateInitialized{false};
@@ -1177,7 +1212,8 @@ int runApplication(
                                     latest->gt(),
                                     rawWindow.swapchain().extent().width,
                                     rawWindow.swapchain().extent().height,
-                                    reg::app::showGtIds());
+                                    reg::app::showGtIds(),
+                                    reg::app::showGtRanges());
                                 identityScene.primitives.insert(
                                     identityScene.primitives.end(),
                                     std::make_move_iterator(gtScene.primitives.begin()),
@@ -1451,9 +1487,32 @@ int runApplication(
                     reg::recorder::BlackboxRecorderStats
                         recorderStats{};
 
+                    reg::recorder::GtAuJournalStats archiveStats{};
+                    if (benchmarkAuJournal) {
+                        archiveStats = benchmarkAuJournal->stats();
+                    }
                     if (blackboxRecorder) {
                         recorderStats =
                             blackboxRecorder->stats();
+                        if (options.gtCapturePolicy ==
+                                reg::app::GtCapturePolicy::Benchmark &&
+                            (recorderStats.packetsDroppedQueueFull != 0U ||
+                             recorderStats.failed ||
+                             recorderStats.failures != 0U ||
+                             recorderStats.packetsWaitingForKeyframe != 0U ||
+                             archiveStats.failed ||
+                             archiveStats.dropped != 0U ||
+                             archiveStats.fileErrors != 0U)) {
+                            gtBenchmarkLossObserved = true;
+                            if (!gtBenchmarkLossLogged) {
+                                gtBenchmarkLossLogged = true;
+                                telemetryModel.log(
+                                    reg::telemetry::Severity::Error,
+                                    "BENCHMARK CAPTURE FAILED: compressed AU "
+                                    "recorder lost packets or failed; "
+                                    "capture is not lossless");
+                            }
+                        }
 
                         if (recorderStats.failed &&
                             !recorderFailureLogged) {
@@ -1466,6 +1525,7 @@ int runApplication(
                     }
 
                     const auto gtStats = gtIngestStats.snapshot();
+                    const auto mapStats = gtMapWorker.stats();
                     telemetryModel.updateCounters(
                         reg::telemetry::Counters{
                             .rtspConnected =
@@ -1493,6 +1553,39 @@ int runApplication(
                             .gtParseTotalUs = gtStats.gtParseTotalUs,
                             .gtParseMaxUs = gtStats.gtParseMaxUs,
                             .gtMaxJsonBytes = gtStats.gtJsonMaxBytes,
+                            .skyMissingFrames = gtStats.skyMissing,
+                            .skyEncodedFrames = gtStats.skyEncoded,
+                            .skyNonReadyFrames = gtStats.skyNonReady,
+                            .skyInvalidFrames = gtStats.skyInvalid,
+                            .depthMissingFrames = gtStats.depthMissing,
+                            .depthEncodedFrames = gtStats.depthEncoded,
+                            .depthNonReadyFrames = gtStats.depthNonReady,
+                            .depthInvalidFrames = gtStats.depthInvalid,
+                            .gtMalformedAu = gtStats.auMalformed,
+                            .gtConflictingSei = gtStats.auConflicts,
+                            .gtIdenticalDuplicates = gtStats.auIdenticalDuplicates,
+                            .gtWorkerQueueDrops = mapStats.queueDrops,
+                            .gtWorkerLockDrops = mapStats.lockDrops,
+                            .gtWorkerSkyReady = mapStats.decodedSky,
+                            .gtWorkerDepthReady = mapStats.decodedDepth,
+                            .gtWorkerInvalidSky = mapStats.invalidSky,
+                            .gtWorkerInvalidDepth = mapStats.invalidDepth,
+                            .gtWorkerChecksumFailures = mapStats.checksumFailures,
+                            .gtWorkerTotalUs = mapStats.durationUs,
+                            .gtWorkerMaxUs = mapStats.longestUs,
+                            .gtWorkerQueueBytes = mapStats.pendingBytes,
+                            .gtWorkerQueueFrames = mapStats.pendingFrames,
+                            .gtWorkerQueueAgeMs = mapStats.oldestPendingAgeMs,
+                            .gtBenchmarkEnabled = options.gtCapturePolicy ==
+                                reg::app::GtCapturePolicy::Benchmark,
+                            .gtBenchmarkFailed = gtBenchmarkLossObserved,
+                            .gtArchiveAccepted = archiveStats.accepted,
+                            .gtArchiveWritten = archiveStats.written,
+                            .gtArchiveDropped = archiveStats.dropped,
+                            .gtArchiveFileErrors = archiveStats.fileErrors,
+                            .gtArchiveBytesWritten = archiveStats.bytesWritten,
+                            .gtArchivePendingBytes = archiveStats.queuedBytes,
+                            .gtArchivePendingPackets = archiveStats.queuedPackets,
                             .decodedFrames =
                                 decodedFrames.load(
                                     std::memory_order_relaxed),
