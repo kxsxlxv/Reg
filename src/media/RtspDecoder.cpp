@@ -442,8 +442,13 @@ void RtspDecoder::decodePacket(
         for(const auto& entry:au.payloads) hasGt=hasGt || entry.has_value();
         for(bool conflict:au.conflicts) hasGt=hasGt || conflict;
         if (hasGt) {
-            gtPts_.remember(packet->pts,makeGtParts(std::move(au)),
-                            bytes.size());
+            try {
+                gtPts_.remember(packet->pts,makeGtParts(std::move(au)),
+                                bytes.size());
+            } catch (...) {
+                // Optional GT metadata must not abort RGB decoding.
+                gtPts_.reset();
+            }
         }
     }
     int sendResult = avcodec_send_packet(codecContext_, packet);
