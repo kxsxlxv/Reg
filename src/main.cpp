@@ -1186,7 +1186,8 @@ int runApplication(
                                     latest->gt(),
                                     rawWindow.swapchain().extent().width,
                                     rawWindow.swapchain().extent().height,
-                                    reg::app::showGtIds());
+                                    reg::app::showGtIds(),
+                                    reg::app::showGtRanges());
                                 identityScene.primitives.insert(
                                     identityScene.primitives.end(),
                                     std::make_move_iterator(gtScene.primitives.begin()),
