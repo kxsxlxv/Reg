@@ -378,6 +378,42 @@ CameraImuMetadata parseCameraImu(const Json* value,
         if (imu.axes != "right_down_forward") return imu;
     }
 
+    if (const auto* convention = value->member("quaternion_order")) {
+        if (convention->type != Json::Type::String ||
+            convention->scalar != "wxyz") return imu;
+        imu.quaternionOrder = convention->scalar;
+    }
+    if (const auto* shutter = value->member("shutter")) {
+        if (shutter->type != Json::Type::String ||
+            shutter->scalar != "instantaneous") return imu;
+        imu.shutter = shutter->scalar;
+    }
+    if (const auto* exposureS = value->member("exposure_s")) {
+        if (!asDouble(*exposureS, imu.exposureS) || imu.exposureS < 0.0 ||
+            imu.exposureS > 1.0) return imu;
+    }
+    if (const auto* rate = value->member("imu_rate_hz")) {
+        if (!asUint64(rate, imu.imuRateHz) || imu.imuRateHz > 10000U) return imu;
+    }
+    if (const auto* model = value->member("imu_model")) {
+        if (model->type != Json::Type::String || model->scalar.size() > 128U)
+            return imu;
+        imu.imuModel = model->scalar;
+    }
+    if (const auto* gap = value->member("imu_gap")) {
+        if (gap->type != Json::Type::Boolean) return imu;
+        imu.imuGap = gap->boolean;
+    }
+    if (const auto* history = value->member("imu_history_start_ns")) {
+        std::uint64_t start{};
+        if (!asUint64(history, start) || start > imu.timestampNs) return imu;
+        imu.imuHistoryStartNs = start;
+    }
+    if (const auto* projection = value->member("projection_row_major")) {
+        std::array<double,16> values{};
+        if (!asVector<16>(projection, values)) return imu;
+        imu.projectionRowMajor = values;
+    }
     if (const auto* k = value->member("K")) {
         std::array<double, 9> values{};
         if (!matrix(k, 3U, values.data()) ||
@@ -425,7 +461,9 @@ CameraImuMetadata parseCameraImu(const Json* value,
             !optionalVector<3>(firstOf(gt, {"acceleration_world_m_s2", "accel_m_s2"}),
                                pose.accelerationWorldMS2) ||
             !optionalVector<3>(firstOf(gt, {"gravity_world_m_s2", "gravity_m_s2"}),
-                               pose.gravityWorldMS2)) return imu;
+                               pose.gravityWorldMS2) ||
+            !optionalQuat(gt->member("rotation_optical_to_world_wxyz"),
+                          pose.rotationOpticalToWorldWxyz)) return imu;
     }
 
     const auto* samples = value->member("imu");
@@ -512,13 +550,34 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
         else if (status->scalar == "ambiguous_viewport") gt.status = GtStatus::AmbiguousViewport;
         else if (status->scalar != "ready") gt.status = GtStatus::Unavailable;
         else gt.status = GtStatus::Ready;
-        if (gt.status != GtStatus::Ready) return gt;
+
+        // The parent identity is present in all actual simulator KGT1 states.
+        // Legacy non-ready KGT1 without an identity is still accepted.
+        const auto* epoch = root.member("stream_epoch");
+        const auto* frameId = root.member("frame_id");
+        const auto* sourceNs = root.member("source_time_ns");
+        const bool anyId = epoch || frameId || sourceNs;
+        if (anyId) {
+            if (!asUint64(epoch, gt.source.key.streamEpoch) ||
+                !asUint64(frameId, gt.source.key.frameId) ||
+                !asUint64(sourceNs, gt.source.sourceTimeNs)) return failed(json.size());
+            gt.sourceValid = true;
+        }
+        // Critical: bbox status is independent of the camera/IMU status.
+        gt.cameraImu = parseCameraImu(root.member("camera_imu"), gt.source);
+        const auto duration = [&]() {
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now()-started).count());
+        };
+        if (gt.status != GtStatus::Ready) {
+            gt.parseDurationUs = duration();
+            return gt;
+        }
 
         const Json* videoSize = root.member("video_size");
         const Json* objects = root.member("objects");
-        if (!asUint64(root.member("stream_epoch"), gt.source.key.streamEpoch) ||
-            !asUint64(root.member("frame_id"), gt.source.key.frameId) ||
-            !asUint64(root.member("source_time_ns"), gt.source.sourceTimeNs) ||
+        if (!gt.sourceValid ||
             videoSize == nullptr || videoSize->type != Json::Type::Array ||
             videoSize->array.size() != 2U ||
             !asDimension(&videoSize->array[0], gt.videoWidth) ||
@@ -547,7 +606,6 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
             }
             gt.objects.push_back(std::move(object));
         }
-        gt.cameraImu = parseCameraImu(root.member("camera_imu"), gt.source);
         gt.jsonBytes = json.size();
         gt.parseDurationUs = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
@@ -585,13 +643,17 @@ void validateGtForFrame(
     const std::optional<SourceFrameIdentity>& rgf1,
     int decodedWidth,
     int decodedHeight) noexcept {
-    if (gt.status != GtStatus::Ready) return;
+    if (gt.status == GtStatus::Missing ||
+        gt.status == GtStatus::ParseError ||
+        (!gt.sourceValid && gt.status != GtStatus::Ready)) return;
     if (!rgf1 ||
+        !gt.sourceValid ||
         gt.source.key != rgf1->key ||
         gt.source.sourceTimeNs != rgf1->sourceTimeNs ||
         decodedWidth <= 0 || decodedHeight <= 0 ||
-        gt.videoWidth != static_cast<std::uint32_t>(decodedWidth) ||
-        gt.videoHeight != static_cast<std::uint32_t>(decodedHeight)) {
+        (gt.status == GtStatus::Ready &&
+         (gt.videoWidth != static_cast<std::uint32_t>(decodedWidth) ||
+          gt.videoHeight != static_cast<std::uint32_t>(decodedHeight)))) {
         gt.objects.clear();
         if (gt.cameraImu.status == CameraImuStatus::Ready) {
             gt.cameraImu.status = CameraImuStatus::FrameMismatch;
