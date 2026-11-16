@@ -1267,6 +1267,50 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     }
 
     static void drawGtPanel(const telemetry::Counters& counters) {
+        ImGui::SeparatorText("GT / СЛОИ RAW (VULKAN)");
+        bool sky=app::showGtSky();
+        if(ImGui::Checkbox("Маска неба KSM1",&sky))
+            app::gShowGtSky.store(sky,std::memory_order_relaxed);
+        float skyAlpha=app::gGtSkyOpacity.load(std::memory_order_relaxed);
+        if(ImGui::SliderFloat("Прозрачность неба",&skyAlpha,0.0F,1.0F,"%.2f"))
+            app::gGtSkyOpacity.store(skyAlpha,std::memory_order_relaxed);
+        bool depth=app::showGtDepth();
+        if(ImGui::Checkbox("Карта глубины KDM1 (optical Z)",&depth))
+            app::gShowGtDepth.store(depth,std::memory_order_relaxed);
+        float depthAlpha=app::gGtDepthOpacity.load(std::memory_order_relaxed);
+        if(ImGui::SliderFloat("Прозрачность глубины",&depthAlpha,0.0F,1.0F,"%.2f"))
+            app::gGtDepthOpacity.store(depthAlpha,std::memory_order_relaxed);
+        float nearM=app::gGtDepthNearM.load(std::memory_order_relaxed);
+        float farM=app::gGtDepthFarM.load(std::memory_order_relaxed);
+        if(ImGui::DragFloat("Ближний Z, м",&nearM,0.5F,0.0F,10000.0F,"%.1f")) {
+            nearM=std::clamp(nearM,0.0F,farM-0.1F);
+            app::gGtDepthNearM.store(nearM,std::memory_order_relaxed);
+        }
+        if(ImGui::DragFloat("Дальний Z, м",&farM,1.0F,nearM+0.1F,20000.0F,"%.1f"))
+            app::gGtDepthFarM.store(std::max(farM,nearM+0.1F),std::memory_order_relaxed);
+        ImGui::TextDisabled("Z: тёплые цвета = ближе, синие = дальше; 0 = нет глубины.");
+        ImGui::TextDisabled("KSM1: бирюзовый = небо, неизвестные пиксели прозрачны.");
+        ImGui::TextDisabled("Маска и карта строго совпадают с FrameKey Raw-кадра.");
+        const auto skyStatus=app::gPresentedSkyStatus.load(std::memory_order_relaxed);
+        const auto depthStatus=app::gPresentedDepthStatus.load(std::memory_order_relaxed);
+        const auto mapName=[](media::GtMapStatus s) {
+            switch(s) {
+                case media::GtMapStatus::Missing:return "missing";
+                case media::GtMapStatus::NotReady:return "not_ready";
+                case media::GtMapStatus::AmbiguousViewport:return "ambiguous_viewport";
+                case media::GtMapStatus::Unavailable:return "unavailable";
+                case media::GtMapStatus::Encoded:return "decoded by worker pending";
+                case media::GtMapStatus::Ready:return "ready";
+                case media::GtMapStatus::Invalid:return "invalid";
+                case media::GtMapStatus::FrameMismatch:return "frame_mismatch";
+            }
+            return "unknown";
+        };
+        ImGui::Text("Небо: %s | GPU map: %s",mapName(skyStatus),
+                    app::gPresentedSkyMapReady.load()?"ready":"absent");
+        ImGui::Text("Глубина: %s | GPU map: %s",mapName(depthStatus),
+                    app::gPresentedDepthMapReady.load()?"ready":"absent");
+        ImGui::SeparatorText("GT / BBOX");
         bool showBoxes = app::showGtBoxes();
         if (ImGui::Checkbox("Показывать GT bbox (T / Е)", &showBoxes)) {
             app::setShowGtBoxes(showBoxes);
