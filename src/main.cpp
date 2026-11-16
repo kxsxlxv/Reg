@@ -7,6 +7,7 @@
 #include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
 #include "media/RtspDecoder.hpp"
 #include "media/GtMapWorker.hpp"
+#include "media/GtDisplaySelection.hpp"
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
@@ -1226,7 +1227,7 @@ int runApplication(
                             // The asynchronous worker may be late: never
                             // reuse a map from another FrameKey or timestamp.
                             std::shared_ptr<const reg::media::GtDecodedBundle> gtMaps;
-                            const reg::vulkan::GtMapStyle mapStyle{
+                            reg::vulkan::GtMapStyle mapStyle{
                                 .sky=reg::app::showGtSky(),
                                 .depth=reg::app::showGtDepth(),
                                 .skyOpacity=reg::app::gGtSkyOpacity.load(),
@@ -1237,10 +1238,16 @@ int runApplication(
                             if (mapStyle.sky || mapStyle.depth) {
                                 if (const auto id=latest->identity()) {
                                     gtMaps=gtMapWorker.find(id->key);
-                                    if (gtMaps &&
-                                        (gtMaps->identity.key!=id->key ||
-                                         gtMaps->identity.sourceTimeNs!=id->sourceTimeNs))
-                                        gtMaps.reset();
+                                    if (gtMaps) {
+                                        const auto selected=reg::media::selectGtDisplayLayers(
+                                            latest->allGt(),*gtMaps,
+                                            latest->width(),latest->height(),
+                                            mapStyle.sky,mapStyle.depth);
+                                        mapStyle.sky=selected.sky;
+                                        mapStyle.depth=selected.depth;
+                                        if (!selected.sky && !selected.depth)
+                                            gtMaps.reset();
+                                    }
                                 }
                             }
                             const bool renderSucceeded =
