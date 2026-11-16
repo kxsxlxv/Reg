@@ -171,10 +171,23 @@ void testCameraImuCompatibility() {
     dedup.observe(imu, [&](const auto&) { ++delivered; });
     check(delivered == 100U && dedup.stats().duplicates == 100U,
           "run_id+sequence dedup overlapping windows");
+    auto collision = imu;
+    collision.imu.resize(1U);
+    collision.imu[0].gyroRadS[0] += 0.5;
+    dedup.observe(collision,[&](const auto&){++delivered;});
+    check(delivered==100U && dedup.stats().conflicts==1U,
+          "same sensor+sequence conflicting sample must be rejected");
+    auto otherSensor=imu;
+    otherSensor.imu.resize(1U);
+    otherSensor.imu[0].sensorId="second-sensor";
+    dedup.observe(otherSensor,[&](const auto&){++delivered;});
+    check(delivered==101U,
+          "same sequence from distinct sensor must not be deduplicated");
+
     auto restarted = imu;
     restarted.runId = "run-2";
     dedup.observe(restarted, [&](const auto&) { ++delivered; });
-    check(delivered == 200U, "new run accepts reused sequences");
+    check(delivered == 201U, "new run accepts reused sequences");
 
     const auto malformed = parse(cameraImuJson(100, true));
     check(malformed.status == reg::media::GtStatus::Ready &&
