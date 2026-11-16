@@ -1,4 +1,5 @@
 #include "media/GtSei.hpp"
+#include "media/GtAccessUnit.hpp"
 #include "media/CameraImuDedup.hpp"
 #include "render/GtOverlayBuilder.hpp"
 #include "vulkan/VideoUvRegion.hpp"
@@ -208,6 +209,97 @@ void testCameraImuCompatibility() {
               << " us (synthetic, not real Reg FPS)\n";
 }
 
+
+std::string partialActualKgt1() {
+    // Mirrors actual simulator partial-bbox-ready-imu.kgt1.bin field names.
+    return R"({"type":"KGT1","version":1,"stream_epoch":8634538654274155750,"frame_id":363,"source_time_ns":1794840766195175171,"status":"not_ready","camera_imu":{"version":1,"run_id":"sky-480x270-wait0-p1-iarv05ok","simulation_epoch":1794828707111475078,"timestamp_ns":11874142500000,"status":"ready","state":"running","axes":"right_down_forward","quaternion_order":"wxyz","imu_rate_hz":400,"imu_gap":false,"imu_model":"ideal_interval_average_end_frame","shutter":"instantaneous","exposure_s":0,"K":[[935.3,0,960],[0,935.3,540],[0,0,1]],"T_camera_imu":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],"projection_row_major":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],"camera_gt":{"position_world_m":[1,2,3],"rotation_optical_to_world_wxyz":[1,0,0,0],"velocity_world_m_s":[0,0,0],"acceleration_world_m_s2":[0,0,0],"gravity_world_m_s2":[0,0,-9.81]},"imu":[]}})";
+}
+
+std::vector<std::uint8_t> mapBinary(std::string_view magic,
+                                     std::string_view header,
+                                     std::size_t payloadSize) {
+    std::vector<std::uint8_t> data(magic.begin(),magic.end());
+    const auto size=static_cast<std::uint32_t>(header.size());
+    for(unsigned shift:{0U,8U,16U,24U})
+        data.push_back(static_cast<std::uint8_t>((size>>shift)&0xffU));
+    data.insert(data.end(),header.begin(),header.end());
+    data.resize(data.size()+payloadSize,0U);
+    return data;
+}
+void testActualProducerFieldSemantics() {
+    using reg::media::CameraImuStatus;
+    using reg::media::GtMapKind;
+    using reg::media::GtMapStatus;
+    auto partial=parse(partialActualKgt1());
+    check(partial.status==reg::media::GtStatus::NotReady &&
+          partial.sourceValid && partial.source.key.frameId==363U,
+          "non-ready bbox identity retained");
+    check(partial.cameraImu.status==CameraImuStatus::Ready &&
+          partial.cameraImu.imu.empty() && partial.cameraImu.imuRateHz==400U &&
+          partial.cameraImu.projectionRowMajor &&
+          partial.cameraImu.cameraGt.rotationOpticalToWorldWxyz,
+          "camera IMU independently ready; actual projection/orientation names");
+    const reg::media::SourceFrameIdentity id{
+        .key={8634538654274155750ULL,363U},
+        .sourceTimeNs=1794840766195175171ULL};
+    reg::media::validateGtForFrame(partial,id,1920,1080);
+    check(partial.status==reg::media::GtStatus::NotReady &&
+          partial.cameraImu.status==CameraImuStatus::Ready,
+          "independent non-ready bbox stays valid after identity join");
+    auto mismatch=partial;
+    auto other=id; ++other.key.frameId;
+    reg::media::validateGtForFrame(mismatch,other,1920,1080);
+    check(mismatch.status==reg::media::GtStatus::FrameMismatch &&
+          mismatch.cameraImu.status==CameraImuStatus::FrameMismatch,
+          "wrong frame never receives IMU");
+
+    const auto skyHeader=R"({"version":1,"stream_epoch":8634538654274155750,"frame_id":363,"source_time_ns":1794840766195175171,"status":"ready","size":[32,16],"source_size":[64,32],"codec":"bitpack","bit_order":"lsb0_row_major","validity_plane":false,"unknown_pixels":0,"raw_bytes":64,"policy":1,"checksum_fnv1a32":0,"ready_ns":123})";
+    auto sky=reg::media::parseGtMapBinary(mapBinary("KSM1",skyHeader,64),GtMapKind::Sky);
+    check(sky.status==GtMapStatus::Encoded && sky.sourceValid &&
+          sky.width==32U && sky.height==16U && sky.encoded.size()==64U,
+          "sky compressed header accepted");
+    reg::media::validateGtMapForFrame(sky,id);
+    check(sky.status==GtMapStatus::Encoded,"sky exact identity");
+    auto badSky=sky;
+    reg::media::validateGtMapForFrame(badSky,other);
+    check(badSky.status==GtMapStatus::FrameMismatch &&
+          badSky.encoded.empty(),"sky never borrows neighboring frame");
+
+    const auto depthHeader=R"({"version":1,"stream_epoch":8634538654274155750,"frame_id":363,"source_time_ns":1794840766195175171,"status":"ready","size":[32,16],"source_size":[64,32],"quantity":"optical_z","units":"m","dtype":"float32_le","invalid_value":0,"sky":"invalid","sampling":"integer_block_center","codec":"raw","raw_bytes":2048,"checksum_crc32":0,"valid_pixels":0,"minimum_m":0,"maximum_m":0,"projection_row_major":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]})";
+    auto depth=reg::media::parseGtMapBinary(mapBinary("KDM1",depthHeader,2048),
+                                              GtMapKind::Depth);
+    check(depth.status==GtMapStatus::Encoded && depth.encoded.size()==2048U,
+          "metric depth envelope accepted");
+    auto truncated=reg::media::parseGtMapBinary(
+        mapBinary("KDM1",depthHeader,2047),GtMapKind::Depth);
+    check(truncated.status==GtMapStatus::Invalid,
+          "truncated uncompressed depth rejected");
+    auto notReady=reg::media::parseGtMapBinary(mapBinary(
+        "KDM1",
+        R"({"version":1,"stream_epoch":8634538654274155750,"frame_id":363,"source_time_ns":1794840766195175171,"status":"not_ready"})",
+        0),GtMapKind::Depth);
+    check(notReady.status==GtMapStatus::NotReady,
+          "depth not-ready does not imply transport loss");
+
+    reg::media::GtPtsAssociation association;
+    auto packet=std::make_shared<reg::media::FrameGtParts>();
+    packet->source=id;
+    auto another=std::make_shared<reg::media::FrameGtParts>();
+    auto id2=id;id2.key.frameId=364U;
+    another->source=id2;
+    // Simulated B-frame order: decode input PTS 10,30,20; present 10,20,30.
+    association.remember(10,packet,1024);
+    association.remember(30,another,2048);
+    association.remember(20,packet,1024);
+    check(association.take(10)->source->key.frameId==363U &&
+          association.take(20)->source->key.frameId==363U &&
+          association.take(30)->source->key.frameId==364U,
+          "exact PTS association across reorder");
+    association.remember(40,packet,1024);
+    association.reset();
+    check(!association.take(40) && association.pendingBytes()==0U,
+          "reconnect invalidates pending GT");
+}
 void testFrames() {
     AVFrame* frame = av_frame_alloc();
     check(frame != nullptr, "alloc frame");
@@ -347,6 +439,7 @@ int main() {
         testVisibleVideoSampling();
         testPayloads();
         testCameraImuCompatibility();
+        testActualProducerFieldSemantics();
         testFrames();
         testGeometry();
         std::cout << "gt_sei_osd_tests: PASS\n";
