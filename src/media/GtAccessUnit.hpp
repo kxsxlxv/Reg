@@ -98,12 +98,10 @@ public:
         if (auto it=entries_.find(pts);it!=entries_.end()) {
             // A PTS collision cannot be resolved by packet arrival order.
             ++stats_.duplicatePts;
-            if (((!it->second.gt->source && !gt->source) ||
-                 (it->second.gt->source && gt->source &&
-                 it->second.gt->source->key==gt->source->key &&
-                 it->second.gt->source->sourceTimeNs==gt->source->sourceTimeNs)) &&
-                !it->second.conflict &&
-                it->second.bytes==packetGtBytes) return;
+            // Matching identity and packet size DO NOT prove byte identity:
+            // conflicting same-PTS payloads would otherwise silently join.
+            // Only the same immutable owned object can be repeated safely.
+            if (it->second.gt == gt && !it->second.conflict) return;
             it->second.conflict=true;
             ++stats_.conflictingPts;
             return;
