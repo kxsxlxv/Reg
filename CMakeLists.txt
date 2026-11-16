@@ -357,6 +357,22 @@ if(REG_BUILD_TESTS)
 
     add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
 
+    add_executable(reg_gt_au_journal_tests
+        tests/gt_au_journal_tests.cpp
+        src/recorder/GtAuJournal.cpp
+        src/media/CompressedVideoPacket.cpp)
+    target_include_directories(reg_gt_au_journal_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_gt_au_journal_tests PRIVATE
+        FFmpeg::avcodec FFmpeg::avutil)
+    if(MSVC)
+        target_compile_options(reg_gt_au_journal_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_gt_au_journal_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME gt_au_journal COMMAND reg_gt_au_journal_tests)
+
     add_executable(reg_gt_map_worker_tests
         tests/gt_map_worker_tests.cpp
         src/media/GtMapWorker.cpp
