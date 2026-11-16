@@ -27,7 +27,7 @@ struct FrameGtParts final {
 };
 
 // Owns all compressed metadata before hardware decode can lose SEI side data.
-inline std::shared_ptr<const FrameGtParts> makeGtParts(H264AuSei au) {
+inline std::shared_ptr<FrameGtParts> makeGtParts(H264AuSei au) {
     auto result=std::make_shared<FrameGtParts>();
     result->unknownSei=au.unknownUuidMessages;
     result->identicalDuplicates=au.byteIdenticalDuplicates;
@@ -81,7 +81,7 @@ public:
     // Caller supplies packet.pts from the actual *complete* compressed AU.
     // Null/invalid PTS cannot be joined safely to a decoded video image.
     void remember(std::int64_t pts,
-                  std::shared_ptr<const FrameGtParts> gt,
+                  std::shared_ptr<FrameGtParts> gt,
                   std::size_t packetGtBytes,
                   Clock::time_point now=Clock::now()) {
         prune(now);
@@ -113,7 +113,7 @@ public:
         prune(now);
     }
     // Exact frame.pts / best_effort_timestamp only. No DTS/FIFO fallback.
-    [[nodiscard]] std::shared_ptr<const FrameGtParts> take(
+    [[nodiscard]] std::shared_ptr<FrameGtParts> take(
         std::int64_t presentationPts,
         Clock::time_point now=Clock::now()) {
         prune(now);
