@@ -4,6 +4,7 @@ extern "C" {
 #include <libavcodec/packet.h>
 }
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -93,7 +94,7 @@ int main() {
                 .path=base/"quota.rgau",
                 .maxQueueBytes=1024,
                 .maxQueuePackets=8,
-                .maxFileBytes=70, // < header + two packet records
+                .maxFileBytes=62, // header+one full packet record needs 63
             });
             check(journal.submit(makePacket(3U,5),1U),"quota input queued");
             journal.stop();
