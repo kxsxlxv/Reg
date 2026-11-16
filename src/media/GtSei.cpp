@@ -617,6 +617,153 @@ GtMetadata parseGtJson(std::span<const std::uint8_t> json) noexcept {
     }
 }
 
+GtMapMetadata parseGtMapBinary(
+    std::span<const std::uint8_t> bytes, GtMapKind kind) noexcept {
+    GtMapMetadata map;
+    map.kind = kind;
+    map.status = GtMapStatus::Invalid;  // independent from RGB/KGT1
+    try {
+        // After the 16-byte UUID: magic[4], JSON length:u32LE, JSON, bytes.
+        if (bytes.size() < 8U || bytes.size() > 8U * 1024U * 1024U) return map;
+        const std::string_view magic(kind == GtMapKind::Sky ? "KSM1" : "KDM1");
+        if (!std::equal(magic.begin(),magic.end(),bytes.begin())) return map;
+        const std::uint64_t headerLen =
+            std::uint64_t(bytes[4]) | (std::uint64_t(bytes[5])<<8U) |
+            (std::uint64_t(bytes[6])<<16U) | (std::uint64_t(bytes[7])<<24U);
+        if (headerLen > 65536U || headerLen > bytes.size()-8U) return map;
+        const auto headerText=std::string_view(
+            reinterpret_cast<const char*>(bytes.data()+8U),
+            static_cast<std::size_t>(headerLen));
+        Json header;
+        if (!Parser(headerText).parse(header) ||
+            header.type != Json::Type::Object) return map;
+        std::uint64_t version=0;
+        if (!asUint64(header.member("version"),version) || version!=1U ||
+            !asUint64(header.member("stream_epoch"), map.source.key.streamEpoch) ||
+            !asUint64(header.member("frame_id"), map.source.key.frameId) ||
+            !asUint64(header.member("source_time_ns"),map.source.sourceTimeNs))
+            return map;
+        map.sourceValid=true;
+        const auto* state=header.member("status");
+        if (!state || state->type!=Json::Type::String) return map;
+        if (state->scalar=="not_ready") map.status=GtMapStatus::NotReady;
+        else if (state->scalar=="ambiguous_viewport") map.status=GtMapStatus::AmbiguousViewport;
+        else if (state->scalar=="ready") map.status=GtMapStatus::Encoded;
+        else map.status=GtMapStatus::Unavailable;
+        const std::size_t dataOffset=8U+static_cast<std::size_t>(headerLen);
+        const auto compressed=bytes.subspan(dataOffset);
+        if (map.status!=GtMapStatus::Encoded) {
+            // Not-ready SEI must never smuggle stale bitmap data.
+            if (!compressed.empty()) map.status=GtMapStatus::Invalid;
+            return map;
+        }
+        const auto* size=header.member("size");
+        const auto* sourceSize=header.member("source_size");
+        if (!size || size->type!=Json::Type::Array || size->array.size()!=2U ||
+            !sourceSize || sourceSize->type!=Json::Type::Array ||
+            sourceSize->array.size()!=2U ||
+            !asDimension(&size->array[0],map.width) ||
+            !asDimension(&size->array[1],map.height) ||
+            !asDimension(&sourceSize->array[0],map.sourceWidth) ||
+            !asDimension(&sourceSize->array[1],map.sourceHeight) ||
+            map.width<32U || map.width>1920U ||
+            map.height<16U || map.height>1080U ||
+            map.width>map.sourceWidth || map.height>map.sourceHeight ||
+            !asUint64(header.member("raw_bytes"),map.rawBytes))
+            {map.status=GtMapStatus::Invalid;return map;}
+        const auto* codec=header.member("codec");
+        if (!codec || codec->type!=Json::Type::String) {
+            map.status=GtMapStatus::Invalid;return map;
+        }
+        map.codec=codec->scalar;
+        if (const auto* ready=header.member("ready_ns")) {
+            if (!asUint64(ready,map.readyNs)) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+        }
+        std::uint64_t checksum{};
+        const auto pixels=std::uint64_t(map.width)*map.height;
+        if (kind==GtMapKind::Sky) {
+            const auto* bitOrder=header.member("bit_order");
+            const auto* validity=header.member("validity_plane");
+            std::uint64_t policy{};
+            if (!bitOrder || bitOrder->type!=Json::Type::String ||
+                bitOrder->scalar!="lsb0_row_major" ||
+                !validity || validity->type!=Json::Type::Boolean ||
+                !asUint64(header.member("policy"),policy) || policy>2U ||
+                !asUint64(header.member("unknown_pixels"),map.unknownPixels) ||
+                !asUint64(header.member("checksum_fnv1a32"),checksum) ||
+                checksum>UINT32_MAX || map.unknownPixels>pixels) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+            map.validityPlane=validity->boolean;
+            map.policy=static_cast<std::uint32_t>(policy);
+            const auto plane=(pixels+7U)/8U;
+            if (map.rawBytes!=plane*(map.validityPlane?2U:1U) ||
+                (!map.validityPlane && map.unknownPixels!=0U) ||
+                (map.codec!="rle8" && map.codec!="bitpack") ||
+                (map.codec=="bitpack" && compressed.size()!=map.rawBytes) ||
+                (map.codec=="rle8" && (compressed.size()%2U!=0U ||
+                                       compressed.size()>map.rawBytes*2U))) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+        } else {
+            const auto* quantity=header.member("quantity");
+            const auto* units=header.member("units");
+            const auto* dtype=header.member("dtype");
+            const auto* invalid=header.member("invalid_value");
+            const auto* sky=header.member("sky");
+            const auto* sampling=header.member("sampling");
+            std::array<double,16> projection{};
+            double invalidValue{};
+            if (!quantity || quantity->type!=Json::Type::String ||
+                quantity->scalar!="optical_z" ||
+                !units || units->type!=Json::Type::String || units->scalar!="m" ||
+                !dtype || dtype->type!=Json::Type::String ||
+                dtype->scalar!="float32_le" ||
+                !invalid || !asDouble(*invalid,invalidValue) || invalidValue!=0.0 ||
+                !sky || sky->type!=Json::Type::String || sky->scalar!="invalid" ||
+                !sampling || sampling->type!=Json::Type::String ||
+                sampling->scalar!="integer_block_center" ||
+                !asVector<16>(header.member("projection_row_major"),projection) ||
+                !asUint64(header.member("valid_pixels"),map.validPixels) ||
+                map.validPixels>pixels ||
+                !asUint64(header.member("checksum_crc32"),checksum) ||
+                checksum>UINT32_MAX || map.rawBytes!=pixels*4U ||
+                (map.codec!="raw" && map.codec!="zstd_shuffle4") ||
+                (map.codec=="raw" && compressed.size()!=map.rawBytes) ||
+                !header.member("minimum_m") || !header.member("maximum_m") ||
+                !asDouble(*header.member("minimum_m"),map.minimumM) ||
+                !asDouble(*header.member("maximum_m"),map.maximumM) ||
+                map.minimumM<0.0 || map.maximumM<map.minimumM) {
+                map.status=GtMapStatus::Invalid;return map;
+            }
+            map.quantity=quantity->scalar;
+            map.projectionRowMajor=projection;
+        }
+        map.checksum=static_cast<std::uint32_t>(checksum);
+        map.encoded.assign(compressed.begin(),compressed.end());
+        return map;
+    } catch (...) {
+        map.status=GtMapStatus::Invalid;
+        map.encoded.clear();
+        return map;
+    }
+}
+
+void validateGtMapForFrame(
+    GtMapMetadata& map,
+    const std::optional<SourceFrameIdentity>& rgf1) noexcept {
+    if (map.status==GtMapStatus::Missing || map.status==GtMapStatus::Invalid)
+        return;
+    if (!map.sourceValid || !rgf1 ||
+        map.source.key!=rgf1->key ||
+        map.source.sourceTimeNs!=rgf1->sourceTimeNs) {
+        map.status=GtMapStatus::FrameMismatch;
+        map.encoded.clear();
+    }
+}
+
 GtMetadata extractGtSei(const AVFrame* frame) noexcept {
     if (frame == nullptr) return {};
     try {
