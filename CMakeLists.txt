@@ -349,6 +349,17 @@ if(REG_BUILD_TESTS)
 
     add_test(NAME frame_identity COMMAND reg_frame_identity_tests)
 
+    add_executable(reg_h264_au_sei_tests tests/h264_au_sei_tests.cpp)
+    target_include_directories(reg_h264_au_sei_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        target_compile_options(reg_h264_au_sei_tests PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_h264_au_sei_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME h264_au_sei COMMAND reg_h264_au_sei_tests)
+
     add_executable(reg_gt_sei_osd_tests
         tests/gt_sei_osd_tests.cpp
         src/media/GtSei.cpp
