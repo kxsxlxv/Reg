@@ -55,6 +55,16 @@ inline void toggleRangeTimelinePaused() noexcept {
 inline std::atomic_bool gShowGtBoxes{false};
 inline std::atomic_bool gShowGtIds{false};
 inline std::atomic_bool gShowGtRanges{false};
+inline std::atomic_bool gShowGtSky{false};
+inline std::atomic_bool gShowGtDepth{false};
+inline std::atomic<float> gGtSkyOpacity{0.35F};
+inline std::atomic<float> gGtDepthOpacity{0.70F};
+inline std::atomic<float> gGtDepthNearM{1.0F};
+inline std::atomic<float> gGtDepthFarM{250.0F};
+inline std::atomic<media::GtMapStatus> gPresentedSkyStatus{media::GtMapStatus::Missing};
+inline std::atomic<media::GtMapStatus> gPresentedDepthStatus{media::GtMapStatus::Missing};
+inline std::atomic_bool gPresentedSkyMapReady{false};
+inline std::atomic_bool gPresentedDepthMapReady{false};
 inline std::atomic<media::GtStatus> gPresentedGtStatus{media::GtStatus::Missing};
 inline std::atomic_uint64_t gGtReadyFrames{0};
 inline std::atomic_uint64_t gGtNotReadyFrames{0};
@@ -62,6 +72,12 @@ inline std::atomic_uint64_t gGtMissingFrames{0};
 inline std::atomic_uint64_t gGtParseErrors{0};
 inline std::atomic_uint64_t gGtMismatchedFrames{0};
 
+inline bool showGtSky() noexcept {
+    return gShowGtSky.load(std::memory_order_relaxed);
+}
+inline bool showGtDepth() noexcept {
+    return gShowGtDepth.load(std::memory_order_relaxed);
+}
 inline bool showGtBoxes() noexcept {
     return gShowGtBoxes.load(std::memory_order_relaxed);
 }
