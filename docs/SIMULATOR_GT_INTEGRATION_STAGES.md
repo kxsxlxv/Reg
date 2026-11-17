@@ -33,6 +33,14 @@
 
 **Still outstanding:** side-by-side depth/RGB/sky comparison, cursor optical-Z readout, freeze-locked RGB+GT inspection, world pose/IMU time-series UI, actual GPU validation/performance/FPS on the Windows test bench. Shader compilation and Windows CI are not a substitute for an actual Vulkan RTSP smoke test.
 
+### Native-size KSM1/KDM1 → Raw RGB upscaling (November 17 follow-up)
+
+- Verified simulator fixture: RGB output **1920×1080**; both KSM1/KDM1 maps **480×270**; `source_size=[2112,1188]` is the renderer's internal sampling raster, **not** RGB frame dimensions. Never reject maps because native `source_size` differs from RGB. Identity remains strict on `stream_epoch`, `frame_id`, `source_time_ns`; each map must fit its own declared native raster.
+- Both layers automatically fill the **visible RGB video viewport** (letterbox-safe) using normalized UVs, regardless of map input resolution. This is GPU resampling; Reg does not ask the simulator to generate 1920×1080 KSM1/KDM1, and canonical GT bytes are never resized.
+- Separate UI toggles select Nearest or validity-aware Linear upscaling for each map. Default sky Nearest preserves hard binary boundaries. Default depth Linear averages only positive valid Z readings: Z=0 cannot dilute valid depth. Linear sky interpolates post-unpack binary coverage/validity as alpha, never compressed bytes.
+- A dedicated pre-FFmpeg decode callback enqueues compressed AU map metadata into the existing non-blocking GT worker before video decode, allowing CPU zstd/CRC verification to overlap Vulkan decoding. The worker's per-map counters, queue age and drops are visible on the GT tab. CRC32 is now lookup-table based instead of bit-at-a-time for 60 FPS.
+- MediaMTX `reader is too slow` means MediaMTX's output path cannot drain quickly enough; it is a separate sender/network/burst/reader issue, **not evidence of GT shader failure**. Check per-AU payload bitrate and packet loss as well as the Reg receive/decode counters. The current MediaMTX queue setting is normally `writeQueueSize`; increasing it only absorbs bursts and cannot solve sustained bandwidth saturation.
+
 ## Stage 4: verification, release (not yet satisfied)
 
 Required: deterministic parser/worker tests, real producer fixture hashes and negative cases, 1/10/60s domain statistics/contract, Windows CTest, Windows live Vulcan/RTSP/GT smoke, source-vs-Reg video pacing and CPU allocations, Jetson consumer parity. Compare performance versus RGB-only in a common replay, report median/P95/P99 for each observed population. No physical Reg-host or Jetson measurements available here; simulator RTSP/TCP 3174/3174 completeness is **not** Windows Reg FPS. Development preview binaries are for manual bench validation only; do not designate a stable release until hardware smoke and performance acceptance.
