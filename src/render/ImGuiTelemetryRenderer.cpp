@@ -5,6 +5,7 @@
 #include "app/RuntimeUiState.hpp"
 #include "render/ImGuiTheme.hpp"
 #include "render/VideoOverlayRecorder.hpp"
+#include "platform/SdlImGuiKeyMap.hpp"
 #include "vulkan/BlankRenderer.hpp"
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanContext.hpp"
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <mutex>
@@ -1075,6 +1077,8 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         MouseButton,
         MouseLeave,
         Focus,
+        Key,
+        Text,
     };
 
     struct PendingInputEvent {
@@ -1083,6 +1087,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         float y{};
         int button{-1};
         bool value{};
+        ImGuiKey key{ImGuiKey_None};
+        SDL_Keymod mods{};
+        std::string text;
     };
 
     explicit Impl(
@@ -1104,6 +1111,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     ImDrawData* drawData{nullptr};
     bool backendInitialized{false};
     bool eventWatchInstalled{false};
+    bool textInputActive{false};
     VkDescriptorPool descriptorPool{VK_NULL_HANDLE};
     VkSwapchainKHR observedSwapchain{VK_NULL_HANDLE};
     VkFormat observedFormat{VK_FORMAT_UNDEFINED};
@@ -1192,6 +1200,27 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 relevant = true;
             }
             break;
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+            if (event->key.windowID == self->windowId) {
+                input.kind = PendingInputKind::Key;
+                input.key = platform::sdlKeyToImGuiKey(
+                    event->key.key,event->key.scancode);
+                input.mods = event->key.mod;
+                input.value = event->type == SDL_EVENT_KEY_DOWN;
+                relevant = true;
+            }
+            break;
+        case SDL_EVENT_TEXT_INPUT:
+            if (event->text.windowID == self->windowId) {
+                // SDL text buffer is only guaranteed valid for the callback.
+                // Do not pass raw pointers across the event queue.
+                input.kind = PendingInputKind::Text;
+                input.text = event->text.text != nullptr
+                    ? event->text.text : "";
+                relevant = !input.text.empty();
+            }
+            break;
         default:
             break;
         }
@@ -1251,7 +1280,48 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             case PendingInputKind::Focus:
                 io.AddFocusEvent(event.value);
                 break;
+            case PendingInputKind::Key:
+                io.AddKeyEvent(ImGuiMod_Ctrl,
+                    (event.mods & SDL_KMOD_CTRL) != 0);
+                io.AddKeyEvent(ImGuiMod_Shift,
+                    (event.mods & SDL_KMOD_SHIFT) != 0);
+                io.AddKeyEvent(ImGuiMod_Alt,
+                    (event.mods & SDL_KMOD_ALT) != 0);
+                io.AddKeyEvent(ImGuiMod_Super,
+                    (event.mods & SDL_KMOD_GUI) != 0);
+                if (event.key != ImGuiKey_None)
+                    io.AddKeyEvent(event.key,event.value);
+                break;
+            case PendingInputKind::Text:
+                io.AddInputCharactersUTF8(event.text.c_str());
+                break;
             }
+        }
+    }
+
+    void synchronizeTextInput() {
+        // SDL3 IME/text input is scoped to its window. Raw remains the
+        // keyboard target when Raw is focused, including NetImgui/U.
+        const bool desired =
+            ImGui::GetIO().WantTextInput &&
+            SDL_GetKeyboardFocus() == window;
+        if (desired && !textInputActive) {
+            if (SDL_StartTextInput(window)) {
+                textInputActive = true;
+            } else {
+                std::cerr << "[telemetry] SDL_StartTextInput failed: "
+                          << SDL_GetError() << '\n';
+            }
+        } else if (!desired && textInputActive) {
+            static_cast<void>(SDL_StopTextInput(window));
+            textInputActive = false;
+        }
+    }
+
+    void stopTextInput() noexcept {
+        if (textInputActive && window != nullptr) {
+            static_cast<void>(SDL_StopTextInput(window));
+            textInputActive = false;
         }
     }
 
@@ -1707,6 +1777,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         ImGui::NewFrame();
         buildDashboard(snapshot, netImgui, extent, now);
         ImGui::Render();
+        synchronizeTextInput();
         drawData = ImGui::GetDrawData();
     }
 
@@ -1789,6 +1860,7 @@ ImGuiTelemetryRenderer::~ImGuiTelemetryRenderer() {
         return;
     }
     impl_->uninstallEventWatch();
+    impl_->stopTextInput();
     if (impl_->vulkan.device() != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(impl_->vulkan.device());
     }
