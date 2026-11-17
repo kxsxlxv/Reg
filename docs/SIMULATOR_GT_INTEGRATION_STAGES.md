@@ -16,7 +16,7 @@
 ## Stage 2: off-path map decode and capture policy (partly implemented)
 
 - `GtMapDecode` validates KSM1 bitpack/RLE8, LSB0 validity and FNV-1a, and KDM1 raw/Zstd shuffled float32 metres with CRC32, finite/positive pixels and exact expected lengths. It preserves canonical scalar bytes without normalization, colorization or CPU video readback.
-- `GtMapWorker` runs on a dedicated thread with bounded compressed task queue (24 MiB, 32), bounded ready cache (64 MiB, 16 entries, age 5s) and exact FrameKey lookup. It receives **no** `AVFrame` or `AVVkFrame`; it can be skipped under Live pressure without blocking hardware decoder.
+- `GtMapWorker` runs on a dedicated thread with bounded compressed task queue (24 MiB, 32), bounded fallback ready cache (96 MiB, 128 entries, age 5s) and per-AU immutable decoded results linked to each video frame and exact FrameKey lookup. It receives **no** `AVFrame` or `AVVkFrame`; it can be skipped under Live pressure without blocking hardware decoder.
 - CLI `--gt-capture-policy live|benchmark` defaults to Live. Benchmark requires recorder enabled. The existing asynchronous compressed recorder sees all demuxed original AUs before latest-frame display; queue overflow/failure makes the benchmark capture explicitly failed, not silently lossless.
 - Per-field statuses and worker queue/CRC/decode counters are exported in the existing opt-in read-only diagnostic API video section. Quantiles and fresh hardware measurements are not inferred.
 
@@ -41,6 +41,14 @@
 - A dedicated pre-FFmpeg decode callback enqueues compressed AU map metadata into the existing non-blocking GT worker before video decode, allowing CPU zstd/CRC verification to overlap Vulkan decoding. The worker's per-map counters, queue age and drops are visible on the GT tab. CRC32 is now lookup-table based instead of bit-at-a-time for 60 FPS.
 - MediaMTX `reader is too slow` means MediaMTX's output path cannot drain quickly enough; it is a separate sender/network/burst/reader issue, **not evidence of GT shader failure**. Check per-AU payload bitrate and packet loss as well as the Reg receive/decode counters. The current MediaMTX queue setting is normally `writeQueueSize`; increasing it only absorbs bursts and cannot solve sustained bandwidth saturation.
 
+### GT telemetry dashboard: compact cards & log optical-Z scale (November 17)
+
+- Match the established Launcher pattern (\`src/launcher/main.cpp\`): three equal-width auto-height coloured cards, labelled **GT BBOX**, **GT Небо**, **GT Карта глубины**, in a single row. Retain independent enable, BBox ID/range, sky/depth alpha, and Nearest/Linear controls. Depth has two compact numeric Z bounds.
+- Replace static verbose help text with hover tooltips. KSM1 has a cyan alpha-over-checker preview; KDM1 has a GPU-palette-matched three-stop colour ramp with **near / geometric midpoint / far in metres**. The ramp and shader use the same fixed logarithmic normalisation: \`t = clamp(log(max(z,near)/near) / log(far/near), 0, 1)\`. Invalid Z=0 remains fully transparent. No per-frame auto-scaling.
+- Hide all packet, parsing, IMU, queue, cache, per-AU and delay counters behind the initially **collapsed DEBUG** section. The expanded section lives in a separately scrolling child, leaving the three cards usable even when DEBUG is long. Collection and diagnostic APIs are unchanged.
+- A new pure-math \`GtDepthScale.hpp\` helper and \`gt_map_decode_tests\` check log near/mid/far, in particular that log midpoint is geometric, not arithmetic. GLSL is separately compiled to SPIR-V by the Windows build.
+- This redesign changes only the display interface and scalar-map colour transfer, **not** the KDM1 depth values, producer wire format, packet pacing, image sampling, or the FrameKey/PTS association.
+
 ## Stage 4: verification, release (not yet satisfied)
 
 Required: deterministic parser/worker tests, real producer fixture hashes and negative cases, 1/10/60s domain statistics/contract, Windows CTest, Windows live Vulcan/RTSP/GT smoke, source-vs-Reg video pacing and CPU allocations, Jetson consumer parity. Compare performance versus RGB-only in a common replay, report median/P95/P99 for each observed population. No physical Reg-host or Jetson measurements available here; simulator RTSP/TCP 3174/3174 completeness is **not** Windows Reg FPS. Development preview binaries are for manual bench validation only; do not designate a stable release until hardware smoke and performance acceptance.
@@ -49,7 +57,7 @@ Required: deterministic parser/worker tests, real producer fixture hashes and ne
 
 - **RTSP**: packet arrival and existing compressed-byte counts; AU metadata parse/identity errors remain separate from video decode.
 - **Decode**: exact Packet-PTS associations (bounded and invalidated on reconnect); optional GT processing never a Vulkan/FFmpeg fallback.
-- **Raw**: newest-frame-wins unchanged; existing presented-frame decision counters are not physical scanout; GT layers not yet displayed.
+- **Raw**: newest-frame-wins unchanged; existing presented-frame decision counters are not physical scanout; GT sky/depth overlays are displayed as independent optional Vulkan layers on matching frames.
 - **GT / worker**: independently count missing, not-ready, invalid and encoded sky/depth; FNV/CRC errors, queue drops/try-lock drops, fully validated maps, pending bytes/frames/age, decompression total/max microseconds. Counters process-lifetime; queue gauges are snapshots; no raw GT or high-cardinality frame labels through HTTP.
 - **Blackbox/Replay**: recorder queue losses make Benchmark failure explicit; no guarantee of complete archive after a loss or retention eviction.
 - **CVM1, NetImgui, Launcher and Vulkan presentation**: no semantic changes in Stage 1/2.
