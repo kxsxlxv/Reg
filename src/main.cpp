@@ -1287,11 +1287,13 @@ int runApplication(
                                 reg::app::gPresentedDepthStatus.store(
                                     latest->depthGt().status,std::memory_order_relaxed);
                                 reg::app::gPresentedSkyMapReady.store(
-                                    gtMaps && gtMaps->sky.status==reg::media::GtMapStatus::Ready,
+                                    rawRenderer.lastGtSkyDrawn(),
                                     std::memory_order_relaxed);
                                 reg::app::gPresentedDepthMapReady.store(
-                                    gtMaps && gtMaps->depth.status==reg::media::GtMapStatus::Ready,
+                                    rawRenderer.lastGtDepthDrawn(),
                                     std::memory_order_relaxed);
+                                reg::app::gPresentedGtGpuError.store(
+                                    rawRenderer.gtMapGpuError(),std::memory_order_relaxed);
                                 didWork = true;
 
                                 const auto count =
