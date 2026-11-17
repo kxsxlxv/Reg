@@ -16,6 +16,7 @@
 #include <implot.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -82,7 +83,7 @@ void gtOpacityControl(const char* id,std::atomic<float>& setting) {
     if(ImGui::SliderInt(id,&percent,0,100,"%d%%"))
         setting.store(static_cast<float>(percent)/100.0F,
                       std::memory_order_relaxed);
-    gtTooltip("Плотность цвета: 0%% — без слоя, 100%% — непрозрачный слой.");
+    gtTooltip("Плотность цвета: 0% — без слоя, 100% — непрозрачный слой.");
 }
 
 // Show true KSM1 tint as a translucent overlay against a small checkerboard.
