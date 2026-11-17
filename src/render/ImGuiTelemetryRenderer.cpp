@@ -1388,7 +1388,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                         ImVec4(0.095F,0.133F,0.185F,1.0F),
                         ImVec4(0.40F,0.80F,0.97F,1.0F))) {
                     bool enabled=app::showGtBoxes();
-                    gtCardHeading("GT BBOX",&enabled,
+                    gtCardHeading("GT BBOX",enabled,
                         ImVec4(0.40F,0.80F,0.97F,1.0F),
                         "Рамки Ground Truth поверх Raw. Клавиша T.");
                     if(enabled!=app::showGtBoxes())
