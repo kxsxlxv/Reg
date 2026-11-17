@@ -46,9 +46,9 @@ public:
     // Settings -> System -> Display -> Identify using active CCD
     // QueryDisplayConfig path ordering: Raw=3, Overlay=2, Telemetry=1.
     // Placement uses normal borderless monitor-sized windows rather than OS
-    // fullscreen state. Secondary output windows are created non-focusable so
-    // clicking them cannot trigger a foreground/focus transition between the
-    // three Vulkan presentation surfaces.
+    // fullscreen state. Passive CV Overlay is non-focusable, but Telemetry
+    // must be keyboard-focusable for numeric GT controls. Mouse-clicking Raw
+    // restores its keyboard focus and local/NetImgui shortcuts.
     bool placeWindowOnDisplay(
         SDL_Window* window,
         std::size_t logicalRole,
