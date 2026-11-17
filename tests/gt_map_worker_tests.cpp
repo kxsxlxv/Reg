@@ -78,6 +78,7 @@ int main() {
               "oldest of 80 forward-decoded masks remains for delayed RGB");
         check(static_cast<bool>(worker.find(FrameKey{9U,1079U})),
               "newest mask remains available too");
+        check(!worker.find(FrameKey{9U,99999U}),"missing key lookup test");
         const auto aheadStats=worker.stats();
         check(aheadStats.readyFrames>=80U &&
               aheadStats.cacheEvictedCapacity==0U &&
