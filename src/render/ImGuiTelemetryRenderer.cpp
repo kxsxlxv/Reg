@@ -45,16 +45,15 @@ const ImVec4 kWarningAmber{1.0F, 0.72F, 0.12F, 1.0F};
 const ImVec4 kErrorRed{1.0F, 0.35F, 0.32F, 1.0F};
 const ImVec4 kRtspAccent{0.66F, 0.57F, 0.95F, 1.0F};
 
-// Compact GT cards follow the same auto-height, subtly tinted child-card
-// pattern as Launcher. Every visible control has a tooltip instead of a
-// permanent explanatory paragraph.
+// Compact GT cards share a fixed three-row rhythm and aligned legends.
+// Tooltips carry explanatory text without changing card geometry.
 bool beginGtCard(const char* id,const ImVec4& tint,const ImVec4& accent) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg,tint);
     ImGui::PushStyleColor(
         ImGuiCol_Border,ImVec4(accent.x,accent.y,accent.z,0.35F));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(10.0F,9.0F));
     const bool visible=ImGui::BeginChild(
-        id,ImVec2(0.0F,119.0F),
+        id,ImVec2(0.0F,112.0F),
         ImGuiChildFlags_Borders|
             ImGuiChildFlags_AlwaysUseWindowPadding,
         ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
@@ -106,7 +105,9 @@ void drawGtSkyLegend(float opacity) {
                                 std::clamp(opacity,0.0F,1.0F))));
     draw->AddRect(origin,ImVec2(origin.x+width,origin.y+height),
                   IM_COL32(77,206,211,130));
-    gtTooltip("Бирюзовый — небо; неизвестные пиксели прозрачны. KSM1 растягивается на Raw RGB.");
+    gtTooltip("Бирюзовый — небо.\n"
+              "Неизвестные пиксели прозрачны.\n"
+              "KSM1 масштабируется на RGB.");
 }
 
 // The three palette stops MUST match depthColor() in shaders/gt_map.frag.
@@ -673,8 +674,14 @@ void drawPerformanceAndHealth(
     if (ImGui::BeginChild(
             "pipeline_health",
             ImVec2(0.0F, panelHeight),
-            ImGuiChildFlags_None)) {
+            ImGuiChildFlags_None,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        // Preserve every status without an internal scrollbar. Tight spacing
+        // buys vertical room while keeping the three sections readable.
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                            ImVec2(ImGui::GetStyle().ItemSpacing.x, 2.0F));
         drawPipelineHealth(counters);
+        ImGui::PopStyleVar();
     }
     ImGui::EndChild();
 
@@ -1420,6 +1427,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             if(boxesChanged)
                 app::setShowGtBoxes(enabled);
             gtTooltip("Рамки объектов на Raw.\nГорячая клавиша T.");
+            ImGui::Separator();
             bool ids=app::showGtIds();
             if(ImGui::Checkbox("ID##gt-ids",&ids))
                 app::setShowGtIds(ids);
@@ -1440,6 +1448,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             if(skyChanged)
                 app::gShowGtSky.store(enabled,std::memory_order_relaxed);
             gtTooltip("KSM1: маска неба на RGB.");
+            ImGui::Separator();
             const float right=ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x;
             gtOpacityControl("##gt-sky-opacity",app::gGtSkyOpacity,right);
             ImGui::SameLine();
@@ -1460,6 +1469,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 app::gShowGtDepth.store(enabled,std::memory_order_relaxed);
             gtTooltip("KDM1: оптическая глубина Z, м.\n"
                       "Логарифмическая цветовая шкала.");
+            ImGui::Separator();
             const float right=ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x;
             gtOpacityControl("##gt-depth-opacity",app::gGtDepthOpacity,right);
             ImGui::SameLine();
@@ -1682,7 +1692,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                       std::chrono::steady_clock::time_point now) {
         const float displayHeight=ImGui::GetContentRegionAvail().y;
         drawPerformanceAndHealth(snapshot.counters,rateHistory,
-            std::clamp(displayHeight*0.35F,160.0F,320.0F));
+            std::clamp(displayHeight*0.42F,390.0F,440.0F));
         ImGui::SeparatorText("GT");
         if(ImGui::CollapsingHeader("Настройки##gt-settings",
                 ImGuiTreeNodeFlags_DefaultOpen)) {
