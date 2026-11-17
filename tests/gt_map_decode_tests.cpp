@@ -1,10 +1,13 @@
 #include "media/GtMapDecode.hpp"
+#include "render/GtDepthScale.hpp"
 
 #include <zstd.h>
 
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -99,6 +102,24 @@ int main() {
         depth.validPixels=2U;depth.encoded[0]^=0xffU;
         check(decodeGtMap(depth).status==GtMapStatus::Invalid,
               "malformed zstd cannot contaminate RGB");
+        // Logarithmic optical-Z colour scale and visual legend must agree.
+        // Unlike a linear 1-250 m scale, the halfway palette colour is
+        // reached at sqrt(250) metres, preserving near-range contrast.
+        const float nearZ=1.0F,farZ=250.0F;
+        const float middle=reg::render::gtDepthLogMidpoint(nearZ,farZ);
+        check(std::abs(reg::render::gtDepthLogPosition(nearZ,nearZ,farZ))<1e-6F,
+              "log-Z near bound red");
+        check(std::abs(reg::render::gtDepthLogPosition(middle,nearZ,farZ)-0.5F)<1e-5F,
+              "log-Z midpoint matches visual legend");
+        check(std::abs(reg::render::gtDepthLogPosition(farZ,nearZ,farZ)-1.0F)<1e-6F,
+              "log-Z far bound blue");
+        check(reg::render::gtDepthLogPosition(100.0F,nearZ,farZ)>
+              (100.0F-nearZ)/(farZ-nearZ),
+              "log-Z spreads nearer distances across more palette");
+        check(reg::render::gtDepthLogPosition(0.0F,nearZ,farZ)<0.0F &&
+              reg::render::gtDepthLogPosition(
+                  std::numeric_limits<float>::quiet_NaN(),nearZ,farZ)<0.0F,
+              "invalid optical Z remains transparent");
         std::cout<<"gt_map_decode_tests: PASS\n";
     } catch(const std::exception& e) {
         std::cerr<<"gt_map_decode_tests: FAIL "<<e.what()<<'\n';
