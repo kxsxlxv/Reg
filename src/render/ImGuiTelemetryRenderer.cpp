@@ -632,8 +632,7 @@ void drawPerformanceGraph(
 
 void drawPerformanceAndHealth(
     const telemetry::Counters& counters,
-    const RateHistory& history,
-    float panelHeight) {
+    const RateHistory& history) {
     const float availableWidth = ImGui::GetContentRegionAvail().x;
     const float healthWidth = std::clamp(
         availableWidth * 0.34F,
@@ -657,31 +656,33 @@ void drawPerformanceAndHealth(
         healthWidth);
     ImGui::TableNextRow();
 
-    ImGui::TableNextColumn();
-    if (ImGui::BeginChild(
-            "performance_panel",
-            ImVec2(0.0F, panelHeight),
-            ImGuiChildFlags_None)) {
-        ImGui::SeparatorText("ПРОИЗВОДИТЕЛЬНОСТЬ");
-        drawRateStatsTable(history);
-        ImGui::Spacing();
-        const float graphHeight = ImGui::GetContentRegionAvail().y;
-        drawPerformanceGraph(history, graphHeight);
-    }
-    ImGui::EndChild();
-
-    ImGui::TableNextColumn();
+    // Lay out the status column first. Its auto-height is the single source
+    // of truth for the FPS panel and prevents empty space or clipped statuses.
+    ImGui::TableSetColumnIndex(1);
+    float healthHeight = 0.0F;
     if (ImGui::BeginChild(
             "pipeline_health",
-            ImVec2(0.0F, panelHeight),
-            ImGuiChildFlags_None,
+            ImVec2(0.0F, 0.0F),
+            ImGuiChildFlags_AutoResizeY,
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-        // Preserve every status without an internal scrollbar. Tight spacing
-        // buys vertical room while keeping the three sections readable.
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
                             ImVec2(ImGui::GetStyle().ItemSpacing.x, 2.0F));
         drawPipelineHealth(counters);
         ImGui::PopStyleVar();
+    }
+    ImGui::EndChild();
+    healthHeight = ImGui::GetItemRectSize().y;
+
+    ImGui::TableSetColumnIndex(0);
+    if (ImGui::BeginChild(
+            "performance_panel",
+            ImVec2(0.0F, healthHeight),
+            ImGuiChildFlags_None,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        ImGui::SeparatorText("ПРОИЗВОДИТЕЛЬНОСТЬ");
+        drawRateStatsTable(history);
+        ImGui::Spacing();
+        drawPerformanceGraph(history, ImGui::GetContentRegionAvail().y);
     }
     ImGui::EndChild();
 
@@ -1690,9 +1691,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
 
     void drawOverview(const telemetry::Snapshot& snapshot,
                       std::chrono::steady_clock::time_point now) {
-        const float displayHeight=ImGui::GetContentRegionAvail().y;
-        drawPerformanceAndHealth(snapshot.counters,rateHistory,
-            std::clamp(displayHeight*0.42F,390.0F,440.0F));
+        drawPerformanceAndHealth(snapshot.counters,rateHistory);
         ImGui::SeparatorText("GT");
         if(ImGui::CollapsingHeader("Настройки##gt-settings",
                 ImGuiTreeNodeFlags_DefaultOpen)) {
