@@ -849,6 +849,11 @@ int runApplication(
         };
 
         reg::video::VideoFramePtr lastRawPresented;
+        // Never present an encoded GT frame before its own AU result has had
+        // a small chance to finish. This does not block RTSP/decode threads.
+        reg::video::VideoFramePtr rawGtWaitingFrame;
+        std::chrono::steady_clock::time_point rawGtWaitSince{};
+        std::uint64_t gtAttachedReady{0},gtDeferred{0},gtWaitTimedOut{0};
         std::uint64_t rawRenderNotReadyAttempts{0};
         double rawRenderAttemptTotalMs{0.0};
         std::optional<reg::video::SynchronizedFrame>
@@ -1045,6 +1050,7 @@ int runApplication(
 
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
+                    rawGtWaitingFrame.reset();
                     trackHistory.clear();
                     telemetryModel.clearTargets();
                     telemetryModel.log(
@@ -1200,9 +1206,39 @@ int runApplication(
                     }
                 } else {
                     const auto latest = rawMailbox.latest();
+                    bool deferRawForGt = false;
+                    if(latest && latest!=lastRawPresented &&
+                       rawWindow.available()) {
+                        const auto& parts=latest->allGt();
+                        const bool requestedEncoded=
+                            (reg::app::showGtSky() &&
+                             parts.sky.status==reg::media::GtMapStatus::Encoded) ||
+                            (reg::app::showGtDepth() &&
+                             parts.depth.status==reg::media::GtMapStatus::Encoded);
+                        if(requestedEncoded && parts.decodedMaps &&
+                           !parts.decodedMaps->ready.load(std::memory_order_acquire)) {
+                            if(rawGtWaitingFrame!=latest) {
+                                rawGtWaitingFrame=latest;
+                                rawGtWaitSince=loopNow;
+                            }
+                            if(loopNow-rawGtWaitSince<
+                               std::chrono::milliseconds{8}) {
+                                deferRawForGt=true;
+                                ++gtDeferred;
+                            } else {
+                                ++gtWaitTimedOut;
+                                rawGtWaitingFrame.reset();
+                            }
+                        } else {
+                            rawGtWaitingFrame.reset();
+                        }
+                    } else if(!latest || latest==lastRawPresented) {
+                        rawGtWaitingFrame.reset();
+                    }
                     if (latest &&
                         latest != lastRawPresented &&
-                        rawWindow.available()) {
+                        rawWindow.available() &&
+                        !deferRawForGt) {
                         try {
                             const auto renderBegin =
                                 std::chrono::steady_clock::now();
@@ -1242,7 +1278,18 @@ int runApplication(
                             };
                             if (mapStyle.sky || mapStyle.depth) {
                                 if (const auto id=latest->identity()) {
-                                    gtMaps=gtMapWorker.find(id->key);
+                                    // Prefer the immutable decoded result
+                                    // attached to this exact compressed AU.
+                                    // It survives arbitrary eviction of the
+                                    // worker's bounded global frame cache.
+                                    const auto parts=latest->gtParts();
+                                    if(parts->decodedMaps) {
+                                        gtMaps=parts->decodedMaps->ready.load(
+                                            std::memory_order_acquire);
+                                        if(gtMaps)++gtAttachedReady;
+                                    } else {
+                                        gtMaps=gtMapWorker.find(id->key);
+                                    }
                                     if (gtMaps) {
                                         const auto selected=reg::media::selectGtDisplayLayers(
                                             latest->allGt(),*gtMaps,
@@ -1628,6 +1675,9 @@ int runApplication(
                             .gtWorkerQueueBytes = mapStats.pendingBytes,
                             .gtWorkerQueueFrames = mapStats.pendingFrames,
                             .gtWorkerQueueAgeMs = mapStats.oldestPendingAgeMs,
+                            .gtFrameAttachedReady = gtAttachedReady,
+                            .gtFrameDeferred = gtDeferred,
+                            .gtFrameDeferredTimeout = gtWaitTimedOut,
                             .gtWorkerCacheFrames = mapStats.readyFrames,
                             .gtWorkerCacheBytes = mapStats.readyBytes,
                             .gtWorkerEvictedAge = mapStats.cacheEvictedAge,
