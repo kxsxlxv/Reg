@@ -1345,6 +1345,19 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         ImGui::Text("Декодирование суммарно / max: %llu / %llu us",
             static_cast<unsigned long long>(counters.gtWorkerTotalUs),
             static_cast<unsigned long long>(counters.gtWorkerMaxUs));
+        ImGui::Text("Готовый кэш: %zu кадр. / %zu MiB (макс. 128 / 96 MiB)",
+            counters.gtWorkerCacheFrames,counters.gtWorkerCacheBytes/(1024U*1024U));
+        ImGui::Text("GT lookup: hit %llu | miss %llu | busy %llu",
+            static_cast<unsigned long long>(counters.gtWorkerLookupHits),
+            static_cast<unsigned long long>(counters.gtWorkerLookupMisses),
+            static_cast<unsigned long long>(counters.gtWorkerLookupBusy));
+        ImGui::Text("Вытеснено: по возрасту %llu | по лимиту %llu",
+            static_cast<unsigned long long>(counters.gtWorkerEvictedAge),
+            static_cast<unsigned long long>(counters.gtWorkerEvictedCapacity));
+        const auto mapCount=std::min(counters.gtWorkerSkyReady,counters.gtWorkerDepthReady);
+        if(mapCount>counters.decodedFrames)
+            ImGui::Text("GT ahead of RGB decode: %llu frames",
+                static_cast<unsigned long long>(mapCount-counters.decodedFrames));
         ImGui::TextDisabled("Encoded: GT принят, но не гарантирует готовность GPU-слоя.");
         ImGui::SeparatorText("GT / BBOX");
         bool showBoxes = app::showGtBoxes();
