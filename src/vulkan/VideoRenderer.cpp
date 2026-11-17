@@ -153,6 +153,8 @@ void VideoRenderer::resetVideoSession() {
     // Reconnect invalidates the previous decoder-session map identity.
     gtMapCompositor_.reset();
     gtMapCompositorDisabled_ = false;
+    lastGtSkyDrawn_ = false;
+    lastGtDepthDrawn_ = false;
 }
 
 bool VideoRenderer::requestScreenshot(
@@ -1310,6 +1312,8 @@ bool VideoRenderer::render(
 
         if (drawGtMaps)
             gtMapCompositor_->draw(slot.commandBuffer,nextFrameSlot_,style);
+        lastGtSkyDrawn_ = drawGtMaps && style.sky;
+        lastGtDepthDrawn_ = drawGtMaps && style.depth;
 
         if (overlay != nullptr) {
             overlay->record(
