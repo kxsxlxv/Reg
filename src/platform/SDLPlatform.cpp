@@ -720,7 +720,7 @@ bool SDLPlatform::pollQuitRequested() {
             (event.key.mod & SDL_KMOD_SHIFT) != 0 &&
             (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0 &&
             remote::gRemoteTextFocus.load(std::memory_order_relaxed) !=
-                remote::RemoteTextFocus::Editing {
+                remote::RemoteTextFocus::Editing) {
             app::toggleRangeTimelinePaused();
         }
 
