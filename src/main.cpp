@@ -1079,6 +1079,7 @@ int runApplication(
                         sessionGeneration;
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
+                    rawGtWaitingFrame.reset();
                     trackHistory.clear();
                     telemetryModel.clearTargets();
                     didWork = true;
@@ -1122,6 +1123,7 @@ int runApplication(
                         exactSyncDiagnostics.clearPending();
                         pendingOverlayFrame.reset();
                         lastRawPresented.reset();
+                        rawGtWaitingFrame.reset();
                         trackHistory.clear();
                         telemetryModel.clearTargets();
                         telemetryModel.log(
