@@ -51,6 +51,40 @@ int main() {
         worker.reset();
         check(!worker.find(key) && worker.stats().sessionResets==1U,
               "new session evicts prior decoded maps");
+        // Regression: the AU worker can be 40+ frames ahead of Vulkan
+        // decoded video. The old 16-frame cache silently evicted every
+        // correctly decoded map before Raw presentation at ~60 FPS.
+        for (std::uint64_t n=0;n<80U;++n) {
+            auto ahead=std::make_shared<FrameGtParts>();
+            ahead->source=SourceFrameIdentity{
+                .key={9U,1000U+n},.sourceTimeNs=1000000U+n};
+            ahead->sky.kind=GtMapKind::Sky;
+            ahead->sky.status=GtMapStatus::Encoded;
+            ahead->sky.width=32U;ahead->sky.height=16U;
+            ahead->sky.rawBytes=64U;
+            ahead->sky.codec="bitpack";
+            ahead->sky.encoded=std::vector<std::uint8_t>(64U,0xa5U);
+            ahead->sky.checksum=fnv(ahead->sky.encoded);
+            check(worker.submit(ahead),"ahead-of-RGB map submitted");
+            const auto until=std::chrono::steady_clock::now()+
+                std::chrono::seconds(2);
+            while(!worker.find(ahead->source->key) &&
+                  std::chrono::steady_clock::now()<until)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            check(static_cast<bool>(worker.find(ahead->source->key)),
+                  "map available after asynchronous decode");
+        }
+        check(static_cast<bool>(worker.find(FrameKey{9U,1000U})),
+              "oldest of 80 forward-decoded masks remains for delayed RGB");
+        check(static_cast<bool>(worker.find(FrameKey{9U,1079U})),
+              "newest mask remains available too");
+        const auto aheadStats=worker.stats();
+        check(aheadStats.readyFrames>=80U &&
+              aheadStats.cacheEvictedCapacity==0U &&
+              aheadStats.lookupHits>0U &&
+              aheadStats.lookupMisses>0U,
+              "cache and lookup diagnostics across 80 GT frames");
+        worker.reset();
         // A decoded GPU texture must never migrate to another video frame.
         FrameGtParts frame;
         frame.source=SourceFrameIdentity{.key={7U,42U},.sourceTimeNs=123456789U};
