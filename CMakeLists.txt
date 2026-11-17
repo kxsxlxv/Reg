@@ -375,6 +375,24 @@ if(REG_BUILD_TESTS)
     endif()
     add_test(NAME gt_au_journal COMMAND reg_gt_au_journal_tests)
 
+    # The native telemetry renderer receives SDL key and UTF-8 events via
+    # its own window-scoped event watch, sharing Raw's SDL->ImGui mapping.
+    add_executable(reg_telemetry_keyboard_routing_tests
+        tests/telemetry_keyboard_routing_tests.cpp)
+    target_include_directories(reg_telemetry_keyboard_routing_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_telemetry_keyboard_routing_tests PRIVATE
+        SDL3::SDL3 reg_imgui)
+    if(MSVC)
+        target_compile_options(reg_telemetry_keyboard_routing_tests PRIVATE
+            /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(reg_telemetry_keyboard_routing_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+    add_test(NAME telemetry_keyboard_routing
+        COMMAND reg_telemetry_keyboard_routing_tests)
+
     add_executable(reg_gt_map_worker_tests
         tests/gt_map_worker_tests.cpp
         src/media/GtMapWorker.cpp
