@@ -85,6 +85,10 @@ public:
     bool requestScreenshot(
         std::filesystem::path path);
 
+    bool lastGtSkyDrawn() const noexcept { return lastGtSkyDrawn_; }
+    bool lastGtDepthDrawn() const noexcept { return lastGtDepthDrawn_; }
+    bool gtMapGpuError() const noexcept { return gtMapCompositorDisabled_; }
+
     bool screenshotPending() const noexcept {
         return pendingScreenshot_.has_value();
     }
@@ -230,6 +234,8 @@ private:
     VkPipeline pipeline_{VK_NULL_HANDLE};
     std::unique_ptr<GtMapCompositor> gtMapCompositor_;
     bool gtMapCompositorDisabled_{false};
+    bool lastGtSkyDrawn_{false};
+    bool lastGtDepthDrawn_{false};
     VkFormat pipelineSwapchainFormat_{VK_FORMAT_UNDEFINED};
 
     VkSwapchainKHR observedSwapchain_{VK_NULL_HANDLE};
