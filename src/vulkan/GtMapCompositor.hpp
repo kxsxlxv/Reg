@@ -17,6 +17,8 @@ namespace reg::vulkan {
 struct GtMapStyle {
     bool sky{false};
     bool depth{false};
+    bool skySmooth{false};
+    bool depthSmooth{true};
     float skyOpacity{0.35F};
     float depthOpacity{0.70F};
     float nearM{1.0F};
