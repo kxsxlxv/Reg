@@ -64,7 +64,11 @@ inline std::atomic_bool gGtSkySmooth{false};
 inline std::atomic_bool gGtDepthSmooth{true};
 inline std::atomic<float> gGtDepthOpacity{0.70F};
 inline std::atomic<float> gGtDepthNearM{1.0F};
-inline std::atomic<float> gGtDepthFarM{250.0F};
+// Outdoor/aerial KDM1 often extends well beyond 250 m. A 250 m
+// default saturated all farther pixels at the same blue stop, even when
+// the colour transfer was logarithmic. Explicit user near/far overrides
+// remain available on the GT depth card.
+inline std::atomic<float> gGtDepthFarM{5000.0F};
 inline std::atomic<media::GtMapStatus> gPresentedSkyStatus{media::GtMapStatus::Missing};
 inline std::atomic<media::GtMapStatus> gPresentedDepthStatus{media::GtMapStatus::Missing};
 inline std::atomic_bool gPresentedSkyMapReady{false};
