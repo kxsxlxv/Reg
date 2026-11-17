@@ -59,6 +59,9 @@ struct Counters {
     std::uint64_t gtWorkerTotalUs{},gtWorkerMaxUs{};
     std::size_t gtWorkerQueueBytes{},gtWorkerQueueFrames{};
     std::uint64_t gtWorkerQueueAgeMs{};
+    std::size_t gtWorkerCacheFrames{},gtWorkerCacheBytes{};
+    std::uint64_t gtWorkerEvictedAge{},gtWorkerEvictedCapacity{};
+    std::uint64_t gtWorkerLookupHits{},gtWorkerLookupMisses{},gtWorkerLookupBusy{};
     bool gtBenchmarkEnabled{};
     bool gtBenchmarkFailed{};
     std::uint64_t gtArchiveAccepted{},gtArchiveWritten{},gtArchiveDropped{},
