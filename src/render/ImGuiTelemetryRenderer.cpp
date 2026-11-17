@@ -1299,7 +1299,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 case media::GtMapStatus::NotReady:return "not_ready";
                 case media::GtMapStatus::AmbiguousViewport:return "ambiguous_viewport";
                 case media::GtMapStatus::Unavailable:return "unavailable";
-                case media::GtMapStatus::Encoded:return "decoded by worker pending";
+                case media::GtMapStatus::Encoded:return "encoded (worker asynchronous)";
                 case media::GtMapStatus::Ready:return "ready";
                 case media::GtMapStatus::Invalid:return "invalid";
                 case media::GtMapStatus::FrameMismatch:return "frame_mismatch";
@@ -1310,6 +1310,25 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     app::gPresentedSkyMapReady.load()?"ready":"absent");
         ImGui::Text("Глубина: %s | GPU map: %s",mapName(depthStatus),
                     app::gPresentedDepthMapReady.load()?"ready":"absent");
+        ImGui::SeparatorText("GT / KSM1-KDM1 WORKER");
+        ImGui::Text("Небо декодировано / ошибочно: %llu / %llu",
+            static_cast<unsigned long long>(counters.gtWorkerSkyReady),
+            static_cast<unsigned long long>(counters.gtWorkerInvalidSky));
+        ImGui::Text("Глубина декодирована / ошибочно: %llu / %llu",
+            static_cast<unsigned long long>(counters.gtWorkerDepthReady),
+            static_cast<unsigned long long>(counters.gtWorkerInvalidDepth));
+        ImGui::Text("Ошибок CRC/FNV: %llu | queue drops: %llu | lock drops: %llu",
+            static_cast<unsigned long long>(counters.gtWorkerChecksumFailures),
+            static_cast<unsigned long long>(counters.gtWorkerQueueDrops),
+            static_cast<unsigned long long>(counters.gtWorkerLockDrops));
+        ImGui::Text("Очередь: %zu кадр. / %zu KiB | возраст: %llu ms",
+            counters.gtWorkerQueueFrames,
+            counters.gtWorkerQueueBytes/1024U,
+            static_cast<unsigned long long>(counters.gtWorkerQueueAgeMs));
+        ImGui::Text("Декодирование суммарно / max: %llu / %llu us",
+            static_cast<unsigned long long>(counters.gtWorkerTotalUs),
+            static_cast<unsigned long long>(counters.gtWorkerMaxUs));
+        ImGui::TextDisabled("Encoded: GT принят, но не гарантирует готовность GPU-слоя.");
         ImGui::SeparatorText("GT / BBOX");
         bool showBoxes = app::showGtBoxes();
         if (ImGui::Checkbox("Показывать GT bbox (T / Е)", &showBoxes)) {
