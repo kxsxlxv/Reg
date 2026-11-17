@@ -1274,12 +1274,18 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         float skyAlpha=app::gGtSkyOpacity.load(std::memory_order_relaxed);
         if(ImGui::SliderFloat("Прозрачность неба",&skyAlpha,0.0F,1.0F,"%.2f"))
             app::gGtSkyOpacity.store(skyAlpha,std::memory_order_relaxed);
+        bool smoothSky=app::gGtSkySmooth.load(std::memory_order_relaxed);
+        if(ImGui::Checkbox("Сглаживать маску (Linear)",&smoothSky))
+            app::gGtSkySmooth.store(smoothSky,std::memory_order_relaxed);
         bool depth=app::showGtDepth();
         if(ImGui::Checkbox("Карта глубины KDM1 (optical Z)",&depth))
             app::gShowGtDepth.store(depth,std::memory_order_relaxed);
         float depthAlpha=app::gGtDepthOpacity.load(std::memory_order_relaxed);
         if(ImGui::SliderFloat("Прозрачность глубины",&depthAlpha,0.0F,1.0F,"%.2f"))
             app::gGtDepthOpacity.store(depthAlpha,std::memory_order_relaxed);
+        bool smoothDepth=app::gGtDepthSmooth.load(std::memory_order_relaxed);
+        if(ImGui::Checkbox("Сглаживать глубину (Linear, Z=0 прозрачен)",&smoothDepth))
+            app::gGtDepthSmooth.store(smoothDepth,std::memory_order_relaxed);
         float nearM=app::gGtDepthNearM.load(std::memory_order_relaxed);
         float farM=app::gGtDepthFarM.load(std::memory_order_relaxed);
         if(ImGui::DragFloat("Ближний Z, м",&nearM,0.5F,0.0F,10000.0F,"%.1f")) {
@@ -1290,7 +1296,15 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             app::gGtDepthFarM.store(std::max(farM,nearM+0.1F),std::memory_order_relaxed);
         ImGui::TextDisabled("Z: тёплые цвета = ближе, синие = дальше; 0 = нет глубины.");
         ImGui::TextDisabled("KSM1: бирюзовый = небо, неизвестные пиксели прозрачны.");
+        ImGui::TextDisabled("Маска и глубина растягиваются на область Raw RGB.");
+        ImGui::TextDisabled("Nearest: без сглаживания; Linear: плавные границы.");
         ImGui::TextDisabled("Маска и карта строго совпадают с FrameKey Raw-кадра.");
+        const auto rawW=app::gPresentedRawWidth.load(std::memory_order_relaxed);
+        const auto rawH=app::gPresentedRawHeight.load(std::memory_order_relaxed);
+        ImGui::Text("KSM1: %ux%u -> Raw %ux%u",
+            app::gPresentedSkyWidth.load(),app::gPresentedSkyHeight.load(),rawW,rawH);
+        ImGui::Text("KDM1: %ux%u -> Raw %ux%u",
+            app::gPresentedDepthWidth.load(),app::gPresentedDepthHeight.load(),rawW,rawH);
         const auto skyStatus=app::gPresentedSkyStatus.load(std::memory_order_relaxed);
         const auto depthStatus=app::gPresentedDepthStatus.load(std::memory_order_relaxed);
         const auto mapName=[](media::GtMapStatus s) {
