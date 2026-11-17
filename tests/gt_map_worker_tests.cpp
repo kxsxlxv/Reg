@@ -58,13 +58,13 @@ int main() {
         frame.sky.status=GtMapStatus::Encoded;
         frame.sky.sourceValid=true;
         frame.sky.source=*frame.source;
-        frame.sky.sourceWidth=1920;frame.sky.sourceHeight=1080;
+        frame.sky.sourceWidth=2112;frame.sky.sourceHeight=1188;
         frame.sky.width=480;frame.sky.height=270;
         frame.depth.kind=GtMapKind::Depth;
         frame.depth.status=GtMapStatus::Encoded;
         frame.depth.sourceValid=true;
         frame.depth.source=*frame.source;
-        frame.depth.sourceWidth=1920;frame.depth.sourceHeight=1080;
+        frame.depth.sourceWidth=2112;frame.depth.sourceHeight=1188;
         frame.depth.width=480;frame.depth.height=270;
         GtDecodedBundle decoded;
         decoded.identity=*frame.source;
@@ -77,15 +77,17 @@ int main() {
         decoded.depth.width=480;decoded.depth.height=270;
         decoded.depth.raw=std::make_shared<const std::vector<std::uint8_t>>(518400U,0U);
         auto selected=selectGtDisplayLayers(frame,decoded,1920,1080,true,true);
-        check(selected.sky && selected.depth,"both independent scalar maps");
+        check(selected.sky && selected.depth,
+              "2112x1188 internal source raster must map to 1920x1080 RGB");
         decoded.identity.sourceTimeNs++;
         selected=selectGtDisplayLayers(frame,decoded,1920,1080,true,true);
         check(!selected.sky && !selected.depth,"no source timestamp reuse");
         decoded.identity=*frame.source;
-        frame.sky.sourceWidth=1280U;
+        frame.sky.sourceWidth=320U;
         selected=selectGtDisplayLayers(frame,decoded,1920,1080,true,true);
-        check(!selected.sky && selected.depth,"sky raster mismatch must not suppress depth");
-        frame.sky.sourceWidth=1920U;
+        check(!selected.sky && selected.depth,
+              "native raster smaller than its sky map is independently rejected");
+        frame.sky.sourceWidth=2112U;
         selected=selectGtDisplayLayers(frame,decoded,1920,1080,false,true);
         check(!selected.sky && selected.depth,"UI toggles are per-layer");
         std::cout<<"gt_map_worker_tests: PASS\n";
