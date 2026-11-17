@@ -186,12 +186,15 @@ int runApplication(
         }
 
         if (options.telemetryEnabled) {
+            // Telemetry hosts editable ImGui controls. Unlike passive
+            // CV Overlay, this window MUST be keyboard-focusable; Raw
+            // receives its own U/T/NetImgui keys again when refocused.
             SDL_Window* telemetrySdlWindow =
                 platform.createVulkanWindow(
                     "Reg - Telemetry",
                     1280,
                     720,
-                    false);
+                    true);
 
             if (!platform.placeWindowOnDisplay(
                     telemetrySdlWindow,
