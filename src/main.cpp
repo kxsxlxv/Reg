@@ -494,6 +494,12 @@ int runApplication(
                                                 std::move(packet)));
                                     }
                                 },
+                            .onGtParts =
+                                [&](std::shared_ptr<const reg::media::FrameGtParts> parts) {
+                                    // Queue compressed maps before hardware
+                                    // video decode so both paths can overlap.
+                                    static_cast<void>(gtMapWorker.submit(std::move(parts)));
+                                },
                             .onFrame =
                                 [&](reg::video::VideoFramePtr frame) {
                                     const auto identity =
@@ -543,9 +549,6 @@ int runApplication(
                                     reg::app::observeGt(frame->gt().status);
                                     gtIngestStats.observe(frame->gt());
                                     gtIngestStats.observeMaps(frame->allGt());
-                                    // Compressed GT is independent of AVVkFrame
-                                    // lifetime. Never decompress on decoder thread.
-                                    static_cast<void>(gtMapWorker.submit(frame->gtParts()));
                                     telemetryModel.observeGtRange(
                                         frame->gt(), frame->decodedAt());
                                     rawMailbox.publish(frame);
