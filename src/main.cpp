@@ -1233,6 +1233,8 @@ int runApplication(
                             reg::vulkan::GtMapStyle mapStyle{
                                 .sky=reg::app::showGtSky(),
                                 .depth=reg::app::showGtDepth(),
+                                .skySmooth=reg::app::gGtSkySmooth.load(),
+                                .depthSmooth=reg::app::gGtDepthSmooth.load(),
                                 .skyOpacity=reg::app::gGtSkyOpacity.load(),
                                 .depthOpacity=reg::app::gGtDepthOpacity.load(),
                                 .nearM=reg::app::gGtDepthNearM.load(),
@@ -1274,6 +1276,12 @@ int runApplication(
                                 reg::app::gPresentedGtStatus.store(
                                     latest->gt().status,
                                     std::memory_order_relaxed);
+                                reg::app::gPresentedRawWidth.store(static_cast<std::uint32_t>(latest->width()));
+                                reg::app::gPresentedRawHeight.store(static_cast<std::uint32_t>(latest->height()));
+                                reg::app::gPresentedSkyWidth.store(latest->skyGt().width);
+                                reg::app::gPresentedSkyHeight.store(latest->skyGt().height);
+                                reg::app::gPresentedDepthWidth.store(latest->depthGt().width);
+                                reg::app::gPresentedDepthHeight.store(latest->depthGt().height);
                                 reg::app::gPresentedSkyStatus.store(
                                     latest->skyGt().status,std::memory_order_relaxed);
                                 reg::app::gPresentedDepthStatus.store(
