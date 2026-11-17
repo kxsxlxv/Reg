@@ -1,5 +1,6 @@
 #include "render/ImGuiTelemetryRenderer.hpp"
 #include "render/GtRangeDashboard.hpp"
+#include "render/GtDepthScale.hpp"
 
 #include "app/RuntimeUiState.hpp"
 #include "render/ImGuiTheme.hpp"
@@ -133,7 +134,7 @@ void drawGtDepthLegend(float nearM,float farM) {
     }
     char nearText[32]{},midText[32]{},farText[32]{};
     std::snprintf(nearText,sizeof(nearText),"%.1f м",nearM);
-    std::snprintf(midText,sizeof(midText),"%.1f м",std::sqrt(nearM*farM));
+    std::snprintf(midText,sizeof(midText),"%.1f м",gtDepthLogMidpoint(nearM,farM));
     std::snprintf(farText,sizeof(farText),"%.1f м",farM);
     const ImU32 color=ImGui::GetColorU32(ImGuiCol_TextDisabled);
     draw->AddText(ImVec2(origin.x,origin.y+barHeight+4.0F),color,nearText);
