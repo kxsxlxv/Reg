@@ -3,6 +3,7 @@
 #include "media/GtSei.hpp"
 #include "media/H264AuSei.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -14,11 +15,21 @@
 
 namespace reg::media {
 
+// The compressed AU and the Vulkan-decoded AVFrame share the SAME GT parts.
+// A separately decoded result can be published through this lifetime-scoped
+// slot without relying on an evictable global FrameKey cache. Only the worker
+// writes; render and decoder threads may read concurrently.
+struct GtDecodedBundle;
+struct GtMapResultSlot {
+    std::atomic<std::shared_ptr<const GtDecodedBundle>> ready{};
+};
+
 struct FrameGtParts final {
     std::optional<SourceFrameIdentity> source;
     GtMetadata bbox;
     GtMapMetadata sky{};
     GtMapMetadata depth{};
+    std::shared_ptr<GtMapResultSlot> decodedMaps;
     std::uint32_t unknownSei{};
     std::uint32_t identicalDuplicates{};
     std::uint32_t conflictingFields{};
@@ -59,6 +70,9 @@ inline std::shared_ptr<FrameGtParts> makeGtParts(H264AuSei au) {
     if (au.conflicts[0]) result->source.reset();
     validateGtMapForFrame(result->sky,result->source);
     validateGtMapForFrame(result->depth,result->source);
+    if(result->source && (result->sky.status==GtMapStatus::Encoded ||
+                          result->depth.status==GtMapStatus::Encoded))
+        result->decodedMaps=std::make_shared<GtMapResultSlot>();
     return result;
 }
 
