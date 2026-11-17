@@ -80,9 +80,17 @@ bool GtMapWorker::submit(std::shared_ptr<const FrameGtParts> parts) noexcept {
 std::shared_ptr<const GtDecodedBundle>
 GtMapWorker::find(const FrameKey& key) const noexcept {
     std::unique_lock lock(mutex_,std::try_to_lock);
-    if(!lock.owns_lock()) return {};
+    if(!lock.owns_lock()) {
+        lookupBusy_.fetch_add(1U,std::memory_order_relaxed);
+        return {};
+    }
     const auto it=ready_.find(key);
-    return it==ready_.end()?nullptr:it->second.result;
+    if(it==ready_.end()) {
+        lookupMisses_.fetch_add(1U,std::memory_order_relaxed);
+        return {};
+    }
+    lookupHits_.fetch_add(1U,std::memory_order_relaxed);
+    return it->second.result;
 }
 
 void GtMapWorker::reset() noexcept {
@@ -108,6 +116,11 @@ GtMapWorkerStats GtMapWorker::stats() const noexcept {
     result.checksumFailures=checksumFailures_.load(std::memory_order_relaxed);
     result.durationUs=durationUs_.load(std::memory_order_relaxed);
     result.longestUs=longestUs_.load(std::memory_order_relaxed);
+    result.cacheEvictedAge=cacheEvictedAge_.load(std::memory_order_relaxed);
+    result.cacheEvictedCapacity=cacheEvictedCapacity_.load(std::memory_order_relaxed);
+    result.lookupHits=lookupHits_.load(std::memory_order_relaxed);
+    result.lookupMisses=lookupMisses_.load(std::memory_order_relaxed);
+    result.lookupBusy=lookupBusy_.load(std::memory_order_relaxed);
     std::unique_lock lock(mutex_,std::try_to_lock);
     if(lock.owns_lock()) {
         result.pendingBytes=pendingBytes_;
@@ -128,14 +141,17 @@ void GtMapWorker::pruneLocked(std::chrono::steady_clock::time_point now) {
         if(now-it->second.createdAt>std::chrono::seconds(5)) {
             readyBytes_-=it->second.bytes;
             it=ready_.erase(it);
+            cacheEvictedAge_.fetch_add(1U,std::memory_order_relaxed);
         } else ++it;
     }
-    while((readyBytes_>kCacheMaxBytes || ready_.size()>16U) && !ready_.empty()) {
+    while((readyBytes_>kCacheMaxBytes || ready_.size()>kCacheMaxFrames) &&
+          !ready_.empty()) {
         auto oldest=ready_.begin();
         for(auto it=ready_.begin();it!=ready_.end();++it)
             if(it->second.createdAt<oldest->second.createdAt)oldest=it;
         readyBytes_-=oldest->second.bytes;
         ready_.erase(oldest);
+        cacheEvictedCapacity_.fetch_add(1U,std::memory_order_relaxed);
     }
 }
 
