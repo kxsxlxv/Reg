@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 
 struct AVBufferRef;
@@ -38,6 +39,11 @@ struct RtspDecoderCallbacks {
 
     std::function<void(
         CompressedVideoPacketPtr)> onCompressedPacket;
+
+    // Called with immutable compressed GT after SEI parsing but BEFORE
+    // hardware decode. Off-path map inflation can overlap Vulkan decode.
+    std::function<void(
+        std::shared_ptr<const FrameGtParts>)> onGtParts;
 
     std::function<void(
         video::VideoFramePtr)> onFrame;
@@ -71,6 +77,7 @@ private:
 
     void decodePacket(
         const FrameCallback& onFrame,
+        const std::function<void(std::shared_ptr<const FrameGtParts>)>& onGtParts,
         AVPacket* packet,
         AVFrame* frame);
 
