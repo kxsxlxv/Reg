@@ -41,6 +41,113 @@ const ImVec4 kWarningAmber{1.0F, 0.72F, 0.12F, 1.0F};
 const ImVec4 kErrorRed{1.0F, 0.35F, 0.32F, 1.0F};
 const ImVec4 kRtspAccent{0.66F, 0.57F, 0.95F, 1.0F};
 
+// Compact GT cards follow the same auto-height, subtly tinted child-card
+// pattern as Launcher. Every visible control has a tooltip instead of a
+// permanent explanatory paragraph.
+bool beginGtCard(const char* id,const ImVec4& tint,const ImVec4& accent) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg,tint);
+    ImGui::PushStyleColor(
+        ImGuiCol_Border,ImVec4(accent.x,accent.y,accent.z,0.35F));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(10.0F,9.0F));
+    const bool visible=ImGui::BeginChild(
+        id,ImVec2(0.0F,0.0F),
+        ImGuiChildFlags_Borders|ImGuiChildFlags_AutoResizeY|
+            ImGuiChildFlags_AlwaysUseWindowPadding,
+        ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+    return visible;
+}
+
+void gtTooltip(const char* text) {
+    if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("%s",text);
+}
+
+void gtCardHeading(const char* label,bool& enabled,const ImVec4& accent,
+                   const char* tooltip) {
+    ImGui::PushStyleColor(ImGuiCol_Text,accent);
+    ImGui::Checkbox(label,&enabled);
+    ImGui::PopStyleColor();
+    gtTooltip(tooltip);
+    ImGui::Separator();
+}
+
+void gtOpacityControl(const char* id,std::atomic<float>& setting) {
+    ImGui::TextDisabled("Наложение");
+    ImGui::SetNextItemWidth(-1.0F);
+    int percent=static_cast<int>(std::lround(
+        std::clamp(setting.load(std::memory_order_relaxed),0.0F,1.0F)*100.0F));
+    if(ImGui::SliderInt(id,&percent,0,100,"%d%%"))
+        setting.store(static_cast<float>(percent)/100.0F,
+                      std::memory_order_relaxed);
+    gtTooltip("Плотность цвета: 0%% — без слоя, 100%% — непрозрачный слой.");
+}
+
+// Show true KSM1 tint as a translucent overlay against a small checkerboard.
+void drawGtSkyLegend(float opacity) {
+    const float width=std::max(32.0F,ImGui::GetContentRegionAvail().x);
+    const ImVec2 origin=ImGui::GetCursorScreenPos();
+    constexpr float height=16.0F;
+    ImGui::InvisibleButton("##gt-sky-legend",ImVec2(width,height));
+    auto* draw=ImGui::GetWindowDrawList();
+    const float cell=width/12.0F;
+    for(int i=0;i<12;++i)
+        draw->AddRectFilled(
+            ImVec2(origin.x+cell*static_cast<float>(i),origin.y),
+            ImVec2(origin.x+cell*static_cast<float>(i+1),origin.y+height),
+            IM_COL32((i&1)?47:31,(i&1)?56:40,(i&1)?67:51,255));
+    draw->AddRectFilled(origin,ImVec2(origin.x+width,origin.y+height),
+        ImGui::GetColorU32(ImVec4(0.15F,0.93F,0.97F,
+                                std::clamp(opacity,0.0F,1.0F))));
+    draw->AddRect(origin,ImVec2(origin.x+width,origin.y+height),
+                  IM_COL32(77,206,211,130));
+    gtTooltip("Бирюзовый — небо; неизвестные пиксели прозрачны. KSM1 растягивается на Raw RGB.");
+}
+
+// The three palette stops MUST match depthColor() in shaders/gt_map.frag.
+// Logarithmic normalisation puts the geometric distance midpoint at 50%.
+void drawGtDepthLegend(float nearM,float farM) {
+    constexpr float barHeight=15.0F;
+    const float width=std::max(32.0F,ImGui::GetContentRegionAvail().x);
+    const ImVec2 origin=ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(width,barHeight+19.0F));
+    auto* draw=ImGui::GetWindowDrawList();
+    const ImVec2 mid{origin.x+0.5F*width,origin.y+barHeight};
+    draw->AddRectFilledMultiColor(
+        origin,mid,
+        IM_COL32(250,77,41,255),IM_COL32(245,214,46,255),
+        IM_COL32(245,214,46,255),IM_COL32(250,77,41,255));
+    draw->AddRectFilledMultiColor(
+        ImVec2(mid.x,origin.y),
+        ImVec2(origin.x+width,origin.y+barHeight),
+        IM_COL32(245,214,46,255),IM_COL32(31,125,245,255),
+        IM_COL32(31,125,245,255),IM_COL32(245,214,46,255));
+    draw->AddRect(origin,ImVec2(origin.x+width,origin.y+barHeight),
+                  IM_COL32(240,240,240,85));
+    for(float offset:{0.0F,0.5F,1.0F}) {
+        const float x=origin.x+offset*width;
+        draw->AddLine(ImVec2(x,origin.y+barHeight),
+                      ImVec2(x,origin.y+barHeight+3.0F),
+                      IM_COL32(200,210,220,160));
+    }
+    char nearText[32]{},midText[32]{},farText[32]{};
+    std::snprintf(nearText,sizeof(nearText),"%.1f м",nearM);
+    std::snprintf(midText,sizeof(midText),"%.1f м",std::sqrt(nearM*farM));
+    std::snprintf(farText,sizeof(farText),"%.1f м",farM);
+    const ImU32 color=ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    draw->AddText(ImVec2(origin.x,origin.y+barHeight+4.0F),color,nearText);
+    draw->AddText(ImVec2(origin.x+width*0.5F-
+                          ImGui::CalcTextSize(midText).x*0.5F,
+                         origin.y+barHeight+4.0F),color,midText);
+    draw->AddText(ImVec2(origin.x+width-
+                          ImGui::CalcTextSize(farText).x,
+                         origin.y+barHeight+4.0F),color,farText);
+    gtTooltip("Логарифмическая шкала оптической глубины Z, м. "
+              "Красный — ближе, жёлтый — середина, синий — дальше. "
+              "Каждому цвету соответствует одинаковый диапазон отношений расстояний.");
+}
+
 struct RateHistory {
     std::vector<double> secondsAgo;
     std::vector<double> decodedFps;
