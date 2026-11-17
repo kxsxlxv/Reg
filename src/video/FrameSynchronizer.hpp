@@ -36,6 +36,9 @@ public:
           metadata_(metadata) {}
 
     SyncDecision next(std::chrono::steady_clock::time_point now);
+    // CVV1 opt-in mode: video must not be dropped just because CVM1 is absent.
+    // The legacy next() remains unchanged for all CVM1-only sessions.
+    SyncDecision nextAllowMissingMetadata(std::chrono::steady_clock::time_point now);
 
 private:
     OverlayFrameBuffer& frames_;

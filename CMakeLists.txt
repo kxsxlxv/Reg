@@ -208,6 +208,9 @@ add_executable(reg_probe
     src/metadata/MetadataStore.cpp
     src/metadata/MetadataReceiver.cpp
     src/metadata/TrackHistory.cpp
+    src/cvv1/Cvv1.cpp
+    src/cvv1/Receiver.cpp
+    src/cvv1/OverlayBuilder.cpp
     src/platform/UdpSocket.cpp
     src/video/VideoFrame.cpp
     src/video/OverlayFrameBuffer.cpp
@@ -542,6 +545,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# CVV1 payloads are parsed by the dedicated receiver thread; no JSON work
+# occurs in the video decode or Vulkan presentation hot paths.
+target_link_libraries(reg_probe PRIVATE nlohmann_json::nlohmann_json)
+
 add_library(reg_launcher_core STATIC
     src/launcher/LauncherConfig.cpp
     src/launcher/ProcessManager.cpp
@@ -762,6 +769,16 @@ if(REG_BUILD_TESTS)
 endif()
 
 if(REG_BUILD_TESTS)
+    add_executable(reg_cvv1_tests
+        tests/cvv1_tests.cpp
+        src/cvv1/Cvv1.cpp
+        src/cvv1/OverlayBuilder.cpp
+        src/metadata/Protocol.cpp
+        src/video/VideoTransform.cpp)
+    target_include_directories(reg_cvv1_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_cvv1_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cvv1_offline COMMAND reg_cvv1_tests)
+
     add_executable(reg_diag_adapter_v1_tests tests/diagnostic_telemetry_adapter_tests.cpp)
     target_link_libraries(reg_diag_adapter_v1_tests PRIVATE reg_diagnostic_api_v1)
     add_test(NAME diagnostic_telemetry_adapter_v1 COMMAND reg_diag_adapter_v1_tests)
