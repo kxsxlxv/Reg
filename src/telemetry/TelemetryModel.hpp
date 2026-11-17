@@ -59,6 +59,7 @@ struct Counters {
     std::uint64_t gtWorkerTotalUs{},gtWorkerMaxUs{};
     std::size_t gtWorkerQueueBytes{},gtWorkerQueueFrames{};
     std::uint64_t gtWorkerQueueAgeMs{};
+    std::uint64_t gtFrameAttachedReady{},gtFrameDeferred{},gtFrameDeferredTimeout{};
     std::size_t gtWorkerCacheFrames{},gtWorkerCacheBytes{};
     std::uint64_t gtWorkerEvictedAge{},gtWorkerEvictedCapacity{};
     std::uint64_t gtWorkerLookupHits{},gtWorkerLookupMisses{},gtWorkerLookupBusy{};
