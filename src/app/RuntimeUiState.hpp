@@ -72,6 +72,7 @@ inline std::atomic_uint32_t gPresentedRawWidth{0},gPresentedRawHeight{0};
 inline std::atomic_uint32_t gPresentedSkyWidth{0},gPresentedSkyHeight{0};
 inline std::atomic_uint32_t gPresentedDepthWidth{0},gPresentedDepthHeight{0};
 inline std::atomic_bool gPresentedDepthMapReady{false};
+inline std::atomic_bool gPresentedGtGpuError{false};
 inline std::atomic<media::GtStatus> gPresentedGtStatus{media::GtStatus::Missing};
 inline std::atomic_uint64_t gGtReadyFrames{0};
 inline std::atomic_uint64_t gGtNotReadyFrames{0};
