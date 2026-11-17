@@ -1628,6 +1628,13 @@ int runApplication(
                             .gtWorkerQueueBytes = mapStats.pendingBytes,
                             .gtWorkerQueueFrames = mapStats.pendingFrames,
                             .gtWorkerQueueAgeMs = mapStats.oldestPendingAgeMs,
+                            .gtWorkerCacheFrames = mapStats.readyFrames,
+                            .gtWorkerCacheBytes = mapStats.readyBytes,
+                            .gtWorkerEvictedAge = mapStats.cacheEvictedAge,
+                            .gtWorkerEvictedCapacity = mapStats.cacheEvictedCapacity,
+                            .gtWorkerLookupHits = mapStats.lookupHits,
+                            .gtWorkerLookupMisses = mapStats.lookupMisses,
+                            .gtWorkerLookupBusy = mapStats.lookupBusy,
                             .gtBenchmarkEnabled = options.gtCapturePolicy ==
                                 reg::app::GtCapturePolicy::Benchmark,
                             .gtBenchmarkFailed = gtBenchmarkLossObserved,
