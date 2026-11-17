@@ -54,8 +54,8 @@ bool beginGtCard(const char* id,const ImVec4& tint,const ImVec4& accent) {
         ImGuiCol_Border,ImVec4(accent.x,accent.y,accent.z,0.35F));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(10.0F,9.0F));
     const bool visible=ImGui::BeginChild(
-        id,ImVec2(0.0F,0.0F),
-        ImGuiChildFlags_Borders|ImGuiChildFlags_AutoResizeY|
+        id,ImVec2(0.0F,119.0F),
+        ImGuiChildFlags_Borders|
             ImGuiChildFlags_AlwaysUseWindowPadding,
         ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
@@ -68,24 +68,24 @@ void gtTooltip(const char* text) {
         ImGui::SetTooltip("%s",text);
 }
 
-void gtCardHeading(const char* label,bool& enabled,const ImVec4& accent,
-                   const char* tooltip) {
-    ImGui::PushStyleColor(ImGuiCol_Text,accent);
-    ImGui::Checkbox(label,&enabled);
-    ImGui::PopStyleColor();
-    gtTooltip(tooltip);
-    ImGui::Separator();
-}
-
-void gtOpacityControl(const char* id,std::atomic<float>& setting) {
-    ImGui::TextDisabled("Наложение");
-    ImGui::SetNextItemWidth(-1.0F);
+void gtOpacityControl(const char* id,std::atomic<float>& setting,float rightReserve) {
+    const float available=ImGui::GetContentRegionAvail().x;
+    ImGui::SetNextItemWidth(std::max(40.0F,available-rightReserve));
     int percent=static_cast<int>(std::lround(
         std::clamp(setting.load(std::memory_order_relaxed),0.0F,1.0F)*100.0F));
     if(ImGui::SliderInt(id,&percent,0,100,"%d%%"))
         setting.store(static_cast<float>(percent)/100.0F,
                       std::memory_order_relaxed);
-    gtTooltip("Плотность цвета: 0% — без слоя, 100% — непрозрачный слой.");
+    gtTooltip("Прозрачность наложения на видео.\n"
+              "0% — слой скрыт.\n100% — непрозрачный слой.");
+}
+
+void gtSmoothingControl(const char* id,std::atomic_bool& setting,
+                        const char* description) {
+    bool enabled=setting.load(std::memory_order_relaxed);
+    if(ImGui::Checkbox(id,&enabled))
+        setting.store(enabled,std::memory_order_relaxed);
+    gtTooltip(description);
 }
 
 // Show true KSM1 tint as a translucent overlay against a small checkerboard.
@@ -111,45 +111,27 @@ void drawGtSkyLegend(float opacity) {
 
 // The three palette stops MUST match depthColor() in shaders/gt_map.frag.
 // Logarithmic normalisation puts the geometric distance midpoint at 50%.
-void drawGtDepthLegend(float nearM,float farM) {
-    constexpr float barHeight=15.0F;
-    const float width=std::max(32.0F,ImGui::GetContentRegionAvail().x);
+void drawGtDepthLegend(float nearM,float farM,float width) {
     const ImVec2 origin=ImGui::GetCursorScreenPos();
-    ImGui::Dummy(ImVec2(width,barHeight+19.0F));
+    constexpr float height=16.0F;
+    ImGui::InvisibleButton("##gt-depth-legend",ImVec2(width,height));
     auto* draw=ImGui::GetWindowDrawList();
-    const ImVec2 mid{origin.x+0.5F*width,origin.y+barHeight};
-    draw->AddRectFilledMultiColor(
-        origin,mid,
+    const float middle=origin.x+width*0.5F;
+    draw->AddRectFilledMultiColor(origin,ImVec2(middle,origin.y+height),
         IM_COL32(250,77,41,255),IM_COL32(245,214,46,255),
         IM_COL32(245,214,46,255),IM_COL32(250,77,41,255));
-    draw->AddRectFilledMultiColor(
-        ImVec2(mid.x,origin.y),
-        ImVec2(origin.x+width,origin.y+barHeight),
+    draw->AddRectFilledMultiColor(ImVec2(middle,origin.y),
+        ImVec2(origin.x+width,origin.y+height),
         IM_COL32(245,214,46,255),IM_COL32(31,125,245,255),
         IM_COL32(31,125,245,255),IM_COL32(245,214,46,255));
-    draw->AddRect(origin,ImVec2(origin.x+width,origin.y+barHeight),
+    draw->AddRect(origin,ImVec2(origin.x+width,origin.y+height),
                   IM_COL32(240,240,240,85));
-    for(float offset:{0.0F,0.5F,1.0F}) {
-        const float x=origin.x+offset*width;
-        draw->AddLine(ImVec2(x,origin.y+barHeight),
-                      ImVec2(x,origin.y+barHeight+3.0F),
-                      IM_COL32(200,210,220,160));
-    }
-    char nearText[32]{},midText[32]{},farText[32]{};
-    std::snprintf(nearText,sizeof(nearText),"%.1f м",nearM);
-    std::snprintf(midText,sizeof(midText),"%.1f м",gtDepthLogMidpoint(nearM,farM));
-    std::snprintf(farText,sizeof(farText),"%.1f м",farM);
-    const ImU32 color=ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    draw->AddText(ImVec2(origin.x,origin.y+barHeight+4.0F),color,nearText);
-    draw->AddText(ImVec2(origin.x+width*0.5F-
-                          ImGui::CalcTextSize(midText).x*0.5F,
-                         origin.y+barHeight+4.0F),color,midText);
-    draw->AddText(ImVec2(origin.x+width-
-                          ImGui::CalcTextSize(farText).x,
-                         origin.y+barHeight+4.0F),color,farText);
-    gtTooltip("Логарифмическая шкала оптической глубины Z, м. "
-              "Красный — ближе, жёлтый — середина, синий — дальше. "
-              "Каждому цвету соответствует одинаковый диапазон отношений расстояний.");
+    if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("Логарифмическая глубина Z, м.\n"
+                         "Ближняя граница: %.1f м\n"
+                         "Середина: %.1f м\n"
+                         "Дальняя граница: %.1f м",
+                         nearM,gtDepthLogMidpoint(nearM,farM),farM);
 }
 
 struct RateHistory {
@@ -649,13 +631,13 @@ void drawPerformanceGraph(
 
 void drawPerformanceAndHealth(
     const telemetry::Counters& counters,
-    const RateHistory& history) {
+    const RateHistory& history,
+    float panelHeight) {
     const float availableWidth = ImGui::GetContentRegionAvail().x;
     const float healthWidth = std::clamp(
         availableWidth * 0.34F,
         320.0F,
         380.0F);
-    const float panelHeight = 390.0F;
 
     if (!ImGui::BeginTable(
             "performance_health",
@@ -1423,225 +1405,316 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         initializeBackend(swapchain);
     }
 
-    void drawOverview(
-        const telemetry::Snapshot& snapshot,
-        std::chrono::steady_clock::time_point now) {
-        drawPerformanceAndHealth(snapshot.counters, rateHistory);
-        ImGui::SeparatorText("GT / ДАЛЬНОСТЬ И ОБНАРУЖЕНИЯ CV");
-        // Freeze only the viewed data, not the decode/metadata ingestion.
-        const bool paused = app::rangeTimelinePaused();
-        if (paused && !rangeWasPaused) {
-            pausedRangeAt = now;
-            pausedRangeTracks = snapshot.gtRangeTracks;
+    static void drawGtControls() {
+        if(!ImGui::BeginTable("##gt-three-cards",3,ImGuiTableFlags_SizingStretchSame))
+            return;
+        const ImVec4 bbox{0.40F,0.80F,0.97F,1.0F};
+        const ImVec4 sky{0.24F,0.91F,0.85F,1.0F};
+        const ImVec4 depth{0.99F,0.68F,0.31F,1.0F};
+        ImGui::TableNextColumn();
+        if(beginGtCard("##gt-card-bbox",ImVec4(0.095F,0.133F,0.185F,1.0F),bbox)) {
+            bool enabled=app::showGtBoxes();
+            ImGui::PushStyleColor(ImGuiCol_Text,bbox);
+            const bool boxesChanged=ImGui::Checkbox("Рамки##gt-boxes",&enabled);
+            ImGui::PopStyleColor();
+            if(boxesChanged)
+                app::setShowGtBoxes(enabled);
+            gtTooltip("Рамки объектов на Raw.\nГорячая клавиша T.");
+            bool ids=app::showGtIds();
+            if(ImGui::Checkbox("ID##gt-ids",&ids))
+                app::setShowGtIds(ids);
+            gtTooltip("Идентификаторы объектов возле рамок.");
+            bool ranges=app::showGtRanges();
+            if(ImGui::Checkbox("Дальность##gt-ranges",&ranges))
+                app::setShowGtRanges(ranges);
+            gtTooltip("Расстояние до корня объекта (range_m).\n"
+                      "Не путать с оптической глубиной Z.");
         }
-        if (!paused && rangeWasPaused)
-            pausedRangeTracks.reset();
-        rangeWasPaused = paused;
-        const auto& rangeView =
-            paused ? pausedRangeTracks : snapshot.gtRangeTracks;
-        static const std::vector<telemetry::GtRangeTrack> emptyRange;
-        gtDashboard.draw(rangeView ? *rangeView : emptyRange,
-                         snapshot.counters, snapshot.gtCvDiagnostics,
-                         paused ? pausedRangeAt : now, paused);
-    }
-
-    static void drawGtPanel(const telemetry::Counters& counters) {
-        // The telemetry host window disables scrolling; the GT panel owns
-        // an independent scroll region for expanded DEBUG diagnostics.
-        const bool gtVisible=ImGui::BeginChild(
-            "##gt-panel-body",ImVec2(0.0F,0.0F),
-            ImGuiChildFlags_None,ImGuiWindowFlags_None);
-        if(gtVisible) {
-            // Three columns, matching the Launcher's equal-width card grid.
-            if(ImGui::BeginTable("##gt-three-cards",3,
-                    ImGuiTableFlags_SizingStretchSame)) {
-                ImGui::TableNextColumn();
-                if(beginGtCard("##gt-card-bbox",
-                        ImVec4(0.095F,0.133F,0.185F,1.0F),
-                        ImVec4(0.40F,0.80F,0.97F,1.0F))) {
-                    bool enabled=app::showGtBoxes();
-                    gtCardHeading("GT BBOX",enabled,
-                        ImVec4(0.40F,0.80F,0.97F,1.0F),
-                        "Рамки Ground Truth поверх Raw. Клавиша T.");
-                    if(enabled!=app::showGtBoxes())
-                        app::setShowGtBoxes(enabled);
-                    bool ids=app::showGtIds();
-                    if(ImGui::Checkbox("ID##gt-ids",&ids))
-                        app::setShowGtIds(ids);
-                    gtTooltip("Идентификаторы объектов рядом с GT BBox.");
-                    bool ranges=app::showGtRanges();
-                    if(ImGui::Checkbox("Дальность##gt-ranges",&ranges))
-                        app::setShowGtRanges(ranges);
-                    gtTooltip("range_m — расстояние до корня объекта, не optical Z.");
+        ImGui::EndChild();
+        ImGui::TableNextColumn();
+        if(beginGtCard("##gt-card-sky",ImVec4(0.085F,0.155F,0.165F,1.0F),sky)) {
+            bool enabled=app::showGtSky();
+            ImGui::PushStyleColor(ImGuiCol_Text,sky);
+            const bool skyChanged=ImGui::Checkbox("Небо##gt-sky",&enabled);
+            ImGui::PopStyleColor();
+            if(skyChanged)
+                app::gShowGtSky.store(enabled,std::memory_order_relaxed);
+            gtTooltip("KSM1: маска неба на RGB.");
+            const float right=ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x;
+            gtOpacityControl("##gt-sky-opacity",app::gGtSkyOpacity,right);
+            ImGui::SameLine();
+            gtSmoothingControl("##gt-sky-smooth",app::gGtSkySmooth,
+                "Сглаживание маски неба.\n"
+                "Выключено: Nearest, чёткие границы.\n"
+                "Включено: Linear, плавные края.");
+            drawGtSkyLegend(app::gGtSkyOpacity.load(std::memory_order_relaxed));
+        }
+        ImGui::EndChild();
+        ImGui::TableNextColumn();
+        if(beginGtCard("##gt-card-depth",ImVec4(0.170F,0.124F,0.124F,1.0F),depth)) {
+            bool enabled=app::showGtDepth();
+            ImGui::PushStyleColor(ImGuiCol_Text,depth);
+            const bool depthChanged=ImGui::Checkbox("Карта глубины##gt-depth",&enabled);
+            ImGui::PopStyleColor();
+            if(depthChanged)
+                app::gShowGtDepth.store(enabled,std::memory_order_relaxed);
+            gtTooltip("KDM1: оптическая глубина Z, м.\n"
+                      "Логарифмическая цветовая шкала.");
+            const float right=ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x;
+            gtOpacityControl("##gt-depth-opacity",app::gGtDepthOpacity,right);
+            ImGui::SameLine();
+            gtSmoothingControl("##gt-depth-smooth",app::gGtDepthSmooth,
+                "Сглаживание глубины.\n"
+                "Linear усредняет только валидные Z.\n"
+                "Нулевые значения остаются прозрачными.");
+            float nearM=std::max(0.1F,app::gGtDepthNearM.load(std::memory_order_relaxed));
+            float farM=std::max(nearM+0.1F,app::gGtDepthFarM.load(std::memory_order_relaxed));
+            const float available=ImGui::GetContentRegionAvail().x;
+            const float rangeWidth=std::min(135.0F,std::max(82.0F,available*0.43F));
+            drawGtDepthLegend(nearM,farM,
+                std::max(32.0F,available-rangeWidth-ImGui::GetStyle().ItemSpacing.x));
+            ImGui::SameLine();
+            if(ImGui::SmallButton("Диапазон##gt-z-range"))
+                ImGui::OpenPopup("##gt-depth-range-popup");
+            gtTooltip("Изменить ближнюю и дальнюю границы Z, м.");
+            if(ImGui::BeginPopup("##gt-depth-range-popup")) {
+                ImGui::TextUnformatted("Диапазон Z, м");
+                ImGui::SetNextItemWidth(130.0F);
+                if(ImGui::InputFloat("От##gt-near",&nearM,0.0F,0.0F,"%.1f")) {
+                    nearM=std::clamp(nearM,0.1F,farM-0.1F);
+                    app::gGtDepthNearM.store(nearM,std::memory_order_relaxed);
                 }
-                ImGui::EndChild();
-
-                ImGui::TableNextColumn();
-                if(beginGtCard("##gt-card-sky",
-                        ImVec4(0.085F,0.155F,0.165F,1.0F),
-                        ImVec4(0.24F,0.91F,0.85F,1.0F))) {
-                    bool enabled=app::showGtSky();
-                    gtCardHeading("GT Небо##gt-sky-enabled",enabled,
-                        ImVec4(0.24F,0.91F,0.85F,1.0F),
-                        "KSM1: маска неба поверх Raw RGB. Бирюзовый цвет.");
-                    if(enabled!=app::showGtSky())
-                        app::gShowGtSky.store(enabled,std::memory_order_relaxed);
-                    gtOpacityControl("##gt-sky-opacity",app::gGtSkyOpacity);
-                    bool linear=app::gGtSkySmooth.load(std::memory_order_relaxed);
-                    if(ImGui::Checkbox("Linear##gt-sky-linear",&linear))
-                        app::gGtSkySmooth.store(linear,std::memory_order_relaxed);
-                    gtTooltip("Nearest — чёткая бинарная маска. Linear — плавные края.");
-                    drawGtSkyLegend(app::gGtSkyOpacity.load(std::memory_order_relaxed));
+                gtTooltip("Ближняя граница логарифмической шкалы, м.");
+                ImGui::SetNextItemWidth(130.0F);
+                if(ImGui::InputFloat("До##gt-far",&farM,0.0F,0.0F,"%.1f")) {
+                    farM=std::max(farM,nearM+0.1F);
+                    app::gGtDepthFarM.store(farM,std::memory_order_relaxed);
                 }
-                ImGui::EndChild();
-
-                ImGui::TableNextColumn();
-                if(beginGtCard("##gt-card-depth",
-                        ImVec4(0.170F,0.124F,0.124F,1.0F),
-                        ImVec4(0.99F,0.68F,0.31F,1.0F))) {
-                    bool enabled=app::showGtDepth();
-                    gtCardHeading("GT Карта глубины##gt-depth-enabled",enabled,
-                        ImVec4(0.99F,0.68F,0.31F,1.0F),
-                        "KDM1: оптическая глубина Z, в метрах. Логарифмическая цветовая шкала.");
-                    if(enabled!=app::showGtDepth())
-                        app::gShowGtDepth.store(enabled,std::memory_order_relaxed);
-                    gtOpacityControl("##gt-depth-opacity",app::gGtDepthOpacity);
-                    bool linear=app::gGtDepthSmooth.load(std::memory_order_relaxed);
-                    if(ImGui::Checkbox("Linear##gt-depth-linear",&linear))
-                        app::gGtDepthSmooth.store(linear,std::memory_order_relaxed);
-                    gtTooltip("Nearest — резкие границы. Linear — сглаживание только по валидным Z; Z=0 остаётся прозрачным.");
-                    float nearM=std::max(0.1F,app::gGtDepthNearM.load(
-                        std::memory_order_relaxed));
-                    float farM=std::max(nearM+0.1F,app::gGtDepthFarM.load(
-                        std::memory_order_relaxed));
-                    ImGui::TextDisabled("Z, м");
-                    const float available=ImGui::GetContentRegionAvail().x;
-                    const float fieldWidth=std::max(48.0F,
-                        (available-ImGui::GetStyle().ItemSpacing.x)*0.5F);
-                    ImGui::SetNextItemWidth(fieldWidth);
-                    if(ImGui::InputFloat("##gt-near",&nearM,0.0F,0.0F,"%.1f")) {
-                        nearM=std::clamp(nearM,0.1F,farM-0.1F);
-                        app::gGtDepthNearM.store(nearM,std::memory_order_relaxed);
-                    }
-                    gtTooltip("Ближняя граница логарифмической шкалы, м. Щёлкните и введите число.");
-                    ImGui::SameLine();
-                    ImGui::SetNextItemWidth(fieldWidth);
-                    if(ImGui::InputFloat("##gt-far",&farM,0.0F,0.0F,"%.1f")) {
-                        farM=std::max(farM,nearM+0.1F);
-                        app::gGtDepthFarM.store(farM,std::memory_order_relaxed);
-                    }
-                    gtTooltip("Дальний предел Z, м. Значения выше него становятся синими; увеличьте предел для дальних сцен.");
-                    drawGtDepthLegend(nearM,farM);
-                }
-                ImGui::EndChild();
-                ImGui::EndTable();
-            }
-
-            ImGui::Spacing();
-            // Counters are recorded continuously, rendered only when opened.
-            if(ImGui::CollapsingHeader("DEBUG##gt",
-                    ImGuiTreeNodeFlags_None)) {
-        const auto rawW=app::gPresentedRawWidth.load(std::memory_order_relaxed);
-        const auto rawH=app::gPresentedRawHeight.load(std::memory_order_relaxed);
-        ImGui::Text("KSM1: %ux%u -> Raw %ux%u",
-            app::gPresentedSkyWidth.load(),app::gPresentedSkyHeight.load(),rawW,rawH);
-        ImGui::Text("KDM1: %ux%u -> Raw %ux%u",
-            app::gPresentedDepthWidth.load(),app::gPresentedDepthHeight.load(),rawW,rawH);
-        const auto skyStatus=app::gPresentedSkyStatus.load(std::memory_order_relaxed);
-        const auto depthStatus=app::gPresentedDepthStatus.load(std::memory_order_relaxed);
-        const auto mapName=[](media::GtMapStatus s) {
-            switch(s) {
-                case media::GtMapStatus::Missing:return "missing";
-                case media::GtMapStatus::NotReady:return "not_ready";
-                case media::GtMapStatus::AmbiguousViewport:return "ambiguous_viewport";
-                case media::GtMapStatus::Unavailable:return "unavailable";
-                case media::GtMapStatus::Encoded:return "encoded (worker asynchronous)";
-                case media::GtMapStatus::Ready:return "ready";
-                case media::GtMapStatus::Invalid:return "invalid";
-                case media::GtMapStatus::FrameMismatch:return "frame_mismatch";
-            }
-            return "unknown";
-        };
-        ImGui::Text("Небо: %s | GPU map: %s",mapName(skyStatus),
-                    app::gPresentedSkyMapReady.load()?"ready":"absent");
-        ImGui::Text("Глубина: %s | GPU map: %s",mapName(depthStatus),
-                    app::gPresentedDepthMapReady.load()?"ready":"absent");
-        if (app::gPresentedGtGpuError.load(std::memory_order_relaxed))
-            ImGui::TextColored(kErrorRed,
-                "Vulkan GT compositor disabled: see Reg stderr for error");
-        ImGui::SeparatorText("GT / KSM1-KDM1 WORKER");
-        ImGui::Text("Небо декодировано / ошибочно: %llu / %llu",
-            static_cast<unsigned long long>(counters.gtWorkerSkyReady),
-            static_cast<unsigned long long>(counters.gtWorkerInvalidSky));
-        ImGui::Text("Глубина декодирована / ошибочно: %llu / %llu",
-            static_cast<unsigned long long>(counters.gtWorkerDepthReady),
-            static_cast<unsigned long long>(counters.gtWorkerInvalidDepth));
-        ImGui::Text("Ошибок CRC/FNV: %llu | queue drops: %llu | lock drops: %llu",
-            static_cast<unsigned long long>(counters.gtWorkerChecksumFailures),
-            static_cast<unsigned long long>(counters.gtWorkerQueueDrops),
-            static_cast<unsigned long long>(counters.gtWorkerLockDrops));
-        ImGui::Text("Очередь: %zu кадр. / %zu KiB | возраст: %llu ms",
-            counters.gtWorkerQueueFrames,
-            counters.gtWorkerQueueBytes/1024U,
-            static_cast<unsigned long long>(counters.gtWorkerQueueAgeMs));
-        ImGui::Text("Декодирование суммарно / max: %llu / %llu us",
-            static_cast<unsigned long long>(counters.gtWorkerTotalUs),
-            static_cast<unsigned long long>(counters.gtWorkerMaxUs));
-        ImGui::Text("Готовый кэш: %zu кадр. / %zu MiB (макс. 128 / 96 MiB)",
-            counters.gtWorkerCacheFrames,counters.gtWorkerCacheBytes/(1024U*1024U));
-        ImGui::Text("GT per-AU (показ): ready %llu | отсрочки %llu | timeout %llu",
-            static_cast<unsigned long long>(counters.gtFrameAttachedReady),
-            static_cast<unsigned long long>(counters.gtFrameDeferred),
-            static_cast<unsigned long long>(counters.gtFrameDeferredTimeout));
-        ImGui::TextDisabled("Raw берёт GT из своего AU, а не из вытесняемого кэша.");
-        ImGui::Text("Fallback GT cache lookup: hit %llu | miss %llu | busy %llu",
-            static_cast<unsigned long long>(counters.gtWorkerLookupHits),
-            static_cast<unsigned long long>(counters.gtWorkerLookupMisses),
-            static_cast<unsigned long long>(counters.gtWorkerLookupBusy));
-        ImGui::Text("Вытеснено: по возрасту %llu | по лимиту %llu",
-            static_cast<unsigned long long>(counters.gtWorkerEvictedAge),
-            static_cast<unsigned long long>(counters.gtWorkerEvictedCapacity));
-        const auto mapCount=std::min(counters.gtWorkerSkyReady,counters.gtWorkerDepthReady);
-        if(mapCount>counters.decodedFrames)
-            ImGui::Text("GT ahead of RGB decode: %llu frames",
-                static_cast<unsigned long long>(mapCount-counters.decodedFrames));
-        ImGui::TextDisabled("Encoded: GT принят, но не гарантирует готовность GPU-слоя.");
-        ImGui::SeparatorText("GT / ТЕКУЩИЙ ОТОБРАЖЁННЫЙ КАДР");
-        const auto status = app::gPresentedGtStatus.load(
-            std::memory_order_relaxed);
-        ImGui::Text("Статус: %s", media::gtStatusName(status));
-        ImGui::SeparatorText("GT / ДЕКОДИРОВАННЫЕ КАДРЫ");
-        ImGui::Text("ready: %llu",
-            static_cast<unsigned long long>(app::gGtReadyFrames.load()));
-        ImGui::Text("not_ready / busy / unavailable: %llu",
-            static_cast<unsigned long long>(app::gGtNotReadyFrames.load()));
-        ImGui::Text("missing: %llu",
-            static_cast<unsigned long long>(app::gGtMissingFrames.load()));
-        ImGui::Text("parse_error: %llu",
-            static_cast<unsigned long long>(app::gGtParseErrors.load()));
-        ImGui::Text("frame_mismatch: %llu",
-            static_cast<unsigned long long>(app::gGtMismatchedFrames.load()));
-        ImGui::SeparatorText("KGT1 / CAMERA-IMU (c начала процесса)");
-        ImGui::Text("KGT1: %llu | size >256KiB: %llu",
-                    static_cast<unsigned long long>(counters.gtKgt1Frames),
-                    static_cast<unsigned long long>(counters.gtOversizePackets));
-        ImGui::Text("IMU ready / invalid / null: %llu / %llu / %llu",
-                    static_cast<unsigned long long>(counters.imuReadyFrames),
-                    static_cast<unsigned long long>(counters.imuInvalidFrames),
-                    static_cast<unsigned long long>(counters.imuNullFrames));
-        ImGui::Text("IMU samples (overlapping windows): %llu",
-                    static_cast<unsigned long long>(counters.imuSamplesParsed));
-        ImGui::Text("KGT1 parse total / max: %llu / %llu us | JSON max: %llu bytes",
-                    static_cast<unsigned long long>(counters.gtParseTotalUs),
-                    static_cast<unsigned long long>(counters.gtParseMaxUs),
-                    static_cast<unsigned long long>(counters.gtMaxJsonBytes));
-        ImGui::TextDisabled("FPS: packets != frames; GT parse_error is NOT an FPS diagnosis.");
-        ImGui::Spacing();
-        ImGui::TextDisabled(
-            "GT наносится только на кадр с идентичными epoch, frame_id и source_time_ns.");
+                gtTooltip("Дальний предел Z, м.\n"
+                          "Увеличьте его для аэросъёмки.");
+                ImGui::EndPopup();
             }
         }
         ImGui::EndChild();
+        ImGui::EndTable();
+    }
+
+    static void drawGtDebug(const telemetry::Snapshot& snapshot) {
+        const auto& counters=snapshot.counters;
+        const auto& diagnostics=snapshot.gtCvDiagnostics;
+        if(!ImGui::BeginTable("##gt-debug-columns",3,
+            ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV))
+            return;
+        ImGui::TableNextColumn();
+        ImGui::SeparatorText("CVM1 / FrameKey");
+        ImGui::Text("UDP / decoded: %llu / %llu",
+            static_cast<unsigned long long>(counters.metadataPackets),
+            static_cast<unsigned long long>(counters.metadataValidFrames));
+        ImGui::Text("Accepted / targets: %llu / %llu",
+            static_cast<unsigned long long>(counters.metadataAcceptedFrames),
+            static_cast<unsigned long long>(counters.metadataTargets));
+        ImGui::Text("Joined / matched CV: %llu / %llu",
+            static_cast<unsigned long long>(diagnostics.joinedFrames),
+            static_cast<unsigned long long>(diagnostics.matchedTargets));
+        ImGui::Text("RGF1 missing: %llu",
+            static_cast<unsigned long long>(counters.identityMissingFrames));
+        ImGui::Text("GT unavailable: %llu",
+            static_cast<unsigned long long>(diagnostics.gtUnavailableFrames));
+        ImGui::Text("CV unmatched / expired / pending: %llu / %llu / %llu",
+            static_cast<unsigned long long>(diagnostics.unmatchedCvFrames),
+            static_cast<unsigned long long>(diagnostics.expiredCvFrames),
+            static_cast<unsigned long long>(diagnostics.pendingCvFrames));
+        if(counters.metadataPackets>0 && counters.metadataValidFrames==0)
+            ImGui::TextColored(kErrorRed,"CVM1 decoder rejected datagrams");
+        else if(counters.metadataAcceptedFrames>0 && diagnostics.joinedFrames==0)
+            ImGui::TextColored(kWarningAmber,"No exact GT FrameKey joins");
+        else if(diagnostics.joinedFrames>0 && diagnostics.matchedTargets==0 &&
+                counters.metadataTargets>0)
+            ImGui::TextColored(kWarningAmber,"No CV matches above IoU 0.30");
+        ImGui::TableNextColumn();
+        ImGui::SeparatorText("Карты / GPU");
+        const auto rawW=app::gPresentedRawWidth.load(std::memory_order_relaxed);
+        const auto rawH=app::gPresentedRawHeight.load(std::memory_order_relaxed);
+        ImGui::Text("Небо: %ux%u / Raw %ux%u",
+            app::gPresentedSkyWidth.load(),app::gPresentedSkyHeight.load(),rawW,rawH);
+        ImGui::Text("Глубина: %ux%u / Raw %ux%u",
+            app::gPresentedDepthWidth.load(),app::gPresentedDepthHeight.load(),rawW,rawH);
+        ImGui::Text("GPU Небо / Глубина: %s / %s",
+            app::gPresentedSkyMapReady.load()?"ready":"absent",
+            app::gPresentedDepthMapReady.load()?"ready":"absent");
+        ImGui::Text("Worker Небо / Глубина: %llu / %llu",
+            static_cast<unsigned long long>(counters.gtWorkerSkyReady),
+            static_cast<unsigned long long>(counters.gtWorkerDepthReady));
+        ImGui::Text("Queue: %zu / %zu KiB",
+            counters.gtWorkerQueueFrames,counters.gtWorkerQueueBytes/1024U);
+        ImGui::Text("Queue drops / lock drops: %llu / %llu",
+            static_cast<unsigned long long>(counters.gtWorkerQueueDrops),
+            static_cast<unsigned long long>(counters.gtWorkerLockDrops));
+        ImGui::Text("CRC/FNV errors: %llu",
+            static_cast<unsigned long long>(counters.gtWorkerChecksumFailures));
+        if(app::gPresentedGtGpuError.load(std::memory_order_relaxed))
+            ImGui::TextColored(kErrorRed,"Vulkan compositor error");
+        ImGui::TableNextColumn();
+        ImGui::SeparatorText("Кадры / IMU");
+        ImGui::Text("GT status: %s",
+            media::gtStatusName(app::gPresentedGtStatus.load(std::memory_order_relaxed)));
+        ImGui::Text("Ready / not ready: %llu / %llu",
+            static_cast<unsigned long long>(app::gGtReadyFrames.load()),
+            static_cast<unsigned long long>(app::gGtNotReadyFrames.load()));
+        ImGui::Text("Missing / mismatch / parse: %llu / %llu / %llu",
+            static_cast<unsigned long long>(app::gGtMissingFrames.load()),
+            static_cast<unsigned long long>(app::gGtMismatchedFrames.load()),
+            static_cast<unsigned long long>(app::gGtParseErrors.load()));
+        ImGui::Text("Per-AU ready / deferred / timeout: %llu / %llu / %llu",
+            static_cast<unsigned long long>(counters.gtFrameAttachedReady),
+            static_cast<unsigned long long>(counters.gtFrameDeferred),
+            static_cast<unsigned long long>(counters.gtFrameDeferredTimeout));
+        ImGui::Text("KGT1 / IMU ready: %llu / %llu",
+            static_cast<unsigned long long>(counters.gtKgt1Frames),
+            static_cast<unsigned long long>(counters.imuReadyFrames));
+        ImGui::Text("IMU invalid / null: %llu / %llu",
+            static_cast<unsigned long long>(counters.imuInvalidFrames),
+            static_cast<unsigned long long>(counters.imuNullFrames));
+        ImGui::Text("Parse max / JSON max: %llu us / %llu bytes",
+            static_cast<unsigned long long>(counters.gtParseMaxUs),
+            static_cast<unsigned long long>(counters.gtMaxJsonBytes));
+        ImGui::EndTable();
+        if(ImGui::TreeNode("Дополнительные счётчики##gt-extra")) {
+            const auto rawW=app::gPresentedRawWidth.load(std::memory_order_relaxed);
+            const auto rawH=app::gPresentedRawHeight.load(std::memory_order_relaxed);
+            ImGui::Text("KSM1: %ux%u -> Raw %ux%u",
+                app::gPresentedSkyWidth.load(),app::gPresentedSkyHeight.load(),rawW,rawH);
+            ImGui::Text("KDM1: %ux%u -> Raw %ux%u",
+                app::gPresentedDepthWidth.load(),app::gPresentedDepthHeight.load(),rawW,rawH);
+            const auto skyStatus=app::gPresentedSkyStatus.load(std::memory_order_relaxed);
+            const auto depthStatus=app::gPresentedDepthStatus.load(std::memory_order_relaxed);
+            const auto mapName=[](media::GtMapStatus s) {
+                switch(s) {
+                    case media::GtMapStatus::Missing:return "missing";
+                    case media::GtMapStatus::NotReady:return "not_ready";
+                    case media::GtMapStatus::AmbiguousViewport:return "ambiguous_viewport";
+                    case media::GtMapStatus::Unavailable:return "unavailable";
+                    case media::GtMapStatus::Encoded:return "encoded (worker asynchronous)";
+                    case media::GtMapStatus::Ready:return "ready";
+                    case media::GtMapStatus::Invalid:return "invalid";
+                    case media::GtMapStatus::FrameMismatch:return "frame_mismatch";
+                }
+                return "unknown";
+            };
+            ImGui::Text("Небо: %s | GPU map: %s",mapName(skyStatus),
+                        app::gPresentedSkyMapReady.load()?"ready":"absent");
+            ImGui::Text("Глубина: %s | GPU map: %s",mapName(depthStatus),
+                        app::gPresentedDepthMapReady.load()?"ready":"absent");
+            if (app::gPresentedGtGpuError.load(std::memory_order_relaxed))
+                ImGui::TextColored(kErrorRed,
+                    "Vulkan GT compositor disabled: see Reg stderr for error");
+            ImGui::SeparatorText("GT / KSM1-KDM1 WORKER");
+            ImGui::Text("Небо декодировано / ошибочно: %llu / %llu",
+                static_cast<unsigned long long>(counters.gtWorkerSkyReady),
+                static_cast<unsigned long long>(counters.gtWorkerInvalidSky));
+            ImGui::Text("Глубина декодирована / ошибочно: %llu / %llu",
+                static_cast<unsigned long long>(counters.gtWorkerDepthReady),
+                static_cast<unsigned long long>(counters.gtWorkerInvalidDepth));
+            ImGui::Text("Ошибок CRC/FNV: %llu | queue drops: %llu | lock drops: %llu",
+                static_cast<unsigned long long>(counters.gtWorkerChecksumFailures),
+                static_cast<unsigned long long>(counters.gtWorkerQueueDrops),
+                static_cast<unsigned long long>(counters.gtWorkerLockDrops));
+            ImGui::Text("Очередь: %zu кадр. / %zu KiB | возраст: %llu ms",
+                counters.gtWorkerQueueFrames,
+                counters.gtWorkerQueueBytes/1024U,
+                static_cast<unsigned long long>(counters.gtWorkerQueueAgeMs));
+            ImGui::Text("Декодирование суммарно / max: %llu / %llu us",
+                static_cast<unsigned long long>(counters.gtWorkerTotalUs),
+                static_cast<unsigned long long>(counters.gtWorkerMaxUs));
+            ImGui::Text("Готовый кэш: %zu кадр. / %zu MiB (макс. 128 / 96 MiB)",
+                counters.gtWorkerCacheFrames,counters.gtWorkerCacheBytes/(1024U*1024U));
+            ImGui::Text("GT per-AU (показ): ready %llu | отсрочки %llu | timeout %llu",
+                static_cast<unsigned long long>(counters.gtFrameAttachedReady),
+                static_cast<unsigned long long>(counters.gtFrameDeferred),
+                static_cast<unsigned long long>(counters.gtFrameDeferredTimeout));
+            ImGui::Text("Fallback GT cache lookup: hit %llu | miss %llu | busy %llu",
+                static_cast<unsigned long long>(counters.gtWorkerLookupHits),
+                static_cast<unsigned long long>(counters.gtWorkerLookupMisses),
+                static_cast<unsigned long long>(counters.gtWorkerLookupBusy));
+            ImGui::Text("Вытеснено: по возрасту %llu | по лимиту %llu",
+                static_cast<unsigned long long>(counters.gtWorkerEvictedAge),
+                static_cast<unsigned long long>(counters.gtWorkerEvictedCapacity));
+            const auto mapCount=std::min(counters.gtWorkerSkyReady,counters.gtWorkerDepthReady);
+            if(mapCount>counters.decodedFrames)
+                ImGui::Text("GT ahead of RGB decode: %llu frames",
+                    static_cast<unsigned long long>(mapCount-counters.decodedFrames));
+            ImGui::SeparatorText("GT / ТЕКУЩИЙ ОТОБРАЖЁННЫЙ КАДР");
+            const auto status = app::gPresentedGtStatus.load(
+                std::memory_order_relaxed);
+            ImGui::Text("Статус: %s", media::gtStatusName(status));
+            ImGui::SeparatorText("GT / ДЕКОДИРОВАННЫЕ КАДРЫ");
+            ImGui::Text("ready: %llu",
+                static_cast<unsigned long long>(app::gGtReadyFrames.load()));
+            ImGui::Text("not_ready / busy / unavailable: %llu",
+                static_cast<unsigned long long>(app::gGtNotReadyFrames.load()));
+            ImGui::Text("missing: %llu",
+                static_cast<unsigned long long>(app::gGtMissingFrames.load()));
+            ImGui::Text("parse_error: %llu",
+                static_cast<unsigned long long>(app::gGtParseErrors.load()));
+            ImGui::Text("frame_mismatch: %llu",
+                static_cast<unsigned long long>(app::gGtMismatchedFrames.load()));
+            ImGui::SeparatorText("KGT1 / CAMERA-IMU (c начала процесса)");
+            ImGui::Text("KGT1: %llu | size >256KiB: %llu",
+                        static_cast<unsigned long long>(counters.gtKgt1Frames),
+                        static_cast<unsigned long long>(counters.gtOversizePackets));
+            ImGui::Text("IMU ready / invalid / null: %llu / %llu / %llu",
+                        static_cast<unsigned long long>(counters.imuReadyFrames),
+                        static_cast<unsigned long long>(counters.imuInvalidFrames),
+                        static_cast<unsigned long long>(counters.imuNullFrames));
+            ImGui::Text("IMU samples (overlapping windows): %llu",
+                        static_cast<unsigned long long>(counters.imuSamplesParsed));
+            ImGui::Text("KGT1 parse total / max: %llu / %llu us | JSON max: %llu bytes",
+                        static_cast<unsigned long long>(counters.gtParseTotalUs),
+                        static_cast<unsigned long long>(counters.gtParseMaxUs),
+                        static_cast<unsigned long long>(counters.gtMaxJsonBytes));
+            ImGui::Spacing();
+    
+            ImGui::TreePop();
+        }
+    }
+
+    void drawOverview(const telemetry::Snapshot& snapshot,
+                      std::chrono::steady_clock::time_point now) {
+        const float displayHeight=ImGui::GetContentRegionAvail().y;
+        drawPerformanceAndHealth(snapshot.counters,rateHistory,
+            std::clamp(displayHeight*0.35F,160.0F,320.0F));
+        ImGui::SeparatorText("GT");
+        if(ImGui::CollapsingHeader("Настройки##gt-settings",
+                ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawGtControls();
+        }
+        // The timeline always uses remaining space, independently of settings.
+        // No scrolling in Overview; object cards use pagination.
+        const bool paused=app::rangeTimelinePaused();
+        if(paused && !rangeWasPaused) {
+            pausedRangeAt=now;
+            pausedRangeTracks=snapshot.gtRangeTracks;
+        }
+        if(!paused && rangeWasPaused) pausedRangeTracks.reset();
+        rangeWasPaused=paused;
+        const auto& view=paused?pausedRangeTracks:snapshot.gtRangeTracks;
+        static const std::vector<telemetry::GtRangeTrack> empty;
+        static bool debugOpen=false;
+        const float available=ImGui::GetContentRegionAvail().y;
+        const float debugReserve=debugOpen?235.0F:32.0F;
+        const float graphHeight=std::max(85.0F,available-debugReserve);
+        if(ImGui::BeginChild("##overview-gt-charts",
+                ImVec2(0.0F,graphHeight),ImGuiChildFlags_None,
+                ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse)) {
+            gtDashboard.draw(view?*view:empty,snapshot.counters,
+                snapshot.gtCvDiagnostics,paused?pausedRangeAt:now,paused);
+        }
+        ImGui::EndChild();
+        ImGui::SetNextItemOpen(debugOpen,ImGuiCond_Always);
+        if(ImGui::CollapsingHeader("DEBUG##overview-gt-debug")) {
+            debugOpen=true;
+            drawGtDebug(snapshot);
+        } else debugOpen=false;
     }
 
     void buildDashboard(
@@ -1674,7 +1747,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             const app::TelemetryPage selectedPage =
                 app::telemetryPage();
             const ImGuiTabItemFlags overviewFlags =
-                selectedPage == app::TelemetryPage::Overview
+                (selectedPage == app::TelemetryPage::Overview || selectedPage == app::TelemetryPage::Gt)
                     ? ImGuiTabItemFlags_SetSelected
                     : ImGuiTabItemFlags_None;
             const ImGuiTabItemFlags exactSyncFlags =
@@ -1683,10 +1756,6 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     : ImGuiTabItemFlags_None;
             const ImGuiTabItemFlags netImguiFlags =
                 selectedPage == app::TelemetryPage::NetImgui
-                    ? ImGuiTabItemFlags_SetSelected
-                    : ImGuiTabItemFlags_None;
-            const ImGuiTabItemFlags gtFlags =
-                selectedPage == app::TelemetryPage::Gt
                     ? ImGuiTabItemFlags_SetSelected
                     : ImGuiTabItemFlags_None;
             const ImGuiTabItemFlags eventsFlags =
@@ -1730,14 +1799,6 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     drawNetImguiDiagnostics(netImgui);
                     ImGui::EndTabItem();
                 }
-            }
-            const bool gtOpen = ImGui::BeginTabItem("GT", nullptr, gtFlags);
-            if (ImGui::IsItemClicked()) {
-                app::setTelemetryPage(app::TelemetryPage::Gt);
-            }
-            if (gtOpen) {
-                drawGtPanel(snapshot.counters);
-                ImGui::EndTabItem();
             }
             const bool eventsOpen = ImGui::BeginTabItem(
                 "События", nullptr, eventsFlags);

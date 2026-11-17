@@ -34,10 +34,8 @@ inline void toggleTelemetryPage() noexcept {
             : (current == TelemetryPage::ExactSync
                 ? TelemetryPage::NetImgui
                 : (current == TelemetryPage::NetImgui
-                    ? TelemetryPage::Gt
-                    : (current == TelemetryPage::Gt
-                        ? TelemetryPage::Events
-                        : TelemetryPage::Overview))));
+                    ? TelemetryPage::Events
+                    : TelemetryPage::Overview)));
 }
 
 // UI-only freeze; telemetry collection and GT/CVM1 pairing keep running.
