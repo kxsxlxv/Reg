@@ -3,6 +3,7 @@
 #include <zstd.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -21,13 +22,24 @@ std::uint32_t fnv32(const std::vector<std::uint8_t>& bytes) noexcept {
     for(const auto byte:bytes) {h^=byte;h*=16777619U;}
     return h;
 }
-std::uint32_t crc32(const std::vector<std::uint8_t>& bytes) noexcept {
-    std::uint32_t value=0xffffffffU;
-    for(const auto byte:bytes) {
-        value ^= byte;
-        for(unsigned i=0;i<8U;++i)
-            value=(value>>1U)^((value&1U)?0xedb88320U:0U);
+// Table-driven standard reflected CRC32 (zlib polynomial). A 480x270
+// float32 depth frame contains 518400 bytes: the old bit-at-a-time loop
+// executed more than four million CRC rounds per frame on the worker.
+constexpr auto makeCrc32Table() noexcept {
+    std::array<std::uint32_t,256> table{};
+    for(std::uint32_t i=0;i<256U;++i) {
+        auto crc=i;
+        for(unsigned bit=0;bit<8U;++bit)
+            crc=(crc>>1U)^((crc&1U)?0xedb88320U:0U);
+        table[i]=crc;
     }
+    return table;
+}
+std::uint32_t crc32(const std::vector<std::uint8_t>& bytes) noexcept {
+    static constexpr auto table=makeCrc32Table();
+    std::uint32_t value=0xffffffffU;
+    for(const auto byte:bytes)
+        value=table[(value^byte)&0xffU]^(value>>8U);
     return value^0xffffffffU;
 }
 bool bit(const std::vector<std::uint8_t>& bytes,std::size_t index) noexcept {

@@ -149,6 +149,7 @@ void RtspDecoder::run(
                     VideoInputKind::File) {
                 decodePacket(
                     callbacks.onFrame,
+                    callbacks.onGtParts,
                     nullptr,
                     frame.get());
                 break;
@@ -173,6 +174,7 @@ void RtspDecoder::run(
 
                 decodePacket(
                     callbacks.onFrame,
+                    callbacks.onGtParts,
                     packet.get(),
                     frame.get());
             }
@@ -407,6 +409,7 @@ void RtspDecoder::close() noexcept {
 
 void RtspDecoder::decodePacket(
     const FrameCallback& onFrame,
+    const std::function<void(std::shared_ptr<const FrameGtParts>)>& onGtParts,
     AVPacket* packet,
     AVFrame* frame) {
     const auto drainFrames = [&]() {
@@ -443,7 +446,12 @@ void RtspDecoder::decodePacket(
         for(bool conflict:au.conflicts) hasGt=hasGt || conflict;
         if (hasGt) {
             try {
-                gtPts_.remember(packet->pts,makeGtParts(std::move(au)),
+                auto gtParts=makeGtParts(std::move(au));
+                // The worker owns only immutable compressed map data.
+                // Enqueue now, allowing metric map decode to overlap the
+                // subsequent FFmpeg/Vulkan hardware video decode.
+                if(onGtParts) onGtParts(gtParts);
+                gtPts_.remember(packet->pts,std::move(gtParts),
                                 bytes.size());
             } catch (...) {
                 // Optional GT metadata must not abort RGB decoding.

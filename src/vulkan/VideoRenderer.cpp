@@ -98,15 +98,17 @@ VideoRenderer::VideoRenderer(const VulkanContext& vulkan, bool allowNetImgui)
 bool VideoRenderer::renderRaw(
     const video::VideoFramePtr& frame,
     Swapchain& swapchain,
-    render::VideoOverlayRecorder* overlay) {
+    render::VideoOverlayRecorder* overlay,
+    const std::shared_ptr<const media::GtDecodedBundle>& maps,
+    const GtMapStyle& style) {
 #if defined(REG_ENABLE_NETIMGUI_REMOTE) && REG_ENABLE_NETIMGUI_REMOTE
     render::VideoOverlayRecorder* remote = ensureNetImguiOverlay(swapchain);
     if (remote != nullptr) {
         render::OverlayChainRecorder chain(overlay, remote);
-        return render(frame, swapchain, &chain);
+        return render(frame, swapchain, &chain, maps, style);
     }
 #endif
-    return render(frame, swapchain, overlay);
+    return render(frame, swapchain, overlay, maps, style);
 }
 
 VideoRenderer::~VideoRenderer() {
@@ -148,6 +150,11 @@ void VideoRenderer::resetVideoSession() {
     }
 
     destroyVideoResources();
+    // Reconnect invalidates the previous decoder-session map identity.
+    gtMapCompositor_.reset();
+    gtMapCompositorDisabled_ = false;
+    lastGtSkyDrawn_ = false;
+    lastGtDepthDrawn_ = false;
 }
 
 bool VideoRenderer::requestScreenshot(
@@ -1128,7 +1135,9 @@ VkViewport VideoRenderer::videoViewport(
 bool VideoRenderer::render(
     const video::VideoFramePtr& frame,
     Swapchain& swapchain,
-    render::VideoOverlayRecorder* overlay) {
+    render::VideoOverlayRecorder* overlay,
+    const std::shared_ptr<const media::GtDecodedBundle>& maps,
+    const GtMapStyle& style) {
     if (!frame) {
         return false;
     }
@@ -1222,6 +1231,28 @@ bool VideoRenderer::render(
 
         frameAccess_.recordSampleBarrier(slot.commandBuffer, lockedFrame);
 
+        // GT bytes were validated and decompressed asynchronously. Upload
+        // only on the Raw render thread, using this frame-slot's retired fence.
+        // The RGB Vulkan decode image is never mapped/read back.
+        bool drawGtMaps = false;
+        if (maps && (style.sky || style.depth) && !gtMapCompositorDisabled_) {
+            try {
+                if (!gtMapCompositor_)
+                    gtMapCompositor_ = std::make_unique<GtMapCompositor>(vulkan_);
+                drawGtMaps = gtMapCompositor_->prepare(
+                    slot.commandBuffer,nextFrameSlot_,swapchain.format(),maps,style);
+            } catch (const DeviceLostError&) {
+                throw;
+            } catch (const std::exception& error) {
+                std::cerr << "[gt] disabling optional GPU map overlay: "
+                          << error.what() << '\n';
+                gtMapCompositorDisabled_ = true;
+                // Never retire GPU resources here: a previous slot may still
+                // reference them. The VideoRenderer destructor/device idle
+                // or a decoder-session reset will release them safely.
+            }
+        }
+
         recordSwapchainToColorBarrier(
             slot.commandBuffer,
             swapchain.image(imageIndex),
@@ -1278,6 +1309,11 @@ bool VideoRenderer::render(
             sizeof(sampleRegion.uvRect),
             sampleRegion.uvRect.data());
         vkCmdDraw(slot.commandBuffer, 3, 1, 0, 0);
+
+        if (drawGtMaps)
+            gtMapCompositor_->draw(slot.commandBuffer,nextFrameSlot_,style);
+        lastGtSkyDrawn_ = drawGtMaps && style.sky;
+        lastGtDepthDrawn_ = drawGtMaps && style.depth;
 
         if (overlay != nullptr) {
             overlay->record(

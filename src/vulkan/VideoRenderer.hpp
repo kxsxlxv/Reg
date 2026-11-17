@@ -1,6 +1,7 @@
 #pragma once
 
 #include "video/VideoFrame.hpp"
+#include "vulkan/GtMapCompositor.hpp"
 #include "vulkan/Swapchain.hpp"
 #include "vulkan/VulkanVideoFrameAccess.hpp"
 
@@ -53,14 +54,18 @@ public:
     bool renderRaw(
         const video::VideoFramePtr& frame,
         Swapchain& swapchain,
-        render::VideoOverlayRecorder* overlay);
+        render::VideoOverlayRecorder* overlay,
+        const std::shared_ptr<const media::GtDecodedBundle>& maps = {},
+        const GtMapStyle& style = {});
 
     // Non-blocking video render with an explicit caller-owned overlay. Returns
     // false when the GPU/swapchain is temporarily not ready.
     bool render(
         const video::VideoFramePtr& frame,
         Swapchain& swapchain,
-        render::VideoOverlayRecorder* overlay);
+        render::VideoOverlayRecorder* overlay,
+        const std::shared_ptr<const media::GtDecodedBundle>& maps = {},
+        const GtMapStyle& style = {});
 
     // Presents a black frame, optionally with an ImGui overlay. Used for
     // explicit NO SIGNAL presentation without stopping/restarting the decoder.
@@ -79,6 +84,10 @@ public:
     // decoded-video presentation path.
     bool requestScreenshot(
         std::filesystem::path path);
+
+    bool lastGtSkyDrawn() const noexcept { return lastGtSkyDrawn_; }
+    bool lastGtDepthDrawn() const noexcept { return lastGtDepthDrawn_; }
+    bool gtMapGpuError() const noexcept { return gtMapCompositorDisabled_; }
 
     bool screenshotPending() const noexcept {
         return pendingScreenshot_.has_value();
@@ -223,6 +232,10 @@ private:
 
     VkPipelineLayout pipelineLayout_{VK_NULL_HANDLE};
     VkPipeline pipeline_{VK_NULL_HANDLE};
+    std::unique_ptr<GtMapCompositor> gtMapCompositor_;
+    bool gtMapCompositorDisabled_{false};
+    bool lastGtSkyDrawn_{false};
+    bool lastGtDepthDrawn_{false};
     VkFormat pipelineSwapchainFormat_{VK_FORMAT_UNDEFINED};
 
     VkSwapchainKHR observedSwapchain_{VK_NULL_HANDLE};

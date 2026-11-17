@@ -7,6 +7,7 @@
 #include "diagnostics/api/runtime/DiagnosticRuntime.hpp"
 #include "media/RtspDecoder.hpp"
 #include "media/GtMapWorker.hpp"
+#include "media/GtDisplaySelection.hpp"
 #include "media/VulkanHwDevice.hpp"
 #include "metadata/MetadataReceiver.hpp"
 #include "metadata/MetadataStore.hpp"
@@ -493,6 +494,12 @@ int runApplication(
                                                 std::move(packet)));
                                     }
                                 },
+                            .onGtParts =
+                                [&](std::shared_ptr<const reg::media::FrameGtParts> parts) {
+                                    // Queue compressed maps before hardware
+                                    // video decode so both paths can overlap.
+                                    static_cast<void>(gtMapWorker.submit(std::move(parts)));
+                                },
                             .onFrame =
                                 [&](reg::video::VideoFramePtr frame) {
                                     const auto identity =
@@ -542,9 +549,6 @@ int runApplication(
                                     reg::app::observeGt(frame->gt().status);
                                     gtIngestStats.observe(frame->gt());
                                     gtIngestStats.observeMaps(frame->allGt());
-                                    // Compressed GT is independent of AVVkFrame
-                                    // lifetime. Never decompress on decoder thread.
-                                    static_cast<void>(gtMapWorker.submit(frame->gtParts()));
                                     telemetryModel.observeGtRange(
                                         frame->gt(), frame->decodedAt());
                                     rawMailbox.publish(frame);
@@ -845,6 +849,11 @@ int runApplication(
         };
 
         reg::video::VideoFramePtr lastRawPresented;
+        // Never present an encoded GT frame before its own AU result has had
+        // a small chance to finish. This does not block RTSP/decode threads.
+        reg::video::VideoFramePtr rawGtWaitingFrame;
+        std::chrono::steady_clock::time_point rawGtWaitSince{};
+        std::uint64_t gtAttachedReady{0},gtDeferred{0},gtWaitTimedOut{0};
         std::uint64_t rawRenderNotReadyAttempts{0};
         double rawRenderAttemptTotalMs{0.0};
         std::optional<reg::video::SynchronizedFrame>
@@ -1041,6 +1050,7 @@ int runApplication(
 
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
+                    rawGtWaitingFrame.reset();
                     trackHistory.clear();
                     telemetryModel.clearTargets();
                     telemetryModel.log(
@@ -1069,6 +1079,7 @@ int runApplication(
                         sessionGeneration;
                     pendingOverlayFrame.reset();
                     lastRawPresented.reset();
+                    rawGtWaitingFrame.reset();
                     trackHistory.clear();
                     telemetryModel.clearTargets();
                     didWork = true;
@@ -1112,6 +1123,7 @@ int runApplication(
                         exactSyncDiagnostics.clearPending();
                         pendingOverlayFrame.reset();
                         lastRawPresented.reset();
+                        rawGtWaitingFrame.reset();
                         trackHistory.clear();
                         telemetryModel.clearTargets();
                         telemetryModel.log(
@@ -1196,9 +1208,39 @@ int runApplication(
                     }
                 } else {
                     const auto latest = rawMailbox.latest();
+                    bool deferRawForGt = false;
+                    if(latest && latest!=lastRawPresented &&
+                       rawWindow.available()) {
+                        const auto& parts=latest->allGt();
+                        const bool requestedEncoded=
+                            (reg::app::showGtSky() &&
+                             parts.sky.status==reg::media::GtMapStatus::Encoded) ||
+                            (reg::app::showGtDepth() &&
+                             parts.depth.status==reg::media::GtMapStatus::Encoded);
+                        if(requestedEncoded && parts.decodedMaps &&
+                           !parts.decodedMaps->ready.load(std::memory_order_acquire)) {
+                            if(rawGtWaitingFrame!=latest) {
+                                rawGtWaitingFrame=latest;
+                                rawGtWaitSince=loopNow;
+                            }
+                            if(loopNow-rawGtWaitSince<
+                               std::chrono::milliseconds{8}) {
+                                deferRawForGt=true;
+                                ++gtDeferred;
+                            } else {
+                                ++gtWaitTimedOut;
+                                rawGtWaitingFrame.reset();
+                            }
+                        } else {
+                            rawGtWaitingFrame.reset();
+                        }
+                    } else if(!latest || latest==lastRawPresented) {
+                        rawGtWaitingFrame.reset();
+                    }
                     if (latest &&
                         latest != lastRawPresented &&
-                        rawWindow.available()) {
+                        rawWindow.available() &&
+                        !deferRawForGt) {
                         try {
                             const auto renderBegin =
                                 std::chrono::steady_clock::now();
@@ -1223,11 +1265,52 @@ int runApplication(
                                 identityScene,
                                 rawWindow.swapchain());
 
+                            // The asynchronous worker may be late: never
+                            // reuse a map from another FrameKey or timestamp.
+                            std::shared_ptr<const reg::media::GtDecodedBundle> gtMaps;
+                            reg::vulkan::GtMapStyle mapStyle{
+                                .sky=reg::app::showGtSky(),
+                                .depth=reg::app::showGtDepth(),
+                                .skySmooth=reg::app::gGtSkySmooth.load(),
+                                .depthSmooth=reg::app::gGtDepthSmooth.load(),
+                                .skyOpacity=reg::app::gGtSkyOpacity.load(),
+                                .depthOpacity=reg::app::gGtDepthOpacity.load(),
+                                .nearM=reg::app::gGtDepthNearM.load(),
+                                .farM=reg::app::gGtDepthFarM.load(),
+                            };
+                            if (mapStyle.sky || mapStyle.depth) {
+                                if (const auto id=latest->identity()) {
+                                    // Prefer the immutable decoded result
+                                    // attached to this exact compressed AU.
+                                    // It survives arbitrary eviction of the
+                                    // worker's bounded global frame cache.
+                                    const auto parts=latest->gtParts();
+                                    if(parts->decodedMaps) {
+                                        gtMaps=parts->decodedMaps->ready.load(
+                                            std::memory_order_acquire);
+                                        if(gtMaps)++gtAttachedReady;
+                                    } else {
+                                        gtMaps=gtMapWorker.find(id->key);
+                                    }
+                                    if (gtMaps) {
+                                        const auto selected=reg::media::selectGtDisplayLayers(
+                                            latest->allGt(),*gtMaps,
+                                            latest->width(),latest->height(),
+                                            mapStyle.sky,mapStyle.depth);
+                                        mapStyle.sky=selected.sky;
+                                        mapStyle.depth=selected.depth;
+                                        if (!selected.sky && !selected.depth)
+                                            gtMaps.reset();
+                                    }
+                                }
+                            }
                             const bool renderSucceeded =
                                 rawRenderer.renderRaw(
                                     latest,
                                     rawWindow.swapchain(),
-                                    rawSignalRenderer.get());
+                                    rawSignalRenderer.get(),
+                                    gtMaps,
+                                    mapStyle);
                             const auto renderEnd =
                                 std::chrono::steady_clock::now();
                             const double renderAttemptMs =
@@ -1242,6 +1325,24 @@ int runApplication(
                                 reg::app::gPresentedGtStatus.store(
                                     latest->gt().status,
                                     std::memory_order_relaxed);
+                                reg::app::gPresentedRawWidth.store(static_cast<std::uint32_t>(latest->width()));
+                                reg::app::gPresentedRawHeight.store(static_cast<std::uint32_t>(latest->height()));
+                                reg::app::gPresentedSkyWidth.store(latest->skyGt().width);
+                                reg::app::gPresentedSkyHeight.store(latest->skyGt().height);
+                                reg::app::gPresentedDepthWidth.store(latest->depthGt().width);
+                                reg::app::gPresentedDepthHeight.store(latest->depthGt().height);
+                                reg::app::gPresentedSkyStatus.store(
+                                    latest->skyGt().status,std::memory_order_relaxed);
+                                reg::app::gPresentedDepthStatus.store(
+                                    latest->depthGt().status,std::memory_order_relaxed);
+                                reg::app::gPresentedSkyMapReady.store(
+                                    rawRenderer.lastGtSkyDrawn(),
+                                    std::memory_order_relaxed);
+                                reg::app::gPresentedDepthMapReady.store(
+                                    rawRenderer.lastGtDepthDrawn(),
+                                    std::memory_order_relaxed);
+                                reg::app::gPresentedGtGpuError.store(
+                                    rawRenderer.gtMapGpuError(),std::memory_order_relaxed);
                                 didWork = true;
 
                                 const auto count =
@@ -1576,6 +1677,16 @@ int runApplication(
                             .gtWorkerQueueBytes = mapStats.pendingBytes,
                             .gtWorkerQueueFrames = mapStats.pendingFrames,
                             .gtWorkerQueueAgeMs = mapStats.oldestPendingAgeMs,
+                            .gtFrameAttachedReady = gtAttachedReady,
+                            .gtFrameDeferred = gtDeferred,
+                            .gtFrameDeferredTimeout = gtWaitTimedOut,
+                            .gtWorkerCacheFrames = mapStats.readyFrames,
+                            .gtWorkerCacheBytes = mapStats.readyBytes,
+                            .gtWorkerEvictedAge = mapStats.cacheEvictedAge,
+                            .gtWorkerEvictedCapacity = mapStats.cacheEvictedCapacity,
+                            .gtWorkerLookupHits = mapStats.lookupHits,
+                            .gtWorkerLookupMisses = mapStats.lookupMisses,
+                            .gtWorkerLookupBusy = mapStats.lookupBusy,
                             .gtBenchmarkEnabled = options.gtCapturePolicy ==
                                 reg::app::GtCapturePolicy::Benchmark,
                             .gtBenchmarkFailed = gtBenchmarkLossObserved,
