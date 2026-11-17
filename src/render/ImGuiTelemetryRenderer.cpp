@@ -1519,16 +1519,14 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     const float fieldWidth=std::max(48.0F,
                         (available-ImGui::GetStyle().ItemSpacing.x)*0.5F);
                     ImGui::SetNextItemWidth(fieldWidth);
-                    if(ImGui::DragFloat("##gt-near",&nearM,0.5F,
-                            0.1F,farM-0.1F,"%.1f")) {
+                    if(ImGui::InputFloat("##gt-near",&nearM,0.0F,0.0F,"%.1f")) {
                         nearM=std::clamp(nearM,0.1F,farM-0.1F);
                         app::gGtDepthNearM.store(nearM,std::memory_order_relaxed);
                     }
-                    gtTooltip("Ближняя граница логарифмической шкалы, м.");
+                    gtTooltip("Ближняя граница логарифмической шкалы, м. Щёлкните и введите число.");
                     ImGui::SameLine();
                     ImGui::SetNextItemWidth(fieldWidth);
-                    if(ImGui::DragFloat("##gt-far",&farM,1.0F,
-                            nearM+0.1F,20000.0F,"%.1f")) {
+                    if(ImGui::InputFloat("##gt-far",&farM,0.0F,0.0F,"%.1f")) {
                         farM=std::max(farM,nearM+0.1F);
                         app::gGtDepthFarM.store(farM,std::memory_order_relaxed);
                     }
