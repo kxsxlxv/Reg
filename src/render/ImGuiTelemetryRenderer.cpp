@@ -1347,7 +1347,12 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             static_cast<unsigned long long>(counters.gtWorkerMaxUs));
         ImGui::Text("Готовый кэш: %zu кадр. / %zu MiB (макс. 128 / 96 MiB)",
             counters.gtWorkerCacheFrames,counters.gtWorkerCacheBytes/(1024U*1024U));
-        ImGui::Text("GT lookup: hit %llu | miss %llu | busy %llu",
+        ImGui::Text("GT per-AU (показ): ready %llu | отсрочки %llu | timeout %llu",
+            static_cast<unsigned long long>(counters.gtFrameAttachedReady),
+            static_cast<unsigned long long>(counters.gtFrameDeferred),
+            static_cast<unsigned long long>(counters.gtFrameDeferredTimeout));
+        ImGui::TextDisabled("Raw берёт GT из своего AU, а не из вытесняемого кэша.");
+        ImGui::Text("Fallback GT cache lookup: hit %llu | miss %llu | busy %llu",
             static_cast<unsigned long long>(counters.gtWorkerLookupHits),
             static_cast<unsigned long long>(counters.gtWorkerLookupMisses),
             static_cast<unsigned long long>(counters.gtWorkerLookupBusy));
