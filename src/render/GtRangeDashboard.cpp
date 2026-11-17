@@ -304,39 +304,14 @@ struct GtRangeDashboard::Impl {
               Clock::time_point anchor,
               bool paused) {
         reloadConfig(Clock::now());
-        if (paused)
-            ImGui::TextColored(kDefaultDetection, "ПАУЗА");
-        else
-            ImGui::TextDisabled("GT range  /  CVM1 IoU (FrameKey)");
-        ImGui::TextDisabled("CVM1 UDP %llu  decoded %llu  accepted %llu  targets %llu",
-            static_cast<unsigned long long>(counters.metadataPackets),
-            static_cast<unsigned long long>(counters.metadataValidFrames),
-            static_cast<unsigned long long>(counters.metadataAcceptedFrames),
-            static_cast<unsigned long long>(counters.metadataTargets));
-        ImGui::TextDisabled("Exact FrameKey joins %llu  matched CV %llu  plotted %zu",
-            static_cast<unsigned long long>(diagnostics.joinedFrames),
-            static_cast<unsigned long long>(diagnostics.matchedTargets),
-            markersDrawnLastFrame);
-        ImGui::TextDisabled("RGF1 missing %llu  GT unavailable %llu  unmatched CV %llu  expired CV %llu  pending CV %llu",
-            static_cast<unsigned long long>(counters.identityMissingFrames),
-            static_cast<unsigned long long>(diagnostics.gtUnavailableFrames),
-            static_cast<unsigned long long>(diagnostics.unmatchedCvFrames),
-            static_cast<unsigned long long>(diagnostics.expiredCvFrames),
-            static_cast<unsigned long long>(diagnostics.pendingCvFrames));
-        if (counters.metadataPackets > 0 && counters.metadataValidFrames == 0)
-            ImGui::TextColored(ImVec4(1.0F, 0.30F, 0.30F, 1.0F),
-                "CVM1 received but protocol decoder rejected every datagram");
-        else if (counters.metadataAcceptedFrames > 0 && diagnostics.joinedFrames == 0)
-            ImGui::TextColored(ImVec4(1.0F, 0.58F, 0.22F, 1.0F),
-                "CVM1 accepted, but there are no exact GT FrameKey joins");
-        else if (diagnostics.joinedFrames > 0 && diagnostics.matchedTargets == 0 && counters.metadataTargets > 0)
-            ImGui::TextColored(ImVec4(1.0F, 0.58F, 0.22F, 1.0F),
-                "Exact FrameKey joins exist, but no target passed IoU 0.30");
-        ImGui::Separator();
+        if(paused) {
+            ImGui::TextColored(kDefaultDetection,"ПАУЗА");
+            ImGui::SameLine();
+        }
         markersDrawnLastFrame = 0;
 
         if (tracks.empty()) {
-            ImGui::TextDisabled("Ожидание GT с полем range_m...");
+            ImGui::TextDisabled("Нет данных дальности");
             return;
         }
         if (!focusedId.empty() &&
