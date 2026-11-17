@@ -1374,38 +1374,103 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
     }
 
     static void drawGtPanel(const telemetry::Counters& counters) {
-        ImGui::SeparatorText("GT / СЛОИ RAW (VULKAN)");
-        bool sky=app::showGtSky();
-        if(ImGui::Checkbox("Маска неба KSM1",&sky))
-            app::gShowGtSky.store(sky,std::memory_order_relaxed);
-        float skyAlpha=app::gGtSkyOpacity.load(std::memory_order_relaxed);
-        if(ImGui::SliderFloat("Прозрачность неба",&skyAlpha,0.0F,1.0F,"%.2f"))
-            app::gGtSkyOpacity.store(skyAlpha,std::memory_order_relaxed);
-        bool smoothSky=app::gGtSkySmooth.load(std::memory_order_relaxed);
-        if(ImGui::Checkbox("Сглаживать маску (Linear)",&smoothSky))
-            app::gGtSkySmooth.store(smoothSky,std::memory_order_relaxed);
-        bool depth=app::showGtDepth();
-        if(ImGui::Checkbox("Карта глубины KDM1 (optical Z)",&depth))
-            app::gShowGtDepth.store(depth,std::memory_order_relaxed);
-        float depthAlpha=app::gGtDepthOpacity.load(std::memory_order_relaxed);
-        if(ImGui::SliderFloat("Прозрачность глубины",&depthAlpha,0.0F,1.0F,"%.2f"))
-            app::gGtDepthOpacity.store(depthAlpha,std::memory_order_relaxed);
-        bool smoothDepth=app::gGtDepthSmooth.load(std::memory_order_relaxed);
-        if(ImGui::Checkbox("Сглаживать глубину (Linear, Z=0 прозрачен)",&smoothDepth))
-            app::gGtDepthSmooth.store(smoothDepth,std::memory_order_relaxed);
-        float nearM=app::gGtDepthNearM.load(std::memory_order_relaxed);
-        float farM=app::gGtDepthFarM.load(std::memory_order_relaxed);
-        if(ImGui::DragFloat("Ближний Z, м",&nearM,0.5F,0.0F,10000.0F,"%.1f")) {
-            nearM=std::clamp(nearM,0.0F,farM-0.1F);
-            app::gGtDepthNearM.store(nearM,std::memory_order_relaxed);
-        }
-        if(ImGui::DragFloat("Дальний Z, м",&farM,1.0F,nearM+0.1F,20000.0F,"%.1f"))
-            app::gGtDepthFarM.store(std::max(farM,nearM+0.1F),std::memory_order_relaxed);
-        ImGui::TextDisabled("Z: тёплые цвета = ближе, синие = дальше; 0 = нет глубины.");
-        ImGui::TextDisabled("KSM1: бирюзовый = небо, неизвестные пиксели прозрачны.");
-        ImGui::TextDisabled("Маска и глубина растягиваются на область Raw RGB.");
-        ImGui::TextDisabled("Nearest: без сглаживания; Linear: плавные границы.");
-        ImGui::TextDisabled("Маска и карта строго совпадают с FrameKey Raw-кадра.");
+        // The telemetry host window disables scrolling; the GT panel owns
+        // an independent scroll region for expanded DEBUG diagnostics.
+        const bool gtVisible=ImGui::BeginChild(
+            "##gt-panel-body",ImVec2(0.0F,0.0F),
+            ImGuiChildFlags_None,ImGuiWindowFlags_None);
+        if(gtVisible) {
+            // Three columns, matching the Launcher's equal-width card grid.
+            if(ImGui::BeginTable("##gt-three-cards",3,
+                    ImGuiTableFlags_SizingStretchSame)) {
+                ImGui::TableNextColumn();
+                if(beginGtCard("##gt-card-bbox",
+                        ImVec4(0.095F,0.133F,0.185F,1.0F),
+                        ImVec4(0.40F,0.80F,0.97F,1.0F))) {
+                    bool enabled=app::showGtBoxes();
+                    gtCardHeading("GT BBOX",&enabled,
+                        ImVec4(0.40F,0.80F,0.97F,1.0F),
+                        "Рамки Ground Truth поверх Raw. Клавиша T.");
+                    if(enabled!=app::showGtBoxes())
+                        app::setShowGtBoxes(enabled);
+                    bool ids=app::showGtIds();
+                    if(ImGui::Checkbox("ID##gt-ids",&ids))
+                        app::setShowGtIds(ids);
+                    gtTooltip("Идентификаторы объектов рядом с GT BBox.");
+                    bool ranges=app::showGtRanges();
+                    if(ImGui::Checkbox("Дальность##gt-ranges",&ranges))
+                        app::setShowGtRanges(ranges);
+                    gtTooltip("range_m — расстояние до корня объекта, не optical Z.");
+                }
+                ImGui::EndChild();
+
+                ImGui::TableNextColumn();
+                if(beginGtCard("##gt-card-sky",
+                        ImVec4(0.085F,0.155F,0.165F,1.0F),
+                        ImVec4(0.24F,0.91F,0.85F,1.0F))) {
+                    bool enabled=app::showGtSky();
+                    gtCardHeading("GT Небо##gt-sky-enabled",enabled,
+                        ImVec4(0.24F,0.91F,0.85F,1.0F),
+                        "KSM1: маска неба поверх Raw RGB. Бирюзовый цвет.");
+                    if(enabled!=app::showGtSky())
+                        app::gShowGtSky.store(enabled,std::memory_order_relaxed);
+                    gtOpacityControl("##gt-sky-opacity",app::gGtSkyOpacity);
+                    bool linear=app::gGtSkySmooth.load(std::memory_order_relaxed);
+                    if(ImGui::Checkbox("Linear##gt-sky-linear",&linear))
+                        app::gGtSkySmooth.store(linear,std::memory_order_relaxed);
+                    gtTooltip("Nearest — чёткая бинарная маска. Linear — плавные края.");
+                    drawGtSkyLegend(app::gGtSkyOpacity.load(std::memory_order_relaxed));
+                }
+                ImGui::EndChild();
+
+                ImGui::TableNextColumn();
+                if(beginGtCard("##gt-card-depth",
+                        ImVec4(0.170F,0.124F,0.124F,1.0F),
+                        ImVec4(0.99F,0.68F,0.31F,1.0F))) {
+                    bool enabled=app::showGtDepth();
+                    gtCardHeading("GT Карта глубины##gt-depth-enabled",enabled,
+                        ImVec4(0.99F,0.68F,0.31F,1.0F),
+                        "KDM1: оптическая глубина Z, в метрах. Логарифмическая цветовая шкала.");
+                    if(enabled!=app::showGtDepth())
+                        app::gShowGtDepth.store(enabled,std::memory_order_relaxed);
+                    gtOpacityControl("##gt-depth-opacity",app::gGtDepthOpacity);
+                    bool linear=app::gGtDepthSmooth.load(std::memory_order_relaxed);
+                    if(ImGui::Checkbox("Linear##gt-depth-linear",&linear))
+                        app::gGtDepthSmooth.store(linear,std::memory_order_relaxed);
+                    gtTooltip("Nearest — резкие границы. Linear — сглаживание только по валидным Z; Z=0 остаётся прозрачным.");
+                    float nearM=std::max(0.1F,app::gGtDepthNearM.load(
+                        std::memory_order_relaxed));
+                    float farM=std::max(nearM+0.1F,app::gGtDepthFarM.load(
+                        std::memory_order_relaxed));
+                    ImGui::TextDisabled("Z, м");
+                    const float available=ImGui::GetContentRegionAvail().x;
+                    const float fieldWidth=std::max(48.0F,
+                        (available-ImGui::GetStyle().ItemSpacing.x)*0.5F);
+                    ImGui::SetNextItemWidth(fieldWidth);
+                    if(ImGui::DragFloat("##gt-near",&nearM,0.5F,
+                            0.1F,farM-0.1F,"%.1f")) {
+                        nearM=std::clamp(nearM,0.1F,farM-0.1F);
+                        app::gGtDepthNearM.store(nearM,std::memory_order_relaxed);
+                    }
+                    gtTooltip("Ближняя граница логарифмической шкалы, м.");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(fieldWidth);
+                    if(ImGui::DragFloat("##gt-far",&farM,1.0F,
+                            nearM+0.1F,20000.0F,"%.1f")) {
+                        farM=std::max(farM,nearM+0.1F);
+                        app::gGtDepthFarM.store(farM,std::memory_order_relaxed);
+                    }
+                    gtTooltip("Дальняя граница логарифмической шкалы, м.");
+                    drawGtDepthLegend(nearM,farM);
+                }
+                ImGui::EndChild();
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            // Counters are recorded continuously, rendered only when opened.
+            if(ImGui::CollapsingHeader("DEBUG##gt",
+                    ImGuiTreeNodeFlags_None)) {
         const auto rawW=app::gPresentedRawWidth.load(std::memory_order_relaxed);
         const auto rawH=app::gPresentedRawHeight.load(std::memory_order_relaxed);
         ImGui::Text("KSM1: %ux%u -> Raw %ux%u",
@@ -1471,22 +1536,6 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             ImGui::Text("GT ahead of RGB decode: %llu frames",
                 static_cast<unsigned long long>(mapCount-counters.decodedFrames));
         ImGui::TextDisabled("Encoded: GT принят, но не гарантирует готовность GPU-слоя.");
-        ImGui::SeparatorText("GT / BBOX");
-        bool showBoxes = app::showGtBoxes();
-        if (ImGui::Checkbox("Показывать GT bbox (T / Е)", &showBoxes)) {
-            app::setShowGtBoxes(showBoxes);
-        }
-        bool showIds = app::showGtIds();
-        if (ImGui::Checkbox("Показывать ID объектов", &showIds)) {
-            app::setShowGtIds(showIds);
-        }
-        bool showRanges=app::showGtRanges();
-        if (ImGui::Checkbox("Показывать root range_m (метры)", &showRanges))
-            app::setShowGtRanges(showRanges);
-        ImGui::TextDisabled(
-            "range_m = расстояние до корня объекта, НЕ optical Z.");
-        ImGui::TextDisabled(
-            "Локальный OSD Raw: запись и вход CV остаются без изменений.");
         ImGui::SeparatorText("GT / ТЕКУЩИЙ ОТОБРАЖЁННЫЙ КАДР");
         const auto status = app::gPresentedGtStatus.load(
             std::memory_order_relaxed);
@@ -1520,6 +1569,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         ImGui::Spacing();
         ImGui::TextDisabled(
             "GT наносится только на кадр с идентичными epoch, frame_id и source_time_ns.");
+            }
+        }
+        ImGui::EndChild();
     }
 
     void buildDashboard(
