@@ -205,7 +205,13 @@ void GtMapWorker::run(std::stop_token token) {
         // argument evaluation order is unspecified: reading decoded->identity
         // alongside std::move(decoded) caused a Windows CTest segfault.
         const FrameKey key = decoded->identity.key;
-        Cached cached{std::move(decoded),bytes,std::chrono::steady_clock::now()};
+        std::shared_ptr<const GtDecodedBundle> result=std::move(decoded);
+        // The packet's GT parts are also owned by its decoded VideoFrame.
+        // This immutable per-AU result survives the global cache evicting
+        // old keys when FFmpeg/Vulkan decode lags the compressed stream.
+        if(task.parts->decodedMaps)
+            task.parts->decodedMaps->ready.store(result,std::memory_order_release);
+        Cached cached{std::move(result),bytes,std::chrono::steady_clock::now()};
         auto [it,inserted]=ready_.emplace(key,std::move(cached));
         if(inserted) readyBytes_+=bytes;
         pruneLocked(std::chrono::steady_clock::now());
