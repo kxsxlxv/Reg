@@ -1462,7 +1462,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                         farM=std::max(farM,nearM+0.1F);
                         app::gGtDepthFarM.store(farM,std::memory_order_relaxed);
                     }
-                    gtTooltip("Дальняя граница логарифмической шкалы, м.");
+                    gtTooltip("Дальний предел Z, м. Значения выше него становятся синими; увеличьте предел для дальних сцен.");
                     drawGtDepthLegend(nearM,farM);
                 }
                 ImGui::EndChild();
