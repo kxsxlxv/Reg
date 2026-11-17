@@ -449,7 +449,8 @@ void GtMapCompositor::draw(
         static_cast<std::int32_t>(slot.depthWidth),
         static_cast<std::int32_t>(slot.depthHeight)};
     push.flags={slot.skyReady?1:0,slot.depthReady?1:0,
-                slot.validityPlane?1:0,0};
+                slot.validityPlane?1:0,
+                (style.skySmooth?1:0)|(style.depthSmooth?2:0)};
     vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline_);
     vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout_,0,1,&slot.descriptorSet,0,nullptr);
