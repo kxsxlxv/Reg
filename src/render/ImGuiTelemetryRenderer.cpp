@@ -1324,6 +1324,9 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     app::gPresentedSkyMapReady.load()?"ready":"absent");
         ImGui::Text("Глубина: %s | GPU map: %s",mapName(depthStatus),
                     app::gPresentedDepthMapReady.load()?"ready":"absent");
+        if (app::gPresentedGtGpuError.load(std::memory_order_relaxed))
+            ImGui::TextColored(kErrorRed,
+                "Vulkan GT compositor disabled: see Reg stderr for error");
         ImGui::SeparatorText("GT / KSM1-KDM1 WORKER");
         ImGui::Text("Небо декодировано / ошибочно: %llu / %llu",
             static_cast<unsigned long long>(counters.gtWorkerSkyReady),
