@@ -3,6 +3,7 @@
 #include "telemetry/TelemetryModel.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -10,6 +11,17 @@ namespace reg::render {
 
 // Visualization-only component. No frame decoding, synchronization, network
 // I/O or estimator state is coupled to ImPlot.
+struct GtRangeViewSettings {
+    bool frameAxis{false};
+    bool manual{false};
+    double windowSeconds{60.0};
+    std::uint64_t windowFrames{600};
+    double fromSeconds{-60.0};
+    double toSeconds{0.0};
+    std::uint64_t fromFrame{};
+    std::uint64_t toFrame{};
+};
+
 class GtRangeDashboard final {
 public:
     GtRangeDashboard();
@@ -23,7 +35,8 @@ public:
               const telemetry::Counters& counters,
               const telemetry::GtCvDiagnostics& diagnostics,
               std::chrono::steady_clock::time_point anchor,
-              bool paused);
+              bool paused,
+              GtRangeViewSettings& view);
 
 private:
     struct Impl;

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -68,8 +69,26 @@ std::filesystem::path settingsPath() {
     return "config/gt-range-ui.json";
 }
 
-bool visible(double x, const ChartSettings& settings) {
-    return x >= -settings.windowSeconds && x <= 0.0;
+double frameOffset(std::uint64_t id, std::uint64_t origin) {
+    return id >= origin ? static_cast<double>(id-origin)
+                        : -static_cast<double>(origin-id);
+}
+
+std::uint64_t frameAtOffset(double value,std::uint64_t origin) {
+    if(!std::isfinite(value)) return origin;
+    const auto magnitude=static_cast<std::uint64_t>(std::min(
+        std::abs(value),static_cast<double>(std::numeric_limits<std::int64_t>::max())));
+    return value<0
+        ? origin-std::min(origin,magnitude)
+        : origin+(std::min(magnitude,
+            std::numeric_limits<std::uint64_t>::max()-origin));
+}
+
+int formatFrameAxis(double value,char* buffer,int size,void* userData) {
+    const auto origin=*static_cast<const std::uint64_t*>(userData);
+    const std::uint64_t id=frameAtOffset(std::round(value),origin);
+    return std::snprintf(buffer,static_cast<std::size_t>(size),"%llu",
+                         static_cast<unsigned long long>(id));
 }
 
 } // namespace
@@ -83,6 +102,8 @@ struct GtRangeDashboard::Impl {
     std::string focusedId;
     int page{};
     std::size_t markersDrawnLastFrame{};
+    bool selectingRange{};
+    double selectionStart{};
 
     void reloadConfig(Clock::time_point now) {
         if (now < nextCheck) return;
@@ -120,7 +141,10 @@ struct GtRangeDashboard::Impl {
     void plotCard(const telemetry::GtRangeTrack& track,
                   float height,
                   Clock::time_point anchor,
-                  bool paused) {
+                  bool paused,
+                  GtRangeViewSettings& view,
+                  std::uint64_t frameOrigin,
+                  std::uint64_t activeEpoch) {
         ImGui::PushID(track.id.c_str());
         constexpr ImGuiWindowFlags noScroll =
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
@@ -141,10 +165,23 @@ struct GtRangeDashboard::Impl {
                 std::max(60.0F, ImGui::GetContentRegionAvail().y);
             if (ImPlot::BeginPlot("##gt_range", ImVec2(-1.0F, graphHeight),
                                   ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
-                ImPlot::SetupAxis(ImAxis_X1, "сек", ImPlotAxisFlags_NoMenus);
-                ImPlot::SetupAxisLimits(
-                    ImAxis_X1, -settings.windowSeconds, 0.0,
-                    paused ? ImPlotCond_Once : ImPlotCond_Always);
+                ImPlot::SetupAxis(ImAxis_X1, view.frameAxis ? "Кадр" : "сек",
+                                  ImPlotAxisFlags_NoMenus);
+                if(view.frameAxis) {
+                    ImPlot::SetupAxisFormat(ImAxis_X1,formatFrameAxis,&frameOrigin);
+                    ImPlot::SetupAxisLimits(ImAxis_X1,
+                        view.manual && paused
+                            ? frameOffset(view.fromFrame,frameOrigin)
+                            : -static_cast<double>(view.windowFrames),
+                        view.manual && paused
+                            ? frameOffset(view.toFrame,frameOrigin) : 0.0,
+                        ImPlotCond_Always);
+                } else {
+                    ImPlot::SetupAxisLimits(ImAxis_X1,
+                        view.manual && paused ? view.fromSeconds : -view.windowSeconds,
+                        view.manual && paused ? view.toSeconds : 0.0,
+                        ImPlotCond_Always);
+                }
                 ImPlot::SetupAxis(ImAxis_Y1, "м",
                     ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit |
                     ImPlotAxisFlags_NoMenus);
@@ -176,9 +213,17 @@ struct GtRangeDashboard::Impl {
                 };
                 Clock::time_point previous{};
                 for (const auto& sample : track.points) {
-                    const double t = secondsBetween(sample.time, anchor);
-                    if (!visible(t, settings)) {
-                        if (!xs.empty()) flush();
+                    if(view.frameAxis && sample.frame.streamEpoch!=activeEpoch) {
+                        if(!xs.empty()) flush();
+                        continue;
+                    }
+                    const double t=view.frameAxis
+                        ? frameOffset(sample.frame.frameId,frameOrigin)
+                        : secondsBetween(sample.time,anchor);
+                    if (!view.manual && (view.frameAxis
+                            ? (t < -static_cast<double>(view.windowFrames) || t>0.0)
+                            : (t < -view.windowSeconds || t>0.0))) {
+                        if(!xs.empty()) flush();
                         continue;
                     }
                     if (!xs.empty() &&
@@ -195,8 +240,14 @@ struct GtRangeDashboard::Impl {
                      group < cvm1::kStyleCount; ++group) {
                     std::vector<double> mx, my;
                     for (const auto& m : track.matches) {
-                        const double x = secondsBetween(m.time, anchor);
-                        if (!visible(x, settings) ||
+                        if(view.frameAxis && m.frame.streamEpoch!=activeEpoch)
+                            continue;
+                        const double x=view.frameAxis
+                            ? frameOffset(m.frame.frameId,frameOrigin)
+                            : secondsBetween(m.time,anchor);
+                        if ((!view.manual && (view.frameAxis
+                                ? (x < -static_cast<double>(view.windowFrames) || x>0.0)
+                                : (x < -view.windowSeconds || x>0.0))) ||
                             cvm1::Palette::index(palette->resolve(m.flags)) != group ||
                             !palette->style(m.flags).visible)
                             continue;
@@ -223,7 +274,90 @@ struct GtRangeDashboard::Impl {
                         mx.data(), my.data(), static_cast<int>(mx.size()), marker);
                 }
 
+                if (paused && ImPlot::IsPlotHovered() &&
+                    !ImGui::GetIO().KeyCtrl) {
+                    // Zoom about cursor and middle-drag pan share the same X
+                    // bounds across all object plots (not independent ImPlot state).
+                    const auto mouse=ImPlot::GetPlotMousePos();
+                    const double from=view.manual
+                        ? (view.frameAxis?frameOffset(view.fromFrame,frameOrigin)
+                                          :view.fromSeconds)
+                        : (view.frameAxis?-static_cast<double>(view.windowFrames)
+                                          :-view.windowSeconds);
+                    const double to=view.manual
+                        ? (view.frameAxis?frameOffset(view.toFrame,frameOrigin)
+                                          :view.toSeconds) : 0.0;
+                    double left=from,right=to;
+                    const float wheel=ImGui::GetIO().MouseWheel;
+                    if(wheel!=0.0F) {
+                        const double factor=std::pow(0.85,static_cast<double>(wheel));
+                        left=mouse.x+(left-mouse.x)*factor;
+                        right=mouse.x+(right-mouse.x)*factor;
+                    } else if(ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+                        const auto bounds=ImPlot::GetPlotLimits();
+                        const auto p0=ImPlot::PlotToPixels(bounds.X.Min,mouse.y);
+                        const auto p1=ImPlot::PlotToPixels(bounds.X.Max,mouse.y);
+                        const double width=static_cast<double>(p1.x-p0.x);
+                        if(width>1.0) {
+                            const double delta=ImGui::GetIO().MouseDelta.x*
+                                (to-from)/width;
+                            left-=delta;
+                            right-=delta;
+                        }
+                    }
+                    if(left!=from || right!=to) {
+                        view.manual=true;
+                        if(view.frameAxis) {
+                            view.fromFrame=frameAtOffset(std::floor(left),frameOrigin);
+                            view.toFrame=frameAtOffset(std::ceil(right),frameOrigin);
+                            if(view.fromFrame>=view.toFrame &&
+                               view.toFrame<std::numeric_limits<std::uint64_t>::max())
+                                ++view.toFrame;
+                        } else {
+                            view.fromSeconds=left;
+                            view.toSeconds=right;
+                        }
+                    }
+                }
                 if (ImPlot::IsPlotHovered()) {
+                    // Ctrl+left drag selects one X range for every GT object.
+                    // This never modifies the camera frame/metadata pipeline.
+                    if(paused && ImGui::GetIO().KeyCtrl &&
+                       ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        selectingRange=true;
+                        selectionStart=ImPlot::GetPlotMousePos().x;
+                    }
+                    if(selectingRange && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                        const auto limits=ImPlot::GetPlotLimits();
+                        const double mouseX=ImPlot::GetPlotMousePos().x;
+                        const ImVec2 cornerA=ImPlot::PlotToPixels(
+                            selectionStart,limits.Y.Min);
+                        const ImVec2 cornerB=ImPlot::PlotToPixels(
+                            mouseX,limits.Y.Max);
+                        ImGui::GetWindowDrawList()->AddRectFilled(
+                            ImVec2(std::min(cornerA.x,cornerB.x),cornerB.y),
+                            ImVec2(std::max(cornerA.x,cornerB.x),cornerA.y),
+                            IM_COL32(70,150,250,48));
+                    }
+                    if(selectingRange && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                        selectingRange=false;
+                        const double finish=ImPlot::GetPlotMousePos().x;
+                        if(std::abs(finish-selectionStart)>1.0e-4) {
+                            const double lo=std::min(finish,selectionStart);
+                            const double hi=std::max(finish,selectionStart);
+                            view.manual=true;
+                            if(view.frameAxis) {
+                                view.fromFrame=frameAtOffset(std::floor(lo),frameOrigin);
+                                view.toFrame=frameAtOffset(std::ceil(hi),frameOrigin);
+                                if(view.fromFrame>=view.toFrame &&
+                                   view.toFrame<std::numeric_limits<std::uint64_t>::max())
+                                    ++view.toFrame;
+                            } else {
+                                view.fromSeconds=lo;
+                                view.toSeconds=hi;
+                            }
+                        }
+                    }
                     const ImVec2 mouse = ImGui::GetMousePos();
                     double nearest = std::numeric_limits<double>::infinity();
                     const telemetry::GtRangePoint* nearestPoint = nullptr;
@@ -231,8 +365,11 @@ struct GtRangeDashboard::Impl {
                     // Pixel-space hit testing avoids reporting a value far
                     // from the pointer on a sparse curve.
                     for (const auto& sample : track.points) {
-                        const double t = secondsBetween(sample.time, anchor);
-                        if (!visible(t, settings)) continue;
+                        if(view.frameAxis && sample.frame.streamEpoch!=activeEpoch)
+                            continue;
+                        const double t=view.frameAxis
+                            ? frameOffset(sample.frame.frameId,frameOrigin)
+                            : secondsBetween(sample.time,anchor);
                         const ImVec2 pix = ImPlot::PlotToPixels(t, sample.meters);
                         const double dx = pix.x - mouse.x, dy = pix.y - mouse.y;
                         const double d = dx * dx + dy * dy;
@@ -243,8 +380,11 @@ struct GtRangeDashboard::Impl {
                         }
                     }
                     for (const auto& hit : track.matches) {
-                        const double t = secondsBetween(hit.time, anchor);
-                        if (!visible(t, settings)) continue;
+                        if(view.frameAxis && hit.frame.streamEpoch!=activeEpoch)
+                            continue;
+                        const double t=view.frameAxis
+                            ? frameOffset(hit.frame.frameId,frameOrigin)
+                            : secondsBetween(hit.time,anchor);
                         const ImVec2 pix = ImPlot::PlotToPixels(t, hit.meters);
                         const double dx = pix.x - mouse.x, dy = pix.y - mouse.y;
                         const double d = dx * dx + dy * dy;
@@ -261,7 +401,7 @@ struct GtRangeDashboard::Impl {
                             const auto& style = cvm1::current()->style(nearestHit->flags);
                             ImGui::TextColored(ImVec4(style.color.r, style.color.g,
                                 style.color.b, style.color.a), "%s", style.label.c_str());
-                            ImGui::Text("GT: %.2f м (измерено)", nearestHit->meters);
+                            ImGui::Text("GT: %.2f м", nearestHit->meters);
                             if (cvm1::isEphemeralId(nearestHit->trackId))
                                 ImGui::Text("CV frame-local ID  class: %u",
                                     static_cast<unsigned>(nearestHit->classId));
@@ -271,22 +411,17 @@ struct GtRangeDashboard::Impl {
                                     static_cast<unsigned>(nearestHit->classId));
                             ImGui::Text("IoU: %.3f   confidence: %.3f",
                                 nearestHit->iou, static_cast<double>(nearestHit->confidence));
-                            ImGui::Text("Frame: %llu/%llu",
-                                static_cast<unsigned long long>(nearestHit->frame.streamEpoch),
+                            ImGui::Text("Кадр: %llu",
                                 static_cast<unsigned long long>(nearestHit->frame.frameId));
-                            ImGui::Text("source_time_ns: %llu",
-                                static_cast<unsigned long long>(nearestHit->sourceTimeNs));
                         } else if (nearestPoint) {
-                            ImGui::Text("GT: %.2f м (измерено)", nearestPoint->meters);
-                            ImGui::Text("Frame: %llu/%llu",
-                                static_cast<unsigned long long>(nearestPoint->frame.streamEpoch),
+                            ImGui::Text("GT: %.2f м", nearestPoint->meters);
+                            ImGui::Text("Кадр: %llu",
                                 static_cast<unsigned long long>(nearestPoint->frame.frameId));
-                            ImGui::Text("source_time_ns: %llu",
-                                static_cast<unsigned long long>(nearestPoint->sourceTimeNs));
                         }
                         ImGui::EndTooltip();
                     }
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                        !ImGui::GetIO().KeyCtrl) {
                         focusedId = focusedId == track.id ? "" : track.id;
                         page = 0;
                     }
@@ -302,41 +437,21 @@ struct GtRangeDashboard::Impl {
               const telemetry::Counters& counters,
               const telemetry::GtCvDiagnostics& diagnostics,
               Clock::time_point anchor,
-              bool paused) {
+              bool paused,
+              GtRangeViewSettings& view) {
         reloadConfig(Clock::now());
-        if (paused)
-            ImGui::TextColored(kDefaultDetection, "ПАУЗА");
-        else
-            ImGui::TextDisabled("GT range  /  CVM1 IoU (FrameKey)");
-        ImGui::TextDisabled("CVM1 UDP %llu  decoded %llu  accepted %llu  targets %llu",
-            static_cast<unsigned long long>(counters.metadataPackets),
-            static_cast<unsigned long long>(counters.metadataValidFrames),
-            static_cast<unsigned long long>(counters.metadataAcceptedFrames),
-            static_cast<unsigned long long>(counters.metadataTargets));
-        ImGui::TextDisabled("Exact FrameKey joins %llu  matched CV %llu  plotted %zu",
-            static_cast<unsigned long long>(diagnostics.joinedFrames),
-            static_cast<unsigned long long>(diagnostics.matchedTargets),
-            markersDrawnLastFrame);
-        ImGui::TextDisabled("RGF1 missing %llu  GT unavailable %llu  unmatched CV %llu  expired CV %llu  pending CV %llu",
-            static_cast<unsigned long long>(counters.identityMissingFrames),
-            static_cast<unsigned long long>(diagnostics.gtUnavailableFrames),
-            static_cast<unsigned long long>(diagnostics.unmatchedCvFrames),
-            static_cast<unsigned long long>(diagnostics.expiredCvFrames),
-            static_cast<unsigned long long>(diagnostics.pendingCvFrames));
-        if (counters.metadataPackets > 0 && counters.metadataValidFrames == 0)
-            ImGui::TextColored(ImVec4(1.0F, 0.30F, 0.30F, 1.0F),
-                "CVM1 received but protocol decoder rejected every datagram");
-        else if (counters.metadataAcceptedFrames > 0 && diagnostics.joinedFrames == 0)
-            ImGui::TextColored(ImVec4(1.0F, 0.58F, 0.22F, 1.0F),
-                "CVM1 accepted, but there are no exact GT FrameKey joins");
-        else if (diagnostics.joinedFrames > 0 && diagnostics.matchedTargets == 0 && counters.metadataTargets > 0)
-            ImGui::TextColored(ImVec4(1.0F, 0.58F, 0.22F, 1.0F),
-                "Exact FrameKey joins exist, but no target passed IoU 0.30");
-        ImGui::Separator();
         markersDrawnLastFrame = 0;
+        std::uint64_t frameOrigin=0,activeEpoch=0;
+        Clock::time_point newest{};
+        for(const auto& track:tracks)
+            if(!track.points.empty() && track.points.back().time>=newest) {
+                newest=track.points.back().time;
+                activeEpoch=track.points.back().frame.streamEpoch;
+                frameOrigin=track.points.back().frame.frameId;
+            }
 
         if (tracks.empty()) {
-            ImGui::TextDisabled("Ожидание GT с полем range_m...");
+            ImGui::TextDisabled("Нет данных дальности");
             return;
         }
         if (!focusedId.empty() &&
@@ -376,14 +491,15 @@ struct GtRangeDashboard::Impl {
             if (!focusedId.empty()) {
                 for (const auto& track : tracks) {
                     if (track.id == focusedId) {
-                        plotCard(track, itemHeight, anchor, paused);
+                        plotCard(track,itemHeight,anchor,paused,view,
+                                 frameOrigin,activeEpoch);
                         break;
                     }
                 }
             } else {
                 for (int i = first; i < end; ++i)
                     plotCard(tracks[static_cast<std::size_t>(i)],
-                             itemHeight, anchor, paused);
+                             itemHeight,anchor,paused,view,frameOrigin,activeEpoch);
             }
         }
         ImGui::EndChild();
@@ -398,8 +514,9 @@ void GtRangeDashboard::draw(
     const telemetry::Counters& counters,
     const telemetry::GtCvDiagnostics& diagnostics,
     Clock::time_point anchor,
-    bool paused) {
-    impl_->draw(tracks, counters, diagnostics, anchor, paused);
+    bool paused,
+    GtRangeViewSettings& view) {
+    impl_->draw(tracks,counters,diagnostics,anchor,paused,view);
 }
 
 } // namespace reg::render

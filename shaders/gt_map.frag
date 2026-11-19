@@ -91,8 +91,14 @@ void main() {
         // KDM1 is optical-axis Z (not Euclidean object range_m).
         float z = sampleDepth(inUv);
         if (!isnan(z) && !isinf(z) && z > 0.0) {
-            float t = clamp((z - p.opacityAndRange.z) /
-                             max(p.opacityAndRange.w - p.opacityAndRange.z, 0.01),
+            // Fixed logarithmic optical-Z scale: equal palette intervals
+            // represent equal DISTANCE RATIOS, not equal metre deltas.
+            // The legend shows near, geometric midpoint and far. The
+            // range stays fixed across frames (no auto-normalisation).
+            float nearZ = max(p.opacityAndRange.z, 0.01);
+            float farZ = max(p.opacityAndRange.w, nearZ + 0.01);
+            float t = clamp(log(max(z, nearZ) / nearZ) /
+                            max(log(farZ / nearZ), 1e-6),
                             0.0, 1.0);
             color = depthColor(t);
             opacity = p.opacityAndRange.y;

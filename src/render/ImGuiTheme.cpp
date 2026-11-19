@@ -104,6 +104,9 @@ void applyStyle(float contentScale) {
     style.ScrollbarRounding = 2.0F;
     style.GrabRounding = 2.0F;
     style.TabRounding = 2.0F;
+    // Borders apply to checkbox and slider frames as well as buttons.
+    style.FrameBorderSize = 1.0F;
+    style.PopupBorderSize = 1.0F;
 
     // Palette — blue accent on dark background.
     ImVec4* c = style.Colors;
@@ -114,11 +117,12 @@ void applyStyle(float contentScale) {
 
     // Borders.
     c[ImGuiCol_BorderShadow] = ImVec4(0.000F, 0.000F, 0.000F, 0.000F);
+    c[ImGuiCol_Border] = ImVec4(0.33F, 0.38F, 0.46F, 0.80F);
 
     // Frame backgrounds.
-    c[ImGuiCol_FrameBg] = ImVec4(0.145F, 0.157F, 0.188F, 1.000F); // #252830
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.180F, 0.192F, 0.224F, 1.000F);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.212F, 0.224F, 0.255F, 1.000F);
+    c[ImGuiCol_FrameBg] = ImVec4(0.15F, 0.18F, 0.24F, 1.0F);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.20F, 0.24F, 0.31F, 1.0F);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.23F, 0.28F, 0.36F, 1.0F);
 
     // Title bar.
     c[ImGuiCol_TitleBg] = ImVec4(0.082F, 0.094F, 0.125F, 1.000F); // #151820
@@ -133,14 +137,14 @@ void applyStyle(float contentScale) {
     c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.290F, 0.561F, 0.851F, 1.000F);
 
     // Accent blue: #4A90D9.
-    c[ImGuiCol_CheckMark] = ImVec4(0.290F, 0.565F, 0.851F, 1.000F);
-    c[ImGuiCol_SliderGrab] = ImVec4(0.290F, 0.565F, 0.851F, 0.800F);
-    c[ImGuiCol_SliderGrabActive] = ImVec4(0.353F, 0.627F, 0.914F, 1.000F); // #5BA0E9
+    c[ImGuiCol_CheckMark] = ImVec4(0.43F, 0.69F, 1.00F, 1.0F);
+    c[ImGuiCol_SliderGrab] = ImVec4(0.36F, 0.60F, 0.96F, 1.0F);
+    c[ImGuiCol_SliderGrabActive] = ImVec4(0.48F, 0.74F, 1.00F, 1.0F);
 
     // Buttons.
-    c[ImGuiCol_Button] = ImVec4(0.208F, 0.220F, 0.251F, 1.000F);
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.290F, 0.565F, 0.851F, 0.600F);
-    c[ImGuiCol_ButtonActive] = ImVec4(0.290F, 0.565F, 0.851F, 1.000F);
+    c[ImGuiCol_Button] = ImVec4(0.18F, 0.22F, 0.30F, 1.0F);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.24F, 0.30F, 0.40F, 1.0F);
+    c[ImGuiCol_ButtonActive] = ImVec4(0.28F, 0.36F, 0.48F, 1.0F);
 
     // Headers.
     c[ImGuiCol_Header] = ImVec4(0.208F, 0.220F, 0.251F, 1.000F);
