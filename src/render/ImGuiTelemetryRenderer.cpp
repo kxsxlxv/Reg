@@ -1879,7 +1879,8 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         ImGui::SetNextItemOpen(gtSettingsOpen,ImGuiCond_Always);
         gtSettingsOpen=ImGui::CollapsingHeader("Настройки##gt-settings");
         if(gtSettingsOpen) drawGtControls();
-        const auto& toolbarTracks=snapshot.gtRangeTracks;
+        const auto& toolbarTracks=(app::rangeTimelinePaused() && pausedRangeTracks)
+            ? pausedRangeTracks : snapshot.gtRangeTracks;
         static const std::vector<telemetry::GtRangeTrack> noGtTracks;
         drawGtRangeToolbar(toolbarTracks?*toolbarTracks:noGtTracks,gtRangeView);
         // The timeline always uses remaining space, independently of settings.

@@ -114,6 +114,21 @@ void exactFrameJoinBothArrivalOrders() {
             "different stream epochs were joined");
 }
 
+void denseFrameHistoryUsesRealIds() {
+    reg::telemetry::GtRangeHistory history;
+    const auto base=std::chrono::steady_clock::now();
+    // 60 FPS means multiple GT frames within a legacy 50ms throttle period.
+    for(std::uint64_t i=0;i<60;++i)
+        history.observeGt(gt(781000+i,200.0+static_cast<double>(i),base),
+                          base+std::chrono::milliseconds(i*16));
+    const auto rows=history.snapshot(base+960ms);
+    require(rows.size()==1 && rows[0].points.size()==60,
+            "frame-axis chart dropped distinct GT frames");
+    require(rows[0].points.front().frame.frameId==781000 &&
+            rows[0].points.back().frame.frameId==781059,
+            "frame-axis chart lost actual RGF1 frame IDs");
+}
+
 void lowIouIgnoredAndReset() {
     reg::telemetry::GtRangeHistory history;
     const auto base = std::chrono::steady_clock::now();
@@ -135,6 +150,7 @@ int main() {
     try {
         sparseGtAndNoFakeZeros();
         exactFrameJoinBothArrivalOrders();
+        denseFrameHistoryUsesRealIds();
         lowIouIgnoredAndReset();
         std::cout << "gt range history: OK\n";
         return 0;
