@@ -826,6 +826,31 @@ target_include_directories(reg_launcher_imgui PUBLIC
 )
 target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
 
+# Offline screenshot uses the SAME ImGui VTR legend draw function as Telemetry,
+# with SDL's software renderer (no physical GPU or running Jetson needed).
+if(REG_BUILD_TESTS AND WIN32)
+    add_executable(reg_vtr_legend_snapshot
+        tests/vtr_legend_snapshot.cpp
+        src/vtr/VtrCatalog.cpp
+        src/vtr/VtrLegend.cpp
+        src/render/ImGuiTheme.cpp)
+    target_include_directories(reg_vtr_legend_snapshot PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_vtr_legend_snapshot PRIVATE
+        reg_launcher_imgui tomlplusplus::tomlplusplus SDL3::SDL3)
+    target_compile_definitions(reg_vtr_legend_snapshot PRIVATE
+        REG_FONT_DIR="${REG_FONT_OUTPUT_DIR}")
+    add_custom_command(TARGET reg_vtr_legend_snapshot POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:SDL3::SDL3>"
+            "$<TARGET_FILE_DIR:reg_vtr_legend_snapshot>"
+        VERBATIM)
+    add_test(NAME vtr_legend_snapshot
+        COMMAND reg_vtr_legend_snapshot
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml"
+            "${CMAKE_CURRENT_BINARY_DIR}/vtr-legend-preview.bmp")
+endif()
+
 add_executable(reg_launcher WIN32
     src/launcher/main.cpp
     src/launcher/LauncherDisplay.cpp
