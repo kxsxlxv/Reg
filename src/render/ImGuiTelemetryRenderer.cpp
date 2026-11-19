@@ -232,6 +232,33 @@ void gtToolbarTooltip(const char* description) {
         ImGui::SetTooltip("%s",description);
 }
 
+enum class GtTimelineIcon { Play, Pause, Reset };
+
+bool gtTimelineIconButton(const char* id,GtTimelineIcon icon) {
+    const bool pressed=ImGui::Button(id,ImVec2(44.0F,ImGui::GetFrameHeight()));
+    const ImVec2 a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();
+    const ImVec2 center{(a.x+b.x)*0.5F,(a.y+b.y)*0.5F};
+    auto* draw=ImGui::GetWindowDrawList();
+    const ImU32 color=ImGui::GetColorU32(ImGuiCol_Text);
+    if(icon==GtTimelineIcon::Play) {
+        draw->AddTriangleFilled(
+            ImVec2(center.x-5.0F,center.y-9.0F),
+            ImVec2(center.x-5.0F,center.y+9.0F),
+            ImVec2(center.x+9.0F,center.y),color);
+    } else if(icon==GtTimelineIcon::Pause) {
+        draw->AddRectFilled(ImVec2(center.x-7.0F,center.y-8.0F),
+                            ImVec2(center.x-2.0F,center.y+8.0F),color);
+        draw->AddRectFilled(ImVec2(center.x+2.0F,center.y-8.0F),
+                            ImVec2(center.x+7.0F,center.y+8.0F),color);
+    } else {
+        draw->AddCircle(center,9.0F,color,20,2.3F);
+        draw->AddTriangleFilled(ImVec2(center.x+5.0F,center.y-11.0F),
+                                ImVec2(center.x+13.0F,center.y-10.0F),
+                                ImVec2(center.x+9.0F,center.y-3.0F),color);
+    }
+    return pressed;
+}
+
 void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
                         GtRangeViewSettings& view) {
     const bool paused=app::rangeTimelinePaused();
@@ -243,13 +270,15 @@ void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
         ImGui::SameLine();
         if(ImGui::RadioButton("Кадры##gt-frames",view.frameAxis)) view.frameAxis=true;
         ImGui::SameLine();
-        if(ImGui::Button(paused?">##gt-play":"||##gt-pause",ImVec2(44.0F,0.0F))) {
+        if(gtTimelineIconButton("##gt-toggle-pause",
+                paused?GtTimelineIcon::Play:GtTimelineIcon::Pause)) {
             app::toggleRangeTimelinePaused();
             if(paused) view.manual=false;
         }
         gtToolbarTooltip(paused?"Продолжить отображение графиков.":"Пауза только для графиков.\nRTSP и CV продолжают работу.");
         ImGui::SameLine();
-        if(ImGui::Button("⟲##gt-reset",ImVec2(42.0F,0.0F))) view.manual=false;
+        if(gtTimelineIconButton("##gt-reset",GtTimelineIcon::Reset))
+            view.manual=false;
         gtToolbarTooltip("Сбросить диапазон и вернуться к новым данным.");
         ImGui::SameLine();
         if(ImGui::RadioButton("Авто##gt-auto",!view.manual)) view.manual=false;
@@ -296,7 +325,7 @@ void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
             if(view.frameAxis) {
                 ImGui::InputScalar("##gt-window-frames",ImGuiDataType_U64,
                                    &view.windowFrames);
-                view.windowFrames=std::clamp(view.windowFrames,30ULL,18000ULL);
+                view.windowFrames=std::clamp<std::uint64_t>(view.windowFrames,30U,18000U);
             } else {
                 ImGui::InputDouble("##gt-window-seconds",&view.windowSeconds,0,0,"%.0f");
                 view.windowSeconds=std::clamp(view.windowSeconds,5.0,300.0);
