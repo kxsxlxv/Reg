@@ -849,6 +849,8 @@ if(WIN32)
 endif()
 install(DIRECTORY "${REG_FONT_OUTPUT_DIR}/" DESTINATION bin/fonts)
 install(DIRECTORY "${REG_SHADER_OUTPUT_DIR}/" DESTINATION bin/shaders)
+# VTR legend and the future binary receiver read the same relocatable catalogue.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml" DESTINATION bin/config)
 if(UNIX AND NOT APPLE)
     # install(FILES) cannot follow soname symlink chains. This variant can.
     # Delay the copy until installation so the built SDL3 library exists.
