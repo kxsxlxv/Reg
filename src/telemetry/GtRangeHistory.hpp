@@ -115,13 +115,14 @@ public:
                 continue;
             track.latestAt = when;
             track.latestMeters = object.rangeM;
-            // Keep visualization bounded at roughly 20 Hz per object; every
-            // exact-frame CV match below retains its precise GT range.
+            // Keep real RGF1 frame IDs for lossless frame-axis navigation.
+            // Retention remains five minutes; cap at 18k samples (~60 FPS).
+            // Do not synthesize measurements for absent GT frames.
             if (track.points.empty() ||
-                when - track.points.back().time >= std::chrono::milliseconds(50)) {
+                track.points.back().frame != gt.source.key) {
                 track.points.push_back(GtRangePoint{
                     when, gt.source.key, gt.source.sourceTimeNs, object.rangeM});
-                if (track.points.size() > 6000U)
+                if (track.points.size() > 18000U)
                     track.points.pop_front();
             }
         }

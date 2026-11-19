@@ -19,6 +19,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -133,6 +136,175 @@ void drawGtDepthLegend(float nearM,float farM,float width) {
                          "Середина: %.1f м\n"
                          "Дальняя граница: %.1f м",
                          nearM,gtDepthLogMidpoint(nearM,farM),farM);
+}
+
+
+std::filesystem::path gtOverviewSettingsPath() {
+    if(char* pref=SDL_GetPrefPath("Reg","Reg")) {
+        const auto path=std::filesystem::path(pref)/"gt-overview.json";
+        SDL_free(pref);
+        return path;
+    }
+    return std::filesystem::path("config")/"gt-overview.json";
+}
+
+void loadGtOverviewSettings(GtRangeViewSettings& view,bool& settingsOpen) {
+    try {
+        std::ifstream file(gtOverviewSettingsPath());
+        if(!file.good()) return;
+        const auto data=nlohmann::json::parse(file);
+        const auto overlay=data.value("overlay",nlohmann::json::object());
+        const auto charts=data.value("charts",nlohmann::json::object());
+        app::setShowGtBoxes(overlay.value("boxes",app::showGtBoxes()));
+        app::setShowGtIds(overlay.value("ids",app::showGtIds()));
+        app::setShowGtRanges(overlay.value("ranges",app::showGtRanges()));
+        app::gShowGtSky.store(overlay.value("sky",app::showGtSky()));
+        app::gShowGtDepth.store(overlay.value("depth",app::showGtDepth()));
+        app::gGtSkyOpacity.store(std::clamp(overlay.value("sky_opacity",0.35F),0.0F,1.0F));
+        app::gGtDepthOpacity.store(std::clamp(overlay.value("depth_opacity",0.70F),0.0F,1.0F));
+        app::gGtSkySmooth.store(overlay.value("sky_smooth",false));
+        app::gGtDepthSmooth.store(overlay.value("depth_smooth",true));
+        const float nearM=std::max(0.1F,overlay.value("depth_near_m",1.0F));
+        app::gGtDepthNearM.store(nearM);
+        app::gGtDepthFarM.store(std::max(nearM+0.1F,overlay.value("depth_far_m",5000.0F)));
+        view.frameAxis=charts.value("axis",std::string("time"))=="frames";
+        view.windowSeconds=std::clamp(charts.value("window_seconds",60.0),5.0,300.0);
+        view.windowFrames=std::clamp(charts.value("window_frames",600ULL),30ULL,18000ULL);
+        settingsOpen=data.value("settings_open",true);
+        // Manual absolute frame numbers and pause are intentionally not restored.
+        view.manual=false;
+    } catch(const std::exception& ex) {
+        std::cerr<<"[gt-overview] Failed to load settings: "<<ex.what()<<'\n';
+    }
+}
+
+nlohmann::json gtOverviewSettingsJson(const GtRangeViewSettings& view,
+                                       bool settingsOpen) {
+    return {
+        {"version",1},
+        {"settings_open",settingsOpen},
+        {"overlay",{
+            {"boxes",app::showGtBoxes()},
+            {"ids",app::showGtIds()},
+            {"ranges",app::showGtRanges()},
+            {"sky",app::showGtSky()},
+            {"depth",app::showGtDepth()},
+            {"sky_opacity",app::gGtSkyOpacity.load()},
+            {"depth_opacity",app::gGtDepthOpacity.load()},
+            {"sky_smooth",app::gGtSkySmooth.load()},
+            {"depth_smooth",app::gGtDepthSmooth.load()},
+            {"depth_near_m",app::gGtDepthNearM.load()},
+            {"depth_far_m",app::gGtDepthFarM.load()}
+        }},
+        {"charts",{
+            {"axis",view.frameAxis?"frames":"time"},
+            {"window_seconds",view.windowSeconds},
+            {"window_frames",view.windowFrames}
+        }}
+    };
+}
+
+void saveGtOverviewSettings(const nlohmann::json& data) {
+    try {
+        const auto path=gtOverviewSettingsPath();
+        std::filesystem::create_directories(path.parent_path());
+        const auto temporary=path.string()+".tmp";
+        {
+            std::ofstream file(temporary,std::ios::binary|std::ios::trunc);
+            file<<data.dump(2)<<'\n';
+            if(!file.good()) throw std::runtime_error("write failed");
+        }
+        std::error_code ec;
+        std::filesystem::rename(temporary,path,ec);
+        if(ec) { // Windows rename cannot replace an existing destination.
+            std::filesystem::remove(path,ec);
+            ec.clear();
+            std::filesystem::rename(temporary,path,ec);
+            if(ec) throw std::runtime_error(ec.message());
+        }
+    } catch(const std::exception& ex) {
+        std::cerr<<"[gt-overview] Failed to save settings: "<<ex.what()<<'\n';
+    }
+}
+
+void gtToolbarTooltip(const char* description) {
+    if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("%s",description);
+}
+
+void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
+                        GtRangeViewSettings& view) {
+    const bool paused=app::rangeTimelinePaused();
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(10.0F,8.0F));
+    if(ImGui::BeginChild("##gt-timeline-toolbar",ImVec2(0.0F,ImGui::GetFrameHeight()+12.0F),
+           ImGuiChildFlags_Borders,
+           ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse)) {
+        if(ImGui::RadioButton("Время##gt-time",!view.frameAxis)) view.frameAxis=false;
+        ImGui::SameLine();
+        if(ImGui::RadioButton("Кадры##gt-frames",view.frameAxis)) view.frameAxis=true;
+        ImGui::SameLine();
+        if(ImGui::Button(paused?">##gt-play":"||##gt-pause",ImVec2(44.0F,0.0F))) {
+            app::toggleRangeTimelinePaused();
+            if(paused) view.manual=false;
+        }
+        gtToolbarTooltip(paused?"Продолжить отображение графиков.":"Пауза только для графиков.\nRTSP и CV продолжают работу.");
+        ImGui::SameLine();
+        if(ImGui::Button("⟲##gt-reset",ImVec2(42.0F,0.0F))) view.manual=false;
+        gtToolbarTooltip("Сбросить диапазон и вернуться к новым данным.");
+        ImGui::SameLine();
+        if(ImGui::RadioButton("Авто##gt-auto",!view.manual)) view.manual=false;
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!app::rangeTimelinePaused());
+        if(ImGui::RadioButton("Диапазон##gt-manual",view.manual)) {
+            view.manual=true;
+            view.fromSeconds=-view.windowSeconds;
+            view.toSeconds=0.0;
+            std::uint64_t newest=0;
+            for(const auto& track:tracks)
+                if(!track.points.empty())
+                    newest=std::max(newest,track.points.back().frame.frameId);
+            view.toFrame=newest;
+            view.fromFrame=newest>view.windowFrames
+                ? newest-view.windowFrames : 0U;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if(view.manual) {
+            ImGui::TextUnformatted("От");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(view.frameAxis?112.0F:82.0F);
+            if(view.frameAxis)
+                ImGui::InputScalar("##gt-from-frame",ImGuiDataType_U64,&view.fromFrame);
+            else
+                ImGui::InputDouble("##gt-from-time",&view.fromSeconds,0,0,"%.2f");
+            ImGui::SameLine();
+            ImGui::TextUnformatted("До");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(view.frameAxis?112.0F:82.0F);
+            if(view.frameAxis)
+                ImGui::InputScalar("##gt-to-frame",ImGuiDataType_U64,&view.toFrame);
+            else
+                ImGui::InputDouble("##gt-to-time",&view.toSeconds,0,0,"%.2f");
+            if(view.frameAxis && view.fromFrame>=view.toFrame)
+                view.toFrame=view.fromFrame+1U;
+            if(!view.frameAxis && view.fromSeconds>=view.toSeconds)
+                view.toSeconds=view.fromSeconds+0.01;
+        } else {
+            ImGui::TextUnformatted(view.frameAxis?"Окно, кадры":"Окно, с");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(75.0F);
+            if(view.frameAxis) {
+                ImGui::InputScalar("##gt-window-frames",ImGuiDataType_U64,
+                                   &view.windowFrames);
+                view.windowFrames=std::clamp(view.windowFrames,30ULL,18000ULL);
+            } else {
+                ImGui::InputDouble("##gt-window-seconds",&view.windowSeconds,0,0,"%.0f");
+                view.windowSeconds=std::clamp(view.windowSeconds,5.0,300.0);
+            }
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
 }
 
 struct RateHistory {
@@ -1113,6 +1285,12 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         std::chrono::steady_clock::now()};
     RateHistory rateHistory;
     GtRangeDashboard gtDashboard;
+    GtRangeViewSettings gtRangeView;
+    bool gtSettingsOpen{true};
+    bool gtPreferencesLoaded{false};
+    std::string gtSavedPreferences;
+    std::string gtPendingPreferences;
+    std::chrono::steady_clock::time_point gtPreferencesChangedAt{};
     bool rangeWasPaused{false};
     std::chrono::steady_clock::time_point pausedRangeAt{};
     std::shared_ptr<const std::vector<telemetry::GtRangeTrack>> pausedRangeTracks;
@@ -1691,12 +1869,19 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
 
     void drawOverview(const telemetry::Snapshot& snapshot,
                       std::chrono::steady_clock::time_point now) {
+        if(!gtPreferencesLoaded) {
+            loadGtOverviewSettings(gtRangeView,gtSettingsOpen);
+            gtPreferencesLoaded=true;
+            gtSavedPreferences=gtOverviewSettingsJson(gtRangeView,gtSettingsOpen).dump();
+        }
         drawPerformanceAndHealth(snapshot.counters,rateHistory);
         ImGui::SeparatorText("GT");
-        if(ImGui::CollapsingHeader("Настройки##gt-settings",
-                ImGuiTreeNodeFlags_DefaultOpen)) {
-            drawGtControls();
-        }
+        ImGui::SetNextItemOpen(gtSettingsOpen,ImGuiCond_Always);
+        gtSettingsOpen=ImGui::CollapsingHeader("Настройки##gt-settings");
+        if(gtSettingsOpen) drawGtControls();
+        const auto& toolbarTracks=snapshot.gtRangeTracks;
+        static const std::vector<telemetry::GtRangeTrack> noGtTracks;
+        drawGtRangeToolbar(toolbarTracks?*toolbarTracks:noGtTracks,gtRangeView);
         // The timeline always uses remaining space, independently of settings.
         // No scrolling in Overview; object cards use pagination.
         const bool paused=app::rangeTimelinePaused();
@@ -1716,7 +1901,8 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 ImVec2(0.0F,graphHeight),ImGuiChildFlags_None,
                 ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse)) {
             gtDashboard.draw(view?*view:empty,snapshot.counters,
-                snapshot.gtCvDiagnostics,paused?pausedRangeAt:now,paused);
+                snapshot.gtCvDiagnostics,paused?pausedRangeAt:now,paused,
+                gtRangeView);
         }
         ImGui::EndChild();
         ImGui::SetNextItemOpen(debugOpen,ImGuiCond_Always);
@@ -1724,6 +1910,17 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
             debugOpen=true;
             drawGtDebug(snapshot);
         } else debugOpen=false;
+        // Debounce writes during slider motion and keep IO out of RTSP paths.
+        const auto nowPreferences=gtOverviewSettingsJson(gtRangeView,gtSettingsOpen).dump();
+        if(nowPreferences!=gtPendingPreferences) {
+            gtPendingPreferences=nowPreferences;
+            gtPreferencesChangedAt=now;
+        }
+        if(nowPreferences!=gtSavedPreferences &&
+           now-gtPreferencesChangedAt>=std::chrono::milliseconds(750)) {
+            saveGtOverviewSettings(gtOverviewSettingsJson(gtRangeView,gtSettingsOpen));
+            gtSavedPreferences=nowPreferences;
+        }
     }
 
     void buildDashboard(
