@@ -226,9 +226,6 @@ struct GtRangeDashboard::Impl {
                         if(!xs.empty()) flush();
                         continue;
                     }
-                        if (!xs.empty()) flush();
-                        continue;
-                    }
                     if (!xs.empty() &&
                         secondsBetween(sample.time, previous) >
                         settings.gapSeconds) flush();
