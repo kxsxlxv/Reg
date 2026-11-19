@@ -234,106 +234,174 @@ void gtToolbarTooltip(const char* description) {
 
 enum class GtTimelineIcon { Play, Pause, Reset };
 
-bool gtTimelineIconButton(const char* id,GtTimelineIcon icon) {
-    const bool pressed=ImGui::Button(id,ImVec2(44.0F,ImGui::GetFrameHeight()));
+bool gtTimelineIconButton(const char* id,GtTimelineIcon icon,float width,float height) {
+    const bool pressed=ImGui::Button(id,ImVec2(width,height));
     const ImVec2 a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();
     const ImVec2 center{(a.x+b.x)*0.5F,(a.y+b.y)*0.5F};
     auto* draw=ImGui::GetWindowDrawList();
     const ImU32 color=ImGui::GetColorU32(ImGuiCol_Text);
     if(icon==GtTimelineIcon::Play) {
         draw->AddTriangleFilled(
-            ImVec2(center.x-5.0F,center.y-9.0F),
-            ImVec2(center.x-5.0F,center.y+9.0F),
-            ImVec2(center.x+9.0F,center.y),color);
+            ImVec2(center.x-5.0F,center.y-8.0F),
+            ImVec2(center.x-5.0F,center.y+8.0F),
+            ImVec2(center.x+8.0F,center.y),color);
     } else if(icon==GtTimelineIcon::Pause) {
-        draw->AddRectFilled(ImVec2(center.x-7.0F,center.y-8.0F),
-                            ImVec2(center.x-2.0F,center.y+8.0F),color);
-        draw->AddRectFilled(ImVec2(center.x+2.0F,center.y-8.0F),
-                            ImVec2(center.x+7.0F,center.y+8.0F),color);
+        draw->AddRectFilled(ImVec2(center.x-7.0F,center.y-7.0F),
+                            ImVec2(center.x-2.0F,center.y+7.0F),color);
+        draw->AddRectFilled(ImVec2(center.x+2.0F,center.y-7.0F),
+                            ImVec2(center.x+7.0F,center.y+7.0F),color);
     } else {
-        draw->AddCircle(center,9.0F,color,20,2.3F);
-        draw->AddTriangleFilled(ImVec2(center.x+5.0F,center.y-11.0F),
-                                ImVec2(center.x+13.0F,center.y-10.0F),
-                                ImVec2(center.x+9.0F,center.y-3.0F),color);
+        // A true circular arrow: arc stops before the arrowhead, not a
+        // complete circle with an unrelated triangle drawn over its rim.
+        constexpr float radius=9.0F;
+        constexpr float start=-1.15F;
+        constexpr float finish=4.45F;
+        draw->PathClear();
+        draw->PathArcTo(center,radius,start,finish,32);
+        draw->PathStroke(color,0,2.3F);
+        const ImVec2 tip{center.x+radius*std::cos(start),
+                         center.y+radius*std::sin(start)};
+        const ImVec2 direction{-std::sin(start),std::cos(start)};
+        const ImVec2 radial{std::cos(start),std::sin(start)};
+        draw->AddTriangleFilled(
+            ImVec2(tip.x+direction.x*2.0F,tip.y+direction.y*2.0F),
+            ImVec2(tip.x-direction.x*6.0F+radial.x*3.7F,
+                   tip.y-direction.y*6.0F+radial.y*3.7F),
+            ImVec2(tip.x-direction.x*6.0F-radial.x*3.7F,
+                   tip.y-direction.y*6.0F-radial.y*3.7F),color);
     }
     return pressed;
+}
+
+bool gtSegmentButton(const char* label,bool selected,float width,float height) {
+    if(selected) {
+        ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(0.19F,0.34F,0.50F,1.0F));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(0.23F,0.43F,0.62F,1.0F));
+        ImGui::PushStyleColor(ImGuiCol_Border,ImVec4(0.42F,0.67F,0.93F,1.0F));
+    }
+    const bool clicked=ImGui::Button(label,ImVec2(width,height));
+    if(selected) ImGui::PopStyleColor(3);
+    return clicked;
 }
 
 void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
                         GtRangeViewSettings& view) {
     const bool paused=app::rangeTimelinePaused();
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(10.0F,8.0F));
-    if(ImGui::BeginChild("##gt-timeline-toolbar",ImVec2(0.0F,ImGui::GetFrameHeight()+12.0F),
+    const auto& style=ImGui::GetStyle();
+    const float unit=ImGui::GetFrameHeight();
+    const float buttonHeight=unit+7.0F;
+    const float toolbarHeight=buttonHeight+style.WindowPadding.y*2.0F+4.0F;
+    if(ImGui::BeginChild("##gt-timeline-toolbar",ImVec2(0.0F,toolbarHeight),
            ImGuiChildFlags_Borders,
            ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse)) {
-        if(ImGui::RadioButton("Время##gt-time",!view.frameAxis)) view.frameAxis=false;
-        ImGui::SameLine();
-        if(ImGui::RadioButton("Кадры##gt-frames",view.frameAxis)) view.frameAxis=true;
-        ImGui::SameLine();
-        if(gtTimelineIconButton("##gt-toggle-pause",
-                paused?GtTimelineIcon::Play:GtTimelineIcon::Pause)) {
-            app::toggleRangeTimelinePaused();
-            if(paused) view.manual=false;
-        }
-        gtToolbarTooltip(paused?"Продолжить отображение графиков.":"Пауза только для графиков.\nRTSP и CV продолжают работу.");
-        ImGui::SameLine();
-        if(gtTimelineIconButton("##gt-reset",GtTimelineIcon::Reset))
-            view.manual=false;
-        gtToolbarTooltip("Сбросить диапазон и вернуться к новым данным.");
-        ImGui::SameLine();
-        if(ImGui::RadioButton("Авто##gt-auto",!view.manual)) view.manual=false;
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!app::rangeTimelinePaused());
-        if(ImGui::RadioButton("Диапазон##gt-manual",view.manual)) {
-            view.manual=true;
-            view.fromSeconds=-view.windowSeconds;
-            view.toSeconds=0.0;
-            std::uint64_t newest=0;
-            for(const auto& track:tracks)
-                if(!track.points.empty())
-                    newest=std::max(newest,track.points.back().frame.frameId);
-            view.toFrame=newest;
-            view.fromFrame=newest>view.windowFrames
-                ? newest-view.windowFrames : 0U;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if(view.manual) {
-            ImGui::TextUnformatted("От");
+        // Four aligned groups fill the entire viewport; the last group
+        // stretches, so the toolbar never bunches against the left edge.
+        if(ImGui::BeginTable("##gt-timeline-layout",4,
+                ImGuiTableFlags_SizingStretchProp|
+                ImGuiTableFlags_BordersInnerV|
+                ImGuiTableFlags_NoPadOuterX)) {
+            ImGui::TableSetupColumn("Ось",ImGuiTableColumnFlags_WidthStretch,0.25F);
+            ImGui::TableSetupColumn("Транспорт",ImGuiTableColumnFlags_WidthStretch,0.14F);
+            ImGui::TableSetupColumn("Масштаб",ImGuiTableColumnFlags_WidthStretch,0.26F);
+            ImGui::TableSetupColumn("Окно",ImGuiTableColumnFlags_WidthStretch,0.35F);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            const float gap=style.ItemSpacing.x;
+            float available=ImGui::GetContentRegionAvail().x;
+            const float segment=std::max(55.0F,(available-gap)*0.5F);
+            if(gtSegmentButton("Время##gt-time",!view.frameAxis,segment,buttonHeight))
+                view.frameAxis=false;
+            gtToolbarTooltip("Шкала X: секунды относительно текущего кадра.");
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(view.frameAxis?112.0F:82.0F);
-            if(view.frameAxis)
-                ImGui::InputScalar("##gt-from-frame",ImGuiDataType_U64,&view.fromFrame);
-            else
-                ImGui::InputDouble("##gt-from-time",&view.fromSeconds,0,0,"%.2f");
-            ImGui::SameLine();
-            ImGui::TextUnformatted("До");
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(view.frameAxis?112.0F:82.0F);
-            if(view.frameAxis)
-                ImGui::InputScalar("##gt-to-frame",ImGuiDataType_U64,&view.toFrame);
-            else
-                ImGui::InputDouble("##gt-to-time",&view.toSeconds,0,0,"%.2f");
-            if(view.frameAxis && view.fromFrame>=view.toFrame)
-                view.toFrame=view.fromFrame+1U;
-            if(!view.frameAxis && view.fromSeconds>=view.toSeconds)
-                view.toSeconds=view.fromSeconds+0.01;
-        } else {
-            ImGui::TextUnformatted(view.frameAxis?"Окно, кадры":"Окно, с");
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(75.0F);
-            if(view.frameAxis) {
-                ImGui::InputScalar("##gt-window-frames",ImGuiDataType_U64,
-                                   &view.windowFrames);
-                view.windowFrames=std::clamp<std::uint64_t>(view.windowFrames,30U,18000U);
-            } else {
-                ImGui::InputDouble("##gt-window-seconds",&view.windowSeconds,0,0,"%.0f");
-                view.windowSeconds=std::clamp(view.windowSeconds,5.0,300.0);
+            if(gtSegmentButton("Кадры##gt-frames",view.frameAxis,segment,buttonHeight))
+                view.frameAxis=true;
+            gtToolbarTooltip("Шкала X: реальные номера кадров RGF1.");
+
+            ImGui::TableSetColumnIndex(1);
+            const float actionWidth=ImGui::GetContentRegionAvail().x;
+            const float actionButton=std::max(30.0F,(actionWidth-gap)*0.5F);
+            if(gtTimelineIconButton("##gt-toggle-pause",
+                    paused?GtTimelineIcon::Play:GtTimelineIcon::Pause,actionButton,buttonHeight)) {
+                app::toggleRangeTimelinePaused();
+                if(paused) view.manual=false;
             }
+            gtToolbarTooltip(paused?"Продолжить графики.":
+                             "Пауза только для графиков.\nRTSP и CV продолжают работу.");
+            ImGui::SameLine();
+            if(gtTimelineIconButton("##gt-reset",GtTimelineIcon::Reset,actionButton,buttonHeight))
+                view.manual=false;
+            gtToolbarTooltip("Сбросить масштаб и следовать за новыми данными.");
+
+            ImGui::TableSetColumnIndex(2);
+            available=ImGui::GetContentRegionAvail().x;
+            const float modeButton=std::max(65.0F,(available-gap)*0.5F);
+            if(gtSegmentButton("Авто##gt-auto",!view.manual,modeButton,buttonHeight))
+                view.manual=false;
+            gtToolbarTooltip("Автоматически следовать за новыми кадрами.");
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!paused);
+            if(gtSegmentButton("Диапазон##gt-manual",view.manual,modeButton,buttonHeight)) {
+                view.manual=true;
+                view.fromSeconds=-view.windowSeconds;
+                view.toSeconds=0.0;
+                std::uint64_t newest=0;
+                for(const auto& track:tracks)
+                    if(!track.points.empty())
+                        newest=std::max(newest,track.points.back().frame.frameId);
+                view.toFrame=newest;
+                view.fromFrame=newest>view.windowFrames
+                    ? newest-view.windowFrames:0U;
+            }
+            gtToolbarTooltip("Ручной диапазон доступен при паузе.");
+            ImGui::EndDisabled();
+
+            ImGui::TableSetColumnIndex(3);
+            const float fieldWidth=ImGui::GetContentRegionAvail().x;
+            ImGui::AlignTextToFramePadding();
+            if(view.manual) {
+                const float labels=ImGui::CalcTextSize("От").x+
+                                   ImGui::CalcTextSize("До").x+gap*4.0F;
+                const float inputWidth=std::max(55.0F,(fieldWidth-labels)*0.5F);
+                ImGui::TextUnformatted("От");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(inputWidth);
+                if(view.frameAxis)
+                    ImGui::InputScalar("##gt-from-frame",ImGuiDataType_U64,&view.fromFrame);
+                else
+                    ImGui::InputDouble("##gt-from-time",&view.fromSeconds,0,0,"%.2f");
+                ImGui::SameLine();
+                ImGui::TextUnformatted("До");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(inputWidth);
+                if(view.frameAxis)
+                    ImGui::InputScalar("##gt-to-frame",ImGuiDataType_U64,&view.toFrame);
+                else
+                    ImGui::InputDouble("##gt-to-time",&view.toSeconds,0,0,"%.2f");
+                if(view.frameAxis && view.fromFrame>=view.toFrame &&
+                   view.fromFrame<std::numeric_limits<std::uint64_t>::max())
+                    view.toFrame=view.fromFrame+1U;
+                if(!view.frameAxis && view.fromSeconds>=view.toSeconds)
+                    view.toSeconds=view.fromSeconds+0.01;
+            } else {
+                ImGui::TextUnformatted(view.frameAxis?"Окно, кадры":"Окно, с");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(std::max(60.0F,
+                    ImGui::GetContentRegionAvail().x));
+                if(view.frameAxis) {
+                    ImGui::InputScalar("##gt-window-frames",ImGuiDataType_U64,
+                                       &view.windowFrames);
+                    view.windowFrames=std::clamp<std::uint64_t>(
+                        view.windowFrames,30U,18000U);
+                } else {
+                    ImGui::InputDouble("##gt-window-seconds",&view.windowSeconds,
+                                       0,0,"%.0f");
+                    view.windowSeconds=std::clamp(view.windowSeconds,5.0,300.0);
+                }
+            }
+            ImGui::EndTable();
         }
     }
     ImGui::EndChild();
-    ImGui::PopStyleVar();
 }
 
 struct RateHistory {
