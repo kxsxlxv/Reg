@@ -1,0 +1,175 @@
+#include "vtr/VtrCatalog.hpp"
+#include <toml++/toml.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <iterator>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+namespace reg::vtr {
+namespace {
+std::string str(const toml::table& t, const char* name, std::string fallback = {}) {
+    if (const auto value = t[name].value<std::string>())
+        return *value;
+    return fallback;
+}
+float number(const toml::table& t, const char* name, float fallback) {
+    const toml::node* node = t.get(name);
+    if (!node) return fallback;
+    double x = 0.0;
+    if (auto* f = node->as_floating_point()) x = f->get();
+    else if (auto* i = node->as_integer()) x = static_cast<double>(i->get());
+    else throw std::runtime_error(std::string("expected a number: ") + name);
+    if (!std::isfinite(x) || x < -1.0e6 || x > 1.0e6)
+        throw std::runtime_error(std::string("number out of range: ") + name);
+    return static_cast<float>(x);
+}
+float bounded(const toml::table& t, const char* name, float fallback,
+              float lo, float hi) {
+    float x = number(t, name, fallback);
+    if (x < lo || x > hi)
+        throw std::runtime_error(std::string("out of range: ") + name);
+    return x;
+}
+Color hex(const std::string& value) {
+    if (value.size() != 7U || value[0] != '#')
+        throw std::runtime_error("VTR color must be #RRGGBB: " + value);
+    auto digit = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c-'0';
+        if (c >= 'a' && c <= 'f') return c-'a'+10;
+        if (c >= 'A' && c <= 'F') return c-'A'+10;
+        return -1;
+    };
+    int byte[3]{};
+    for (int n=0;n<3;++n) {
+        const int a = digit(value[1+n*2]), b = digit(value[2+n*2]);
+        if (a < 0 || b < 0) throw std::runtime_error("invalid hex color");
+        byte[n] = a * 16 + b;
+    }
+    return {byte[0]/255.0F, byte[1]/255.0F, byte[2]/255.0F};
+}
+Color color(const toml::table& t, const char* key, Color fallback) {
+    const toml::node* node = t.get(key);
+    if (!node) return fallback;
+    auto value = t[key].value<std::string>();
+    if (!value) throw std::runtime_error(std::string("expected color: ")+key);
+    return hex(*value);
+}
+std::string pattern(const toml::table& t, const char* key,
+                    std::string fallback) {
+    const std::string result = str(t, key, std::move(fallback));
+    if (result != "none" && result != "solid" && result != "dashed")
+        throw std::runtime_error(std::string("unknown line pattern: ")+result);
+    return result;
+}
+void readBox(const toml::table& t, Box& out) {
+    out.stroke.color = color(t, "color", out.stroke.color);
+    out.stroke.width = bounded(t, "width", out.stroke.width, 0.5F, 16.0F);
+    out.stroke.pattern = pattern(t, "edges", "none");
+    out.corners = pattern(t, "corners", "none");
+    out.diagonals = pattern(t, "diagonals", "none");
+    out.cornerPx = bounded(t, "corner_px", out.cornerPx, 1.0F, 200.0F);
+    out.fill = color(t, "fill", out.stroke.color);
+    out.fillAlpha = bounded(t, "fill_alpha", 0.0F, 0.0F, 1.0F);
+}
+void readLabel(const toml::table& t, Label& out, bool isOutput) {
+    out.show = t["show"].value<bool>().value_or(isOutput ? true : out.show);
+    out.text = str(t, "text", out.text);
+    out.place = str(t, "place", out.place);
+    if (out.place != "top_left_outside" && out.place != "bottom_left_outside")
+        throw std::runtime_error("unsupported VTR label placement");
+    out.color = color(t, "color", out.color);
+    out.background = color(t, "background", out.background);
+    out.backgroundAlpha = bounded(t, "background_alpha", out.backgroundAlpha, 0.0F, 1.0F);
+    out.fontPx = bounded(t, "font_px", out.fontPx, 8.0F, 48.0F);
+    out.paddingPx = bounded(t, "padding_px", out.paddingPx, 0.0F, 24.0F);
+    out.gapPx = bounded(t, "gap_px", out.gapPx, 0.0F, 24.0F);
+    if (out.text.size() > 128U) throw std::runtime_error("VTR label template too long");
+}
+void readOsd(const toml::table& t, Osd& out) {
+    out.stroke.color = color(t, "color", out.stroke.color);
+    out.stroke.width = bounded(t, "width", out.stroke.width, 0.5F, 16.0F);
+    out.stroke.pattern = pattern(t, "pattern", "solid");
+    out.alpha = bounded(t, "alpha", out.alpha, 0.0F, 1.0F);
+}
+bool supported(std::string_view s) {
+    constexpr std::array<std::string_view, 11> supportedTypes{
+        "bbox","line","polyline","polygon","circle","ellipse",
+        "point","arrow","text","mask","heatmap"};
+    return std::find(supportedTypes.begin(), supportedTypes.end(), s)
+        != supportedTypes.end();
+}
+} // namespace
+
+Catalog readCatalog(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error("VTR config not found: " + path.string());
+    const std::string bytes{std::istreambuf_iterator<char>(file),
+                            std::istreambuf_iterator<char>()};
+    if (bytes.size() > 256U * 1024U)
+        throw std::runtime_error("VTR catalogue exceeds 256 KiB");
+    const toml::table document = toml::parse(bytes, path.string());
+    const auto format = document["format"].value<std::int64_t>();
+    if (!format || *format != 1)
+        throw std::runtime_error("Unsupported VTR TOML format (expected format = 1)");
+    const auto* outputs = document.get_as<toml::table>("output");
+    if (!outputs || outputs->empty() || outputs->size() > 128U)
+        throw std::runtime_error("VTR requires 1..128 [output.*] sections");
+
+    Catalog result;
+    result.hash = UINT64_C(14695981039346656037);
+    for (unsigned char byte : bytes) {
+        result.hash ^= byte;
+        result.hash *= UINT64_C(1099511628211);
+    }
+    Label defaults;
+    if (const auto* d = document.get_as<toml::table>("defaults"))
+        if (const auto* l = d->get_as<toml::table>("label"))
+            readLabel(*l, defaults, false);
+
+    std::set<std::uint16_t> ids;
+    for (const auto& [name, node] : *outputs) {
+        const auto* entry = node.as_table();
+        if (!entry) throw std::runtime_error("VTR output must be a table");
+        const auto id = (*entry)["id"].value<std::int64_t>();
+        if (!id || *id < 1 || *id > 65535)
+            throw std::runtime_error("VTR output id must be uint16 > 0");
+        const auto narrowed = static_cast<std::uint16_t>(*id);
+        if (!ids.insert(narrowed).second)
+            throw std::runtime_error("Duplicate VTR output id");
+        Output output;
+        output.id = narrowed;
+        output.key = std::string(name.str());
+        output.semantic = str(*entry, "semantic");
+        output.geometry = str(*entry, "geometry");
+        output.benchmark = str(*entry, "benchmark", "none");
+        if (output.semantic.empty() || !supported(output.geometry))
+            throw std::runtime_error("Missing semantic or unknown geometry for " + output.key);
+        output.label = defaults;
+        if (const auto* box = entry->get_as<toml::table>("box"))
+            readBox(*box, output.box);
+        if (const auto* label = entry->get_as<toml::table>("label"))
+            readLabel(*label, output.label, true);
+        if (const auto* osd = entry->get_as<toml::table>("osd"))
+            readOsd(*osd, output.osd);
+        result.outputs.push_back(std::move(output));
+    }
+    std::sort(result.outputs.begin(), result.outputs.end(),
+              [](const Output& a, const Output& b) { return a.id < b.id; });
+    return result;
+}
+
+std::string hashHex(std::uint64_t hash) {
+    std::ostringstream text;
+    text << std::hex << std::setfill('0') << std::setw(16) << hash;
+    return text.str();
+}
+} // namespace reg::vtr
