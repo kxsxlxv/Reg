@@ -158,7 +158,7 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
             points.emplace_back(center.x+56.0F*std::cos(angle),
                                 center.y+31.0F*std::sin(angle));
         }
-        outline(d,points,o,false);
+        outline(d,points,o.osd,false);
     } else if (geometry=="point") {
         d->AddCircleFilled(center,7.0F,ink);
     } else if (geometry=="text") {
