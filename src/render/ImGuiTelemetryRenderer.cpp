@@ -234,12 +234,30 @@ void gtToolbarTooltip(const char* description) {
 
 enum class GtTimelineIcon { Play, Pause, Reset };
 
-bool gtTimelineIconButton(const char* id,GtTimelineIcon icon,float width,float height) {
-    const bool pressed=ImGui::Button(id,ImVec2(width,height));
-    const ImVec2 a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();
-    const ImVec2 center{(a.x+b.x)*0.5F,(a.y+b.y)*0.5F};
+// Actions use a distinct outlined square style. They are NOT mode toggles.
+bool gtTimelineIconButton(const char* id,GtTimelineIcon icon,float side,
+                          bool active=false) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,5.0F);
+    ImGui::PushStyleColor(ImGuiCol_Button,
+        active?ImVec4(0.14F,0.23F,0.32F,1.0F):
+               ImVec4(0.13F,0.16F,0.21F,1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+        ImVec4(0.23F,0.32F,0.43F,1.0F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+        ImVec4(0.27F,0.39F,0.53F,1.0F));
+    ImGui::PushStyleColor(ImGuiCol_Border,
+        active?ImVec4(0.38F,0.57F,0.75F,1.0F):
+               ImVec4(0.35F,0.40F,0.49F,0.95F));
+    const bool pressed=ImGui::Button(id,ImVec2(side,side));
+    ImGui::PopStyleColor(4);
+    ImGui::PopStyleVar();
+
+    const ImVec2 min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();
+    const ImVec2 center{(min.x+max.x)*0.5F,(min.y+max.y)*0.5F};
     auto* draw=ImGui::GetWindowDrawList();
-    const ImU32 color=ImGui::GetColorU32(ImGuiCol_Text);
+    const ImU32 color=ImGui::GetColorU32(
+        active?ImVec4(0.64F,0.82F,1.0F,1.0F):
+               ImVec4(0.89F,0.91F,0.94F,1.0F));
     if(icon==GtTimelineIcon::Play) {
         draw->AddTriangleFilled(
             ImVec2(center.x-5.0F,center.y-8.0F),
@@ -251,97 +269,152 @@ bool gtTimelineIconButton(const char* id,GtTimelineIcon icon,float width,float h
         draw->AddRectFilled(ImVec2(center.x+2.0F,center.y-7.0F),
                             ImVec2(center.x+7.0F,center.y+7.0F),color);
     } else {
-        // A true circular arrow: arc stops before the arrowhead, not a
-        // complete circle with an unrelated triangle drawn over its rim.
-        constexpr float radius=9.0F;
-        constexpr float start=-1.15F;
-        constexpr float finish=4.45F;
-        draw->PathClear();
-        draw->PathArcTo(center,radius,start,finish,32);
-        draw->PathStroke(color,0,2.3F);
-        const ImVec2 tip{center.x+radius*std::cos(start),
-                         center.y+radius*std::sin(start)};
-        const ImVec2 direction{-std::sin(start),std::cos(start)};
-        const ImVec2 radial{std::cos(start),std::sin(start)};
-        draw->AddTriangleFilled(
-            ImVec2(tip.x+direction.x*2.0F,tip.y+direction.y*2.0F),
-            ImVec2(tip.x-direction.x*6.0F+radial.x*3.7F,
-                   tip.y-direction.y*6.0F+radial.y*3.7F),
-            ImVec2(tip.x-direction.x*6.0F-radial.x*3.7F,
-                   tip.y-direction.y*6.0F-radial.y*3.7F),color);
+        // CCW reset: an open 272-degree arc with a tangent-aligned chevron.
+        // No closed circle and no separate triangle floating above the arc.
+        constexpr float radius=8.9F;
+        constexpr float first=2.25F;
+        constexpr float last=-2.50F;
+        constexpr int steps=32;
+        ImVec2 arc[steps+1]{};
+        for(int i=0;i<=steps;++i) {
+            const float angle=first+(last-first)*
+                (static_cast<float>(i)/static_cast<float>(steps));
+            arc[i]={center.x+radius*std::cos(angle),
+                    center.y+radius*std::sin(angle)};
+        }
+        draw->AddPolyline(arc,steps+1,color,ImDrawFlags_None,2.3F);
+        const ImVec2 tip=arc[steps];
+        const ImVec2 tangent{std::sin(last),-std::cos(last)};
+        const ImVec2 normal{-tangent.y,tangent.x};
+        const ImVec2 back{tip.x-6.5F*tangent.x,
+                          tip.y-6.5F*tangent.y};
+        draw->AddLine(tip,
+            ImVec2(back.x+3.7F*normal.x,back.y+3.7F*normal.y),
+            color,2.3F);
+        draw->AddLine(tip,
+            ImVec2(back.x-3.7F*normal.x,back.y-3.7F*normal.y),
+            color,2.3F);
     }
     return pressed;
 }
 
-bool gtSegmentButton(const char* label,bool selected,float width,float height) {
-    if(selected) {
-        ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(0.19F,0.34F,0.50F,1.0F));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(0.23F,0.43F,0.62F,1.0F));
-        ImGui::PushStyleColor(ImGuiCol_Border,ImVec4(0.42F,0.67F,0.93F,1.0F));
+// Flat, contiguous segmented control. Unlike action buttons, a selected
+// segment has a quiet surface and a slim accent underline.
+bool gtSegmentedChoice(const char* id,const char* first,const char* second,
+                       bool& secondSelected,float width,float height,
+                       const char* firstHint,const char* secondHint) {
+    const ImVec2 origin=ImGui::GetCursorScreenPos();
+    const ImVec2 bottomRight{origin.x+width,origin.y+height};
+    auto* draw=ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin,bottomRight,
+        ImGui::GetColorU32(ImVec4(0.105F,0.13F,0.17F,1.0F)),6.0F);
+    draw->AddRect(origin,bottomRight,
+        ImGui::GetColorU32(ImVec4(0.27F,0.32F,0.40F,0.95F)),6.0F);
+
+    bool changed=false;
+    ImGui::PushID(id);
+    const float widths[2]{std::floor(width*0.5F),width-std::floor(width*0.5F)};
+    const char* labels[2]{first,second};
+    const char* hints[2]{firstHint,secondHint};
+    for(int i=0;i<2;++i) {
+        if(i!=0) ImGui::SameLine(0.0F,0.0F);
+        const ImVec2 cell=ImGui::GetCursorScreenPos();
+        const bool click=ImGui::InvisibleButton(i==0?"##segment-a":"##segment-b",
+                                                ImVec2(widths[i],height));
+        const bool selected=(i==1)==secondSelected;
+        const bool hovered=ImGui::IsItemHovered();
+        const ImVec2 cellEnd{cell.x+widths[i],cell.y+height};
+        if(selected) {
+            draw->AddRectFilled(
+                ImVec2(cell.x+2.0F,cell.y+2.0F),
+                ImVec2(cellEnd.x-2.0F,cellEnd.y-2.0F),
+                ImGui::GetColorU32(ImVec4(0.20F,0.26F,0.34F,1.0F)),4.0F);
+            draw->AddRectFilled(
+                ImVec2(cell.x+8.0F,cellEnd.y-3.0F),
+                ImVec2(cellEnd.x-8.0F,cellEnd.y-1.0F),
+                ImGui::GetColorU32(ImVec4(0.42F,0.70F,0.98F,1.0F)));
+        } else if(hovered) {
+            draw->AddRectFilled(
+                ImVec2(cell.x+2.0F,cell.y+2.0F),
+                ImVec2(cellEnd.x-2.0F,cellEnd.y-2.0F),
+                ImGui::GetColorU32(ImVec4(0.17F,0.21F,0.27F,1.0F)),4.0F);
+        }
+        if(ImGui::IsItemFocused())
+            draw->AddRect(cell,cellEnd,ImGui::GetColorU32(ImGuiCol_NavCursor),
+                          4.0F,0,1.0F);
+        const ImVec2 textSize=ImGui::CalcTextSize(labels[i]);
+        draw->AddText(
+            ImVec2(cell.x+(widths[i]-textSize.x)*0.5F,
+                   cell.y+(height-textSize.y)*0.5F),
+            ImGui::GetColorU32(selected
+                ? ImVec4(0.95F,0.97F,1.0F,1.0F)
+                : ImVec4(0.67F,0.72F,0.79F,1.0F)),labels[i]);
+        gtToolbarTooltip(hints[i]);
+        if(click && !selected) {
+            secondSelected=i==1;
+            changed=true;
+        }
     }
-    const bool clicked=ImGui::Button(label,ImVec2(width,height));
-    if(selected) ImGui::PopStyleColor(3);
-    return clicked;
+    ImGui::PopID();
+    return changed;
 }
 
 void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
                         GtRangeViewSettings& view) {
     const bool paused=app::rangeTimelinePaused();
     const auto& style=ImGui::GetStyle();
-    const float unit=ImGui::GetFrameHeight();
-    const float buttonHeight=unit+7.0F;
-    const float toolbarHeight=buttonHeight+style.WindowPadding.y*2.0F+4.0F;
-    if(ImGui::BeginChild("##gt-timeline-toolbar",ImVec2(0.0F,toolbarHeight),
-           ImGuiChildFlags_Borders,
-           ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse)) {
-        // Four aligned groups fill the entire viewport; the last group
-        // stretches, so the toolbar never bunches against the left edge.
+    const float buttonSide=ImGui::GetFrameHeight()+6.0F;
+    const float toolbarHeight=buttonSide+style.WindowPadding.y*2.0F+4.0F;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg,ImVec4(0.095F,0.115F,0.15F,1.0F));
+    if(ImGui::BeginChild("##gt-timeline-toolbar",
+            ImVec2(0.0F,toolbarHeight),ImGuiChildFlags_Borders,
+            ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse)) {
+        // Different control types have different affordances:
+        // tabs = selection, square outlined buttons = action, right = numeric input.
         if(ImGui::BeginTable("##gt-timeline-layout",4,
-                ImGuiTableFlags_SizingStretchProp|
-                ImGuiTableFlags_BordersInnerV|
-                ImGuiTableFlags_NoPadOuterX)) {
+                ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_NoPadOuterX)) {
             ImGui::TableSetupColumn("Ось",ImGuiTableColumnFlags_WidthStretch,0.25F);
-            ImGui::TableSetupColumn("Транспорт",ImGuiTableColumnFlags_WidthStretch,0.14F);
-            ImGui::TableSetupColumn("Масштаб",ImGuiTableColumnFlags_WidthStretch,0.26F);
-            ImGui::TableSetupColumn("Окно",ImGuiTableColumnFlags_WidthStretch,0.35F);
+            ImGui::TableSetupColumn("Действия",ImGuiTableColumnFlags_WidthStretch,0.14F);
+            ImGui::TableSetupColumn("Режим",ImGuiTableColumnFlags_WidthStretch,0.26F);
+            ImGui::TableSetupColumn("Интервал",ImGuiTableColumnFlags_WidthStretch,0.35F);
             ImGui::TableNextRow();
+
             ImGui::TableSetColumnIndex(0);
-            const float gap=style.ItemSpacing.x;
-            float available=ImGui::GetContentRegionAvail().x;
-            const float segment=std::max(55.0F,(available-gap)*0.5F);
-            if(gtSegmentButton("Время##gt-time",!view.frameAxis,segment,buttonHeight))
-                view.frameAxis=false;
-            gtToolbarTooltip("Шкала X: секунды относительно текущего кадра.");
-            ImGui::SameLine();
-            if(gtSegmentButton("Кадры##gt-frames",view.frameAxis,segment,buttonHeight))
-                view.frameAxis=true;
-            gtToolbarTooltip("Шкала X: реальные номера кадров RGF1.");
+            gtSegmentedChoice("gt-axis","Время","Кадры",view.frameAxis,
+                std::max(1.0F,ImGui::GetContentRegionAvail().x-4.0F),
+                buttonSide,
+                "Ось X: секунды относительно текущего кадра.",
+                "Ось X: настоящие номера кадров RGF1.");
 
             ImGui::TableSetColumnIndex(1);
-            const float actionWidth=ImGui::GetContentRegionAvail().x;
-            const float actionButton=std::max(30.0F,(actionWidth-gap)*0.5F);
+            const float actionAvailable=ImGui::GetContentRegionAvail().x;
+            const float actionGap=style.ItemSpacing.x;
+            const float actionWidth=buttonSide*2.0F+actionGap;
+            if(actionAvailable>actionWidth)
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX()+
+                    (actionAvailable-actionWidth)*0.5F);
             if(gtTimelineIconButton("##gt-toggle-pause",
-                    paused?GtTimelineIcon::Play:GtTimelineIcon::Pause,actionButton,buttonHeight)) {
+                    paused?GtTimelineIcon::Play:GtTimelineIcon::Pause,
+                    buttonSide,paused)) {
                 app::toggleRangeTimelinePaused();
                 if(paused) view.manual=false;
             }
             gtToolbarTooltip(paused?"Продолжить графики.":
-                             "Пауза только для графиков.\nRTSP и CV продолжают работу.");
+                "Пауза только для графиков.\nRTSP и CV продолжают работу.");
             ImGui::SameLine();
-            if(gtTimelineIconButton("##gt-reset",GtTimelineIcon::Reset,actionButton,buttonHeight))
+            if(gtTimelineIconButton("##gt-reset",GtTimelineIcon::Reset,buttonSide))
                 view.manual=false;
             gtToolbarTooltip("Сбросить масштаб и следовать за новыми данными.");
 
             ImGui::TableSetColumnIndex(2);
-            available=ImGui::GetContentRegionAvail().x;
-            const float modeButton=std::max(65.0F,(available-gap)*0.5F);
-            if(gtSegmentButton("Авто##gt-auto",!view.manual,modeButton,buttonHeight))
-                view.manual=false;
-            gtToolbarTooltip("Автоматически следовать за новыми кадрами.");
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!paused);
-            if(gtSegmentButton("Диапазон##gt-manual",view.manual,modeButton,buttonHeight)) {
-                view.manual=true;
+            const bool wasManual=view.manual;
+            gtSegmentedChoice("gt-mode","Авто","Диапазон",view.manual,
+                std::max(1.0F,ImGui::GetContentRegionAvail().x-4.0F),
+                buttonSide,
+                "Автоматическое окно графиков.",
+                "Ручной диапазон X.\nСначала поставьте графики на паузу.");
+            if(view.manual && !paused) view.manual=false;
+            if(view.manual && !wasManual) {
                 view.fromSeconds=-view.windowSeconds;
                 view.toSeconds=0.0;
                 std::uint64_t newest=0;
@@ -352,16 +425,20 @@ void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
                 view.fromFrame=newest>view.windowFrames
                     ? newest-view.windowFrames:0U;
             }
-            gtToolbarTooltip("Ручной диапазон доступен при паузе.");
-            ImGui::EndDisabled();
 
             ImGui::TableSetColumnIndex(3);
+            // Numeric widgets have the standard ImGui frame height, not the
+            // taller action-button height. Center this complete line optically.
+            const float offset=std::max(0.0F,
+                (buttonSide-ImGui::GetFrameHeight())*0.5F);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY()+offset);
             const float fieldWidth=ImGui::GetContentRegionAvail().x;
+            const float gap=style.ItemSpacing.x;
             ImGui::AlignTextToFramePadding();
             if(view.manual) {
                 const float labels=ImGui::CalcTextSize("От").x+
                                    ImGui::CalcTextSize("До").x+gap*4.0F;
-                const float inputWidth=std::max(55.0F,(fieldWidth-labels)*0.5F);
+                const float inputWidth=std::max(45.0F,(fieldWidth-labels)*0.5F);
                 ImGui::TextUnformatted("От");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(inputWidth);
@@ -370,6 +447,7 @@ void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
                 else
                     ImGui::InputDouble("##gt-from-time",&view.fromSeconds,0,0,"%.2f");
                 ImGui::SameLine();
+                ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted("До");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(inputWidth);
@@ -385,8 +463,8 @@ void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
             } else {
                 ImGui::TextUnformatted(view.frameAxis?"Окно, кадры":"Окно, с");
                 ImGui::SameLine();
-                ImGui::SetNextItemWidth(std::max(60.0F,
-                    ImGui::GetContentRegionAvail().x));
+                ImGui::SetNextItemWidth(std::max(30.0F,
+                    ImGui::GetContentRegionAvail().x-2.0F));
                 if(view.frameAxis) {
                     ImGui::InputScalar("##gt-window-frames",ImGuiDataType_U64,
                                        &view.windowFrames);
@@ -402,6 +480,7 @@ void drawGtRangeToolbar(const std::vector<telemetry::GtRangeTrack>& tracks,
         }
     }
     ImGui::EndChild();
+    ImGui::PopStyleColor();
 }
 
 struct RateHistory {
