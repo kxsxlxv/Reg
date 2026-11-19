@@ -277,6 +277,51 @@ struct GtRangeDashboard::Impl {
                         mx.data(), my.data(), static_cast<int>(mx.size()), marker);
                 }
 
+                if (paused && ImPlot::IsPlotHovered() &&
+                    !ImGui::GetIO().KeyCtrl) {
+                    // Zoom about cursor and middle-drag pan share the same X
+                    // bounds across all object plots (not independent ImPlot state).
+                    const auto mouse=ImPlot::GetPlotMousePos();
+                    const double from=view.manual
+                        ? (view.frameAxis?frameOffset(view.fromFrame,frameOrigin)
+                                          :view.fromSeconds)
+                        : (view.frameAxis?-static_cast<double>(view.windowFrames)
+                                          :-view.windowSeconds);
+                    const double to=view.manual
+                        ? (view.frameAxis?frameOffset(view.toFrame,frameOrigin)
+                                          :view.toSeconds) : 0.0;
+                    double left=from,right=to;
+                    const float wheel=ImGui::GetIO().MouseWheel;
+                    if(wheel!=0.0F) {
+                        const double factor=std::pow(0.85,static_cast<double>(wheel));
+                        left=mouse.x+(left-mouse.x)*factor;
+                        right=mouse.x+(right-mouse.x)*factor;
+                    } else if(ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+                        const auto bounds=ImPlot::GetPlotLimits();
+                        const auto p0=ImPlot::PlotToPixels(bounds.X.Min,mouse.y);
+                        const auto p1=ImPlot::PlotToPixels(bounds.X.Max,mouse.y);
+                        const double width=static_cast<double>(p1.x-p0.x);
+                        if(width>1.0) {
+                            const double delta=ImGui::GetIO().MouseDelta.x*
+                                (to-from)/width;
+                            left-=delta;
+                            right-=delta;
+                        }
+                    }
+                    if(left!=from || right!=to) {
+                        view.manual=true;
+                        if(view.frameAxis) {
+                            view.fromFrame=frameAtOffset(std::floor(left),frameOrigin);
+                            view.toFrame=frameAtOffset(std::ceil(right),frameOrigin);
+                            if(view.fromFrame>=view.toFrame &&
+                               view.toFrame<std::numeric_limits<std::uint64_t>::max())
+                                ++view.toFrame;
+                        } else {
+                            view.fromSeconds=left;
+                            view.toSeconds=right;
+                        }
+                    }
+                }
                 if (ImPlot::IsPlotHovered()) {
                     // Ctrl+left drag selects one X range for every GT object.
                     // This never modifies the camera frame/metadata pipeline.
