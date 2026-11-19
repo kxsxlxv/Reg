@@ -74,13 +74,19 @@ double frameOffset(std::uint64_t id, std::uint64_t origin) {
                         : -static_cast<double>(origin-id);
 }
 
+std::uint64_t frameAtOffset(double value,std::uint64_t origin) {
+    if(!std::isfinite(value)) return origin;
+    const auto magnitude=static_cast<std::uint64_t>(std::min(
+        std::abs(value),static_cast<double>(std::numeric_limits<std::int64_t>::max())));
+    return value<0
+        ? origin-std::min(origin,magnitude)
+        : origin+(std::min(magnitude,
+            std::numeric_limits<std::uint64_t>::max()-origin));
+}
+
 int formatFrameAxis(double value,char* buffer,int size,void* userData) {
     const auto origin=*static_cast<const std::uint64_t*>(userData);
-    const auto rounded=std::llround(value);
-    const std::uint64_t id=rounded<0
-        ? origin-static_cast<std::uint64_t>(
-            std::min<std::uint64_t>(origin,static_cast<std::uint64_t>(-(rounded+1))+1U))
-        : origin+static_cast<std::uint64_t>(rounded);
+    const std::uint64_t id=frameAtOffset(std::round(value),origin);
     return std::snprintf(buffer,static_cast<std::size_t>(size),"%llu",
                          static_cast<unsigned long long>(id));
 }
@@ -96,6 +102,8 @@ struct GtRangeDashboard::Impl {
     std::string focusedId;
     int page{};
     std::size_t markersDrawnLastFrame{};
+    bool selectingRange{};
+    double selectionStart{};
 
     void reloadConfig(Clock::time_point now) {
         if (now < nextCheck) return;
@@ -270,6 +278,44 @@ struct GtRangeDashboard::Impl {
                 }
 
                 if (ImPlot::IsPlotHovered()) {
+                    // Ctrl+left drag selects one X range for every GT object.
+                    // This never modifies the camera frame/metadata pipeline.
+                    if(paused && ImGui::GetIO().KeyCtrl &&
+                       ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        selectingRange=true;
+                        selectionStart=ImPlot::GetPlotMousePos().x;
+                    }
+                    if(selectingRange && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                        const auto limits=ImPlot::GetPlotLimits();
+                        const double mouseX=ImPlot::GetPlotMousePos().x;
+                        const ImVec2 cornerA=ImPlot::PlotToPixels(
+                            selectionStart,limits.Y.Min);
+                        const ImVec2 cornerB=ImPlot::PlotToPixels(
+                            mouseX,limits.Y.Max);
+                        ImGui::GetWindowDrawList()->AddRectFilled(
+                            ImVec2(std::min(cornerA.x,cornerB.x),cornerB.y),
+                            ImVec2(std::max(cornerA.x,cornerB.x),cornerA.y),
+                            IM_COL32(70,150,250,48));
+                    }
+                    if(selectingRange && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                        selectingRange=false;
+                        const double finish=ImPlot::GetPlotMousePos().x;
+                        if(std::abs(finish-selectionStart)>1.0e-4) {
+                            const double lo=std::min(finish,selectionStart);
+                            const double hi=std::max(finish,selectionStart);
+                            view.manual=true;
+                            if(view.frameAxis) {
+                                view.fromFrame=frameAtOffset(std::floor(lo),frameOrigin);
+                                view.toFrame=frameAtOffset(std::ceil(hi),frameOrigin);
+                                if(view.fromFrame>=view.toFrame &&
+                                   view.toFrame<std::numeric_limits<std::uint64_t>::max())
+                                    ++view.toFrame;
+                            } else {
+                                view.fromSeconds=lo;
+                                view.toSeconds=hi;
+                            }
+                        }
+                    }
                     const ImVec2 mouse = ImGui::GetMousePos();
                     double nearest = std::numeric_limits<double>::infinity();
                     const telemetry::GtRangePoint* nearestPoint = nullptr;
@@ -332,7 +378,8 @@ struct GtRangeDashboard::Impl {
                         }
                         ImGui::EndTooltip();
                     }
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                        !ImGui::GetIO().KeyCtrl) {
                         focusedId = focusedId == track.id ? "" : track.id;
                         page = 0;
                     }
