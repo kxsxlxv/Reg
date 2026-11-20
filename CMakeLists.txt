@@ -227,6 +227,9 @@ add_executable(reg_probe
     src/render/ImGuiTelemetryRenderer.cpp
     src/render/GtRangeDashboard.cpp
     src/render/Cvm1SemanticStyleConfig.cpp
+    src/vtr/VtrCatalog.cpp
+    src/vtr/VtrLegend.cpp
+    src/vtr/VtrPhoto.cpp
     src/telemetry/TelemetryModel.cpp
     src/recorder/SegmentedMkvWriter.cpp
     src/recorder/MetadataJournal.cpp
@@ -681,6 +684,33 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# Compact human-readable VTR output catalogue (header-only TOML parser).
+FetchContent_Declare(
+    tomlplusplus
+    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+    GIT_TAG v3.4.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(tomlplusplus)
+
+if(REG_BUILD_TESTS)
+    add_executable(reg_vtr_catalog_tests
+        tests/vtr_catalog_tests.cpp src/vtr/VtrCatalog.cpp)
+    target_include_directories(reg_vtr_catalog_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(reg_vtr_catalog_tests PRIVATE tomlplusplus::tomlplusplus)
+    add_custom_command(TARGET reg_vtr_catalog_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:reg_vtr_catalog_tests>/config"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml"
+            "$<TARGET_FILE_DIR:reg_vtr_catalog_tests>/config/vtr.toml"
+        VERBATIM)
+    add_test(NAME vtr_catalog COMMAND reg_vtr_catalog_tests)
+    set_tests_properties(vtr_catalog PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:reg_vtr_catalog_tests>")
+endif()
+
 if(REG_BUILD_TESTS)
 
     add_executable(reg_cvm1_style_config_tests
@@ -703,12 +733,15 @@ if(REG_BUILD_TESTS)
 endif()
 
 # Graph styles/labels are user-editable at runtime, without rebuilding REG.
-target_link_libraries(reg_probe PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(reg_probe PRIVATE nlohmann_json::nlohmann_json tomlplusplus::tomlplusplus)
 add_custom_command(TARGET reg_probe POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:reg_probe>/config"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/config/gt-range-ui.json"
         "$<TARGET_FILE_DIR:reg_probe>/config/gt-range-ui.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml"
+        "$<TARGET_FILE_DIR:reg_probe>/config/vtr.toml"
     VERBATIM)
 
 
@@ -794,6 +827,33 @@ target_include_directories(reg_launcher_imgui PUBLIC
 )
 target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
 
+# Offline screenshot uses the SAME ImGui VTR legend draw function as Telemetry,
+# with SDL's software renderer (no physical GPU or running Jetson needed).
+if(REG_BUILD_TESTS AND WIN32)
+    add_executable(reg_vtr_legend_snapshot
+        tests/vtr_legend_snapshot.cpp
+        src/vtr/VtrCatalog.cpp
+        src/vtr/VtrLegend.cpp
+        src/vtr/VtrPhoto.cpp
+        src/render/ImGuiTheme.cpp)
+    target_include_directories(reg_vtr_legend_snapshot PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src" "${REG_ZSTD_INCLUDE_DIR}")
+    target_link_libraries(reg_vtr_legend_snapshot PRIVATE
+        reg_launcher_imgui tomlplusplus::tomlplusplus SDL3::SDL3
+        ${REG_ZSTD_LIBRARY})
+    target_compile_definitions(reg_vtr_legend_snapshot PRIVATE
+        REG_FONT_DIR="${REG_FONT_OUTPUT_DIR}")
+    add_custom_command(TARGET reg_vtr_legend_snapshot POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:SDL3::SDL3>"
+            "$<TARGET_FILE_DIR:reg_vtr_legend_snapshot>"
+        VERBATIM)
+    add_test(NAME vtr_legend_snapshot
+        COMMAND reg_vtr_legend_snapshot
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml"
+            "${CMAKE_CURRENT_BINARY_DIR}/vtr-legend-preview.bmp")
+endif()
+
 add_executable(reg_launcher WIN32
     src/launcher/main.cpp
     src/launcher/LauncherDisplay.cpp
@@ -817,6 +877,8 @@ if(WIN32)
 endif()
 install(DIRECTORY "${REG_FONT_OUTPUT_DIR}/" DESTINATION bin/fonts)
 install(DIRECTORY "${REG_SHADER_OUTPUT_DIR}/" DESTINATION bin/shaders)
+# VTR legend and the future binary receiver read the same relocatable catalogue.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml" DESTINATION bin/config)
 if(UNIX AND NOT APPLE)
     # install(FILES) cannot follow soname symlink chains. This variant can.
     # Delay the copy until installation so the built SDL3 library exists.

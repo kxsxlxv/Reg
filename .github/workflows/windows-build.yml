@@ -154,6 +154,7 @@ jobs:
           path: |
             dist/portable.zip
             dist/manifest.json
+            build-win/vtr-legend-preview.bmp
           if-no-files-found: error
 
       # PRs are tested but never publish executable updates.

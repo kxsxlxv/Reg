@@ -1,6 +1,9 @@
 #include "render/ImGuiTelemetryRenderer.hpp"
 #include "render/GtRangeDashboard.hpp"
 #include "render/GtDepthScale.hpp"
+#include "vtr/VtrCatalog.hpp"
+#include "vtr/VtrLegend.hpp"
+#include "vtr/VtrPhoto.hpp"
 
 #include "app/RuntimeUiState.hpp"
 #include "render/ImGuiTheme.hpp"
@@ -1461,6 +1464,10 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         std::chrono::steady_clock::now()};
     RateHistory rateHistory;
     GtRangeDashboard gtDashboard;
+    vtr::Catalog vtrCatalog;
+    std::string vtrError;
+    std::filesystem::path vtrFile;
+    bool vtrLoaded{false};
     GtRangeViewSettings gtRangeView;
     bool gtSettingsOpen{true};
     bool gtPreferencesLoaded{false};
@@ -2100,6 +2107,25 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
         }
     }
 
+    void drawVtrTab() {
+        if (!vtrLoaded) {
+            vtrLoaded=true;
+            std::error_code ec;
+            vtrFile=std::filesystem::current_path(ec)/"config/vtr.toml";
+            if (ec || !std::filesystem::exists(vtrFile,ec)) {
+                if (const char* base=SDL_GetBasePath(); base!=nullptr)
+                    vtrFile=std::filesystem::path(base)/"config/vtr.toml";
+            }
+            try {
+                vtrCatalog=vtr::readCatalog(vtrFile);
+                vtrError.clear();
+            } catch (const std::exception& ex) {
+                vtrError=ex.what();
+            }
+        }
+        vtr::drawLegend(vtrCatalog,vtrError,vtrFile);
+    }
+
     void buildDashboard(
         const telemetry::Snapshot& snapshot,
         const NetImguiDiagnostics& netImgui,
@@ -2139,6 +2165,10 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     : ImGuiTabItemFlags_None;
             const ImGuiTabItemFlags netImguiFlags =
                 selectedPage == app::TelemetryPage::NetImgui
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
+            const ImGuiTabItemFlags vtrFlags =
+                selectedPage == app::TelemetryPage::VtrLegend
                     ? ImGuiTabItemFlags_SetSelected
                     : ImGuiTabItemFlags_None;
             const ImGuiTabItemFlags eventsFlags =
@@ -2183,6 +2213,16 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     ImGui::EndTabItem();
                 }
             }
+            const bool vtrOpen = ImGui::BeginTabItem(
+                "VTR / OSD", nullptr, vtrFlags);
+            if (ImGui::IsItemClicked()) {
+                app::setTelemetryPage(app::TelemetryPage::VtrLegend);
+            }
+            if (vtrOpen) {
+                drawVtrTab();
+                ImGui::EndTabItem();
+            }
+
             const bool eventsOpen = ImGui::BeginTabItem(
                 "События", nullptr, eventsFlags);
             if (ImGui::IsItemClicked()) {
@@ -2281,6 +2321,8 @@ ImGuiTelemetryRenderer::ImGuiTelemetryRenderer(
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
     configureRegImGuiTheme(initialSwapchain.contentScale());
+    // Telemetry-only photo atlas (Raw / replay do not load the demo asset).
+    vtr::installPreviewPhoto(ImGui::GetIO().Fonts);
     ImPlot::GetStyle().UseLocalTime = false;
 
     try {

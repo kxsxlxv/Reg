@@ -1,0 +1,128 @@
+# VTR — Vision To Reg. One output = one self-contained block.
+# Change styles here; the program that produces an output is not part of its identity.
+# format is the TOML contract version. A hash of this file identifies its exact contents.
+format = 1
+
+[defaults.label]
+place = "top_left_outside"
+color = "#FFFFFF"
+background = "#000000"
+background_alpha = 0.70
+font_px = 14
+padding_px = 4
+gap_px = 3
+
+# Independent detections — each can feed a supervisor, MOT or SOT.
+
+[output.neural_detection]
+id = 1
+semantic = "detection"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#F5C542", width = 2, edges = "solid", fill_alpha = 0.04 }
+label = { show = true, text = "NN {conf_pct}%" }
+
+[output.canny_detection]
+id = 2
+semantic = "detection"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#FF6575", width = 2, edges = "dashed" }
+label = { show = false, text = "Canny" }
+
+[output.motion_detection]
+id = 3
+semantic = "detection"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#FF8E40", width = 2, edges = "solid", corners = "solid", corner_px = 12 }
+
+# Operator-only extrapolation between neural detector updates (~20 Hz on 60 FPS).
+# No outline and no label; intentionally not included in benchmark.
+[output.linear_propagation]
+id = 4
+semantic = "propagation"
+geometry = "bbox"
+benchmark = "none"
+box = { fill = "#32A8FF", fill_alpha = 0.22, edges = "none" }
+
+# Sky/Canny and independent motion.
+
+[output.sky_mask]
+id = 10
+semantic = "sky"
+geometry = "mask"
+benchmark = "sky_mask_iou"
+osd = { color = "#408CFF", alpha = 0.25 }
+
+[output.canny_contours]
+id = 11
+semantic = "contour"
+geometry = "polyline"
+benchmark = "none"
+osd = { color = "#FF6575", width = 2, pattern = "solid" }
+
+[output.motion_mask]
+id = 12
+semantic = "motion"
+geometry = "mask"
+benchmark = "none"
+osd = { color = "#FA4141", alpha = 0.35 }
+
+# Supervisor decisions are separate from the candidate sources.
+
+[output.supervisor_accepted]
+id = 20
+semantic = "detection"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#F2F2F2", width = 3, edges = "none", corners = "solid", corner_px = 18 }
+label = { show = true, text = "ACCEPT {origin}" }
+
+[output.supervisor_rejected]
+id = 21
+semantic = "rejected"
+geometry = "bbox"
+benchmark = "none"
+box = { color = "#8F9299", width = 1, edges = "dashed", diagonals = "solid" }
+
+# MOT states and propagated geometry are not tied to TrackTrack or Kalman.
+
+[output.mot_track]
+id = 30
+semantic = "tracking"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#28DF7D", width = 2, edges = "dashed", corners = "solid", corner_px = 15 }
+label = { show = true, text = "MOT #{track_id}" }
+
+[output.mot_prediction]
+id = 31
+semantic = "prediction"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#36C0FF", width = 2, edges = "dashed", diagonals = "dashed" }
+
+[output.mot_ofa]
+id = 32
+semantic = "propagation"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#57A9FF", width = 2, edges = "solid", fill_alpha = 0.04 }
+
+# SOT and its auxiliary search ROI.
+
+[output.sot_track]
+id = 40
+semantic = "tracking"
+geometry = "bbox"
+benchmark = "bbox_iou"
+box = { color = "#E966FF", width = 3, edges = "none", corners = "solid", corner_px = 20 }
+label = { show = false, text = "SOT #{track_id}" }
+
+[output.sot_search_roi]
+id = 41
+semantic = "search_region"
+geometry = "bbox"
+benchmark = "none"
+box = { color = "#AD8BFF", width = 1, edges = "dashed", fill_alpha = 0.03 }
