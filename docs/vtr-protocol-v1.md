@@ -27,8 +27,8 @@ a live VTR UDP receiver and does not replace existing CVM1.
 `arrow`, `text` (label), `mask`, `heatmap`.
 
 The enum and style grammar must be implemented identically on Jetson and Reg.
-Today the legend provides a schematic ImGui preview of these declared
-geometry classes, **not parity-tested live rendering**. Mask/heatmap transport,
+Today the legend provides illustrative ImGui OSD overlays on a user-supplied
+photograph, **not parity-tested live rendering**. Mask/heatmap transport,
 actual VTR binary message layout, and Jetson implementation are follow-ups.
 
 For bbox: `edges`, `corners`, `diagonals` take

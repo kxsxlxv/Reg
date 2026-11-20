@@ -28,27 +28,6 @@ void stroke(ImDrawList* d, ImVec2 a, ImVec2 b, ImU32 color,
                    ImVec2(a.x+dx*t/len,a.y+dy*t/len),color,width);
     }
 }
-void drone(ImDrawList* d, ImVec2 center) {
-    const ImU32 body=IM_COL32(83,104,124,255);
-    const ImU32 edge=IM_COL32(128,151,169,255);
-    // Small top-down UAV silhouette; never a fetched or live video frame.
-    d->AddLine(ImVec2(center.x-37,center.y-20),
-               ImVec2(center.x+37,center.y+20),body,9);
-    d->AddLine(ImVec2(center.x+37,center.y-20),
-               ImVec2(center.x-37,center.y+20),body,9);
-    for (int dx : {-39,39}) for (int dy : {-22,22}) {
-        d->AddCircleFilled(ImVec2(center.x+dx,center.y+dy),8,IM_COL32(48,67,86,255));
-        d->AddCircle(ImVec2(center.x+dx,center.y+dy),8,edge,0,1);
-    }
-    const ImVec2 p[]={
-        {center.x,center.y-24},{center.x+11,center.y+7},
-        {center.x+5,center.y+20},{center.x-5,center.y+20},
-        {center.x-11,center.y+7}
-    };
-    d->AddConvexPolyFilled(p,5,body);
-    d->AddLine(p[0],p[1],edge,1.5F);
-    d->AddLine(p[0],p[4],edge,1.5F);
-}
 std::string replace(std::string text,std::string_view key,
                     std::string_view value) {
     for (size_t pos=0;(pos=text.find(key,pos))!=std::string::npos;
