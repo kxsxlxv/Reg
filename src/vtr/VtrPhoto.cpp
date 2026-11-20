@@ -12,7 +12,7 @@ namespace reg::vtr {
 namespace {
 constexpr int kWidth = 320;
 constexpr int kHeight = 168;
-constexpr int kPaletteBytes = 256 * 3;
+constexpr int kPaletteBytes = 128 * 3;
 constexpr int kDecodedBytes = kPaletteBytes + kWidth * kHeight;
 
 // The authentic user-supplied UAV photo, resized for preview and reduced to
