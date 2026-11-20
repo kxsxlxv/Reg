@@ -105,7 +105,7 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     d->AddRectFilled(min,max,IM_COL32(12,23,35,255),5.0F);
     d->AddRect(min,max,IM_COL32(66,84,104,180),5.0F);
     d->PushClipRect(min,max,true);
-    const ImVec2 center{(min.x+max.x)*0.5F,(min.y+max.y)*0.58F};
+    const ImVec2 center{(min.x+max.x)*0.5F,min.y+(max.y-min.y)*0.52F};
     drone(d,center);
     const float x=center.x-59.0F,y=center.y-35.0F;
     const ImVec2 a{x,y},b{x+118.0F,y+73.0F};
@@ -186,29 +186,50 @@ void drawLegend(Catalog& catalog, std::string& error,
     }
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Перечитать локальный config/vtr.toml. SSH не требуется.");
-    ImGui::TextDisabled("Схематичный БПЛА. Превью OSD без Jetson и видеопотока.");
     if (!error.empty())
         ImGui::TextColored({1.0F,0.43F,0.35F,1.0F},"Ошибка: %s",error.c_str());
     ImGui::Separator();
+
+    // A compact responsive gallery. The previous one-column layout wasted
+    // the entire right-hand side of the Telemetry window.
     if (ImGui::BeginChild("##vtr-scroll",ImVec2(0.0F,0.0F),ImGuiChildFlags_None)) {
-        for(const auto& o:catalog.outputs) {
-            ImGui::PushID(static_cast<int>(o.id));
-            if(ImGui::BeginChild("##vtr-output",ImVec2(-1.0F,134.0F),
-                                  ImGuiChildFlags_Borders)) {
-                const ImVec2 p=ImGui::GetCursorScreenPos();
-                ImGui::InvisibleButton("##vtr-preview",ImVec2(245.0F,113.0F));
-                preview(ImGui::GetWindowDrawList(),o,p,{p.x+245.0F,p.y+113.0F});
-                ImGui::SameLine(0.0F,17.0F);
-                ImGui::BeginGroup();
-                ImGui::Text("#%u  %s",static_cast<unsigned>(o.id),o.key.c_str());
-                ImGui::TextDisabled("Semantic: %s",o.semantic.c_str());
-                ImGui::TextDisabled("Geometry: %s",o.geometry.c_str());
-                ImGui::TextDisabled("GT: %s",o.benchmark.c_str());
-                ImGui::TextDisabled("Label: %s",o.label.show?"ON":"OFF");
-                ImGui::EndGroup();
+        const float contentWidth = ImGui::GetContentRegionAvail().x;
+        const int columns = contentWidth >= 840.0F ? 2 : 1;
+        if (ImGui::BeginTable("##vtr-grid",columns,
+                              ImGuiTableFlags_SizingStretchSame)) {
+            for (const auto& o : catalog.outputs) {
+                ImGui::TableNextColumn();
+                ImGui::PushID(static_cast<int>(o.id));
+                const float cellWidth=ImGui::GetContentRegionAvail().x;
+                const bool stacked=cellWidth < 390.0F;
+                if (ImGui::BeginChild("##vtr-output",
+                        ImVec2(0.0F,stacked ? 178.0F : 132.0F),
+                        ImGuiChildFlags_Borders)) {
+                    const float available=ImGui::GetContentRegionAvail().x;
+                    const float previewWidth=stacked
+                        ? available : std::min(245.0F,available*0.49F);
+                    const ImVec2 p=ImGui::GetCursorScreenPos();
+                    constexpr float previewHeight=112.0F;
+                    ImGui::InvisibleButton("##vtr-preview",
+                                           ImVec2(previewWidth,previewHeight));
+                    preview(ImGui::GetWindowDrawList(),o,p,
+                            {p.x+previewWidth,p.y+previewHeight});
+                    if (!stacked)
+                        ImGui::SameLine(0.0F,12.0F);
+                    ImGui::BeginGroup();
+                    ImGui::Text("#%u  %s",
+                        static_cast<unsigned>(o.id),o.key.c_str());
+                    ImGui::TextColored({0.72F,0.78F,0.85F,1.0F},
+                        "%s  /  %s",o.semantic.c_str(),o.geometry.c_str());
+                    ImGui::TextDisabled("GT: %s",o.benchmark.c_str());
+                    ImGui::TextDisabled("Label: %s",
+                                        o.label.show?"ON":"OFF");
+                    ImGui::EndGroup();
+                }
+                ImGui::EndChild();
+                ImGui::PopID();
             }
-            ImGui::EndChild();
-            ImGui::PopID();
+            ImGui::EndTable();
         }
     }
     ImGui::EndChild();
