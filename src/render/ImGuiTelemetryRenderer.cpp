@@ -3,6 +3,7 @@
 #include "render/GtDepthScale.hpp"
 #include "vtr/VtrCatalog.hpp"
 #include "vtr/VtrLegend.hpp"
+#include "vtr/VtrPhoto.hpp"
 
 #include "app/RuntimeUiState.hpp"
 #include "render/ImGuiTheme.hpp"
@@ -2320,6 +2321,8 @@ ImGuiTelemetryRenderer::ImGuiTelemetryRenderer(
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
     configureRegImGuiTheme(initialSwapchain.contentScale());
+    // Telemetry-only photo atlas (Raw / replay do not load the demo asset).
+    vtr::installPreviewPhoto(ImGui::GetIO().Fonts);
     ImPlot::GetStyle().UseLocalTime = false;
 
     try {

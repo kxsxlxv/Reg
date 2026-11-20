@@ -39,6 +39,7 @@ int main(int argc,char** argv) {
         io.DisplayFramebufferScale={1.0F,1.0F};
         io.DeltaTime=1.0F/60.0F;
         reg::render::configureRegImGuiTheme(1.0F);
+        reg::vtr::installPreviewPhoto(ImGui::GetIO().Fonts);
         reg::vtr::PreviewPhoto photo;
         if (!reg::vtr::previewPhoto(photo)) {
             std::fprintf(stderr,"VTR authentic photo atlas missing\\n");
