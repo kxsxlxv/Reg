@@ -73,7 +73,7 @@ int main(int argc,char** argv) {
             }
             ImGui::End();
             ImGui::Render();
-            const ImDrawData* data=ImGui::GetDrawData();
+            ImDrawData* data=ImGui::GetDrawData();
             std::printf("VTR screenshot frame=%d legend=%d vertices=%d\n",
                 frame,legendVisible?1:0,data!=nullptr?data->TotalVtxCount:0);
             if (!SDL_SetRenderDrawColor(renderer,18,22,30,255) ||
