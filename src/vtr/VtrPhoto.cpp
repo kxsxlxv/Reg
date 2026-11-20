@@ -284,6 +284,7 @@ std::vector<std::uint8_t> decode64(std::string_view data) {
     unsigned accumulator = 0;
     int bits = -8;
     for (const unsigned char c : data) {
+        if (c == '=') break; // Standard Base64 padding at the end.
         int n = -1;
         if (c >= 'A' && c <= 'Z') n = c - 'A';
         else if (c >= 'a' && c <= 'z') n = c - 'a' + 26;
