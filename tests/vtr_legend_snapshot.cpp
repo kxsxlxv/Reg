@@ -59,7 +59,7 @@ int main(int argc,char** argv) {
                 if (ImGui::BeginTabItem("Обзор")) ImGui::EndTabItem();
                 if (ImGui::BeginTabItem("Exact Sync")) ImGui::EndTabItem();
                 if (ImGui::BeginTabItem("NetImgui")) ImGui::EndTabItem();
-                if (ImGui::BeginTabItem("VTR / Легенда",nullptr,
+                if (ImGui::BeginTabItem("VTR / OSD",nullptr,
                                         ImGuiTabItemFlags_SetSelected)) {
                     legendVisible = true;
                     std::string error;
