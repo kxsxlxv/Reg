@@ -25,7 +25,7 @@ int main(int argc,char** argv) {
             std::fprintf(stderr,"SDL_Init: %s\n",SDL_GetError());
             return 2;
         }
-        constexpr int w=1100,h=2180;
+        constexpr int w=1100,h=1210;
         SDL_Surface* surface=SDL_CreateSurface(w,h,SDL_PIXELFORMAT_RGBA32);
         if(!surface) { std::fprintf(stderr,"SDL_CreateSurface: %s\n",SDL_GetError());return 2; }
         SDL_Renderer* renderer=SDL_CreateSoftwareRenderer(surface);
