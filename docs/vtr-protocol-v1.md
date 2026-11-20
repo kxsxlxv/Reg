@@ -53,3 +53,18 @@ semi-transparent background.
    ROI and operator-only fill are not benchmark detections.
 5. Keep CVM1 operational until the sender and receiver implement and
    verify the new VTR data path independently. No UI widgets or scripts.
+
+## Authentic UAV photo preview (Reg phase 1)
+
+The UI OSD demo renders a downsampled colour-indexed copy of the **user-provided**
+image `1000031104.jpg` (source 1536×804), **not** an AI-generated picture,
+a synthetic UAV, or a video frame. The sample photo is embedded in the
+ImGui font atlas and is rendered by the same code in Vulkan and the SDL3
+software screenshot test. No user-side image installation is necessary.
+
+The reference manual bbox is `xyxy = [130, 55, 1111, 671]` in source pixels.
+It includes the two wingtips, tail assembly and nose probe; labels and box
+styles in `config/vtr.toml` are drawn dynamically over the original photo
+through the existing `ImDrawList` primitives. Contour, sky and motion samples
+are **illustrative only**, not pixel-accurate segmentation/GT or detector output.
+The photo never modifies RTSP Raw frames, recordings, or CV algorithm inputs.

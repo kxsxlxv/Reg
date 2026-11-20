@@ -229,6 +229,7 @@ add_executable(reg_probe
     src/render/Cvm1SemanticStyleConfig.cpp
     src/vtr/VtrCatalog.cpp
     src/vtr/VtrLegend.cpp
+    src/vtr/VtrPhoto.cpp
     src/telemetry/TelemetryModel.cpp
     src/recorder/SegmentedMkvWriter.cpp
     src/recorder/MetadataJournal.cpp
@@ -833,11 +834,13 @@ if(REG_BUILD_TESTS AND WIN32)
         tests/vtr_legend_snapshot.cpp
         src/vtr/VtrCatalog.cpp
         src/vtr/VtrLegend.cpp
+        src/vtr/VtrPhoto.cpp
         src/render/ImGuiTheme.cpp)
     target_include_directories(reg_vtr_legend_snapshot PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src" "${REG_ZSTD_INCLUDE_DIR}")
     target_link_libraries(reg_vtr_legend_snapshot PRIVATE
-        reg_launcher_imgui tomlplusplus::tomlplusplus SDL3::SDL3)
+        reg_launcher_imgui tomlplusplus::tomlplusplus SDL3::SDL3
+        ${REG_ZSTD_LIBRARY})
     target_compile_definitions(reg_vtr_legend_snapshot PRIVATE
         REG_FONT_DIR="${REG_FONT_OUTPUT_DIR}")
     add_custom_command(TARGET reg_vtr_legend_snapshot POST_BUILD

@@ -1,4 +1,5 @@
 #include "render/ImGuiTheme.hpp"
+#include "vtr/VtrPhoto.hpp"
 
 #include <imgui.h>
 #include <SDL3/SDL.h>
@@ -85,6 +86,9 @@ void loadFonts() {
             std::string("Failed to load Material Symbols font: ") +
             symbolsPath.string());
     }
+    // Install the same authentic photo texture for Vulkan and offline SDL.
+    // The atlas is mutable here; never register it from an ImGui frame.
+    reg::vtr::installPreviewPhoto(io.Fonts);
 }
 
 void applyStyle(float contentScale) {

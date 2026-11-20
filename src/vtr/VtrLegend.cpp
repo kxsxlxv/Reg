@@ -1,4 +1,5 @@
 #include "vtr/VtrLegend.hpp"
+#include "vtr/VtrPhoto.hpp"
 #include <imgui.h>
 
 #include <algorithm>
@@ -105,64 +106,110 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     d->AddRectFilled(min,max,IM_COL32(12,23,35,255),5.0F);
     d->AddRect(min,max,IM_COL32(66,84,104,180),5.0F);
     d->PushClipRect(min,max,true);
-    const ImVec2 center{(min.x+max.x)*0.5F,min.y+(max.y-min.y)*0.52F};
-    drone(d,center);
-    const float x=center.x-59.0F,y=center.y-35.0F;
-    const ImVec2 a{x,y},b{x+118.0F,y+73.0F};
+
+    // This is the authentic user's 1536x804 photograph, sampled at 320x168
+    // for a small atlas tile. Aspect-fit without cropping or stretching.
+    PreviewPhoto photo{};
+    const bool hasPhoto=previewPhoto(photo);
+    const float width=max.x-min.x, height=max.y-min.y;
+    const float srcW=hasPhoto?static_cast<float>(photo.width):320.0F;
+    const float srcH=hasPhoto?static_cast<float>(photo.height):168.0F;
+    const float scale=std::min(width/srcW,height/srcH);
+    const ImVec2 photoMin{min.x+(width-srcW*scale)*0.5F,
+                          min.y+(height-srcH*scale)*0.5F};
+    const ImVec2 photoMax{photoMin.x+srcW*scale,photoMin.y+srcH*scale};
+    if (hasPhoto) {
+        d->AddImage(photo.texture,photoMin,photoMax,photo.uv0,photo.uv1,
+                    IM_COL32(255,255,255,255));
+    } else {
+        d->AddText({min.x+8,min.y+8},IM_COL32(255,115,100,255),
+                   "VTR photo unavailable");
+    }
+
+    // The reference BBOX is a prior manually measured annotation, not GT
+    // produced by a neural net. All overlay geometry uses SOURCE image units
+    // so boxes and contours remain aligned when the preview gets resized.
+    // Source: 1536x804, [x1,y1,x2,y2] = [130,55,1111,671].
+    const auto img=[&](float x,float y) -> ImVec2 {
+        return {photoMin.x+x/1536.0F*(photoMax.x-photoMin.x),
+                photoMin.y+y/804.0F*(photoMax.y-photoMin.y)};
+    };
+    const ImVec2 a=img(130,55),b=img(1111,671);
+    const ImVec2 center=img(660,365);
     const ImU32 ink=rgba(o.osd.stroke.color,o.osd.alpha);
     const auto& geometry=o.geometry;
     if (geometry=="bbox") {
         rectangle(d,o.box,a,b);
         if (o.label.show && !o.label.text.empty()) {
-            std::string text=sampleLabel(o.label.text);
+            const std::string text=sampleLabel(o.label.text);
             const ImVec2 textSize=ImGui::CalcTextSize(text.c_str());
             const float pad=o.label.paddingPx;
             const float totalHeight=textSize.y+2.0F*pad;
             const float ly=o.label.place=="bottom_left_outside"
                 ? b.y+o.label.gapPx : a.y-totalHeight-o.label.gapPx;
-            const float safeY=std::clamp(ly,min.y+2.0F,max.y-totalHeight-2.0F);
+            const float safeY=std::clamp(ly,min.y+2.0F,
+                                         max.y-totalHeight-2.0F);
             d->AddRectFilled({a.x,safeY},
                 {a.x+textSize.x+2.0F*pad,safeY+totalHeight},
                 rgba(o.label.background,o.label.backgroundAlpha),3.0F);
             d->AddText({a.x+pad,safeY+pad},rgba(o.label.color),text.c_str());
         }
     } else if (geometry=="line") {
-        stroke(d,a,b,ink,o.osd.stroke.width,o.osd.stroke.pattern);
+        stroke(d,img(155,660),img(1105,65),ink,o.osd.stroke.width,
+               o.osd.stroke.pattern);
     } else if (geometry=="arrow") {
-        stroke(d,{a.x,a.y+65},{b.x,b.y-65},ink,o.osd.stroke.width,o.osd.stroke.pattern);
-        d->AddTriangleFilled({b.x,b.y-65},{b.x-13,b.y-72},{b.x-10,b.y-57},ink);
+        const ImVec2 p=img(630,290),q=img(915,460);
+        stroke(d,p,q,ink,o.osd.stroke.width,o.osd.stroke.pattern);
+        d->AddTriangleFilled(q,{q.x-10,q.y-13},{q.x-12,q.y+5},ink);
     } else if (geometry=="polyline") {
-        outline(d,{{a.x,a.y+48},{a.x+20,a.y+18},{a.x+44,a.y+39},
-                   {a.x+75,a.y+11},{b.x,b.y-30}},o.osd,false);
-    } else if (geometry=="polygon" || geometry=="mask" || geometry=="heatmap") {
-        const ImVec2 points[]={{a.x+10,a.y+50},{a.x+30,a.y+8},
-                               {b.x-20,a.y+16},{b.x-5,b.y-5},
-                               {a.x+27,b.y}};
-        if (geometry=="heatmap") {
+        // Handpicked, approximate aircraft boundary points; visualization
+        // only, not a pixel-accurate segmentation mask or a GT source.
+        outline(d,{img(140,650),img(153,665),img(674,404),
+                   img(708,392),img(866,471),img(902,477),
+                   img(920,457),img(892,417),img(768,323),
+                   img(1105,65),img(1081,59),img(758,256),
+                   img(541,123),img(512,103),img(443,199),
+                   img(474,237),img(628,350),img(604,370),
+                   img(140,650)},o.osd,false);
+    } else if (geometry=="polygon" || geometry=="mask" ||
+               geometry=="heatmap") {
+        if (geometry=="mask" && o.semantic=="sky") {
+            // Illustrative sky region outside the annotated object extent;
+            // not a decoded per-pixel sky segmentation.
+            const ImU32 c=rgba(o.osd.stroke.color,o.osd.alpha);
+            d->AddRectFilled(photoMin,{photoMax.x,a.y},c);
+            d->AddRectFilled({photoMin.x,b.y},photoMax,c);
+            d->AddRectFilled({photoMin.x,a.y},{a.x,b.y},c);
+            d->AddRectFilled({b.x,a.y},{photoMax.x,b.y},c);
+        } else if (geometry=="heatmap") {
             for (int i=4;i>=1;--i)
-                d->AddCircleFilled({center.x+16,center.y},15.0F*i,
+                d->AddCircleFilled(img(810,437),10.0F*i,
                     rgba(o.osd.stroke.color,o.osd.alpha*0.13F));
         } else {
+            const ImVec2 points[]={
+                img(520,325),img(713,249),img(915,455),
+                img(818,501),img(594,410)};
             const float alpha=geometry=="mask"?o.osd.alpha:0.22F;
             d->AddConvexPolyFilled(points,5,rgba(o.osd.stroke.color,alpha));
-            if(geometry=="polygon")
-                outline(d,{points[0],points[1],points[2],points[3],points[4]},o.osd,true);
+            if (geometry=="polygon")
+                outline(d,{points[0],points[1],points[2],points[3],
+                           points[4]},o.osd,true);
         }
     } else if (geometry=="circle") {
-        d->AddCircle(center,37.0F,ink,0,o.osd.stroke.width);
+        d->AddCircle(center,30.0F,ink,0,o.osd.stroke.width);
     } else if (geometry=="ellipse") {
         std::vector<ImVec2> points;
         for (int i=0;i<=48;++i) {
             constexpr float pi=3.14159265358979323846F;
-            float angle=2.0F*pi*static_cast<float>(i)/48.0F;
-            points.emplace_back(center.x+56.0F*std::cos(angle),
-                                center.y+31.0F*std::sin(angle));
+            const float angle=2.0F*pi*static_cast<float>(i)/48.0F;
+            points.emplace_back(center.x+50.0F*std::cos(angle),
+                                center.y+25.0F*std::sin(angle));
         }
         outline(d,points,o.osd,false);
     } else if (geometry=="point") {
         d->AddCircleFilled(center,7.0F,ink);
     } else if (geometry=="text") {
-        d->AddText({a.x+20,a.y+14},ink,"VTR TEXT");
+        d->AddText(img(570,195),ink,"VTR TEXT");
     }
     d->PopClipRect();
 }
