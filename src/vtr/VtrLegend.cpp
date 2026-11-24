@@ -15,18 +15,48 @@ namespace {
 ImU32 rgba(Color c, float alpha = 1.0F) {
     return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r,c.g,c.b,alpha));
 }
+// Continuous dash phase along a path, including rounded corners.
+using Path = std::vector<ImVec2>;
+void strokePath(ImDrawList* d, const Path& points, ImU32 color,
+                float width, std::string_view pattern, float border=0.0F) {
+    if (pattern=="none" || points.size()<2U) return;
+    const auto paint=[&](const Path& p) {
+        if (p.size()<2U) return;
+        if (border>0.0F)
+            d->AddPolyline(p.data(),static_cast<int>(p.size()),
+                IM_COL32(12,16,20,235),ImDrawFlags_None,width+2.0F*border);
+        d->AddPolyline(p.data(),static_cast<int>(p.size()),color,ImDrawFlags_None,width);
+    };
+    if (pattern=="solid") { paint(points); return; }
+    const bool dot=pattern=="dash_dot";
+    const std::array<float,4> lengths=dot
+        ? std::array<float,4>{10,4,2,4}
+        : std::array<float,4>{7,5,7,5};
+    int phase=0;
+    float remaining=lengths[0];
+    Path run;
+    for (std::size_t i=1;i<points.size();++i) {
+        const ImVec2 a=points[i-1], b=points[i];
+        const float dx=b.x-a.x,dy=b.y-a.y,len=std::hypot(dx,dy);
+        if (len<0.001F) continue;
+        for (float s=0;s<len-0.0001F;) {
+            const float step=std::min(remaining,len-s);
+            if ((phase%2)==0) {
+                if (run.empty()) run.emplace_back(a.x+dx*s/len,a.y+dy*s/len);
+                run.emplace_back(a.x+dx*(s+step)/len,a.y+dy*(s+step)/len);
+            }
+            s+=step; remaining-=step;
+            if (remaining<0.0001F) {
+                if ((phase%2)==0) { paint(run); run.clear(); }
+                phase=(phase+1)%4; remaining=lengths[static_cast<std::size_t>(phase)];
+            }
+        }
+    }
+    paint(run);
+}
 void stroke(ImDrawList* d, ImVec2 a, ImVec2 b, ImU32 color,
             float width, std::string_view pattern) {
-    if (pattern == "none") return;
-    if (pattern == "solid") { d->AddLine(a,b,color,width); return; }
-    const float dx=b.x-a.x,dy=b.y-a.y,len=std::sqrt(dx*dx+dy*dy);
-    if (len < 0.01F) return;
-    const float dash=7.0F, gap=5.0F;
-    for (float s=0;s<len;s+=dash+gap) {
-        const float t=std::min(len,s+dash);
-        d->AddLine(ImVec2(a.x+dx*s/len,a.y+dy*s/len),
-                   ImVec2(a.x+dx*t/len,a.y+dy*t/len),color,width);
-    }
+    strokePath(d,{a,b},color,width,pattern);
 }
 std::string replace(std::string text,std::string_view key,
                     std::string_view value) {
@@ -45,32 +75,117 @@ std::string sampleLabel(std::string text) {
     text=replace(std::move(text),"{origin}","Canny");
     return text;
 }
+// Construct four corner paths clockwise. Their straight legs may have
+// different lengths from the rounding radius. The underlying BBOX is unchanged.
+std::array<Path,4> cornerPaths(ImVec2 a,ImVec2 b,float k,float r) {
+    const ImVec2 c[4]={{a.x+r,a.y+r},{b.x-r,a.y+r},
+                      {b.x-r,b.y-r},{a.x+r,b.y-r}};
+    const ImVec2 before[4]={{a.x,a.y+k},{b.x-k,a.y},
+                            {b.x,b.y-k},{a.x+k,b.y}};
+    const ImVec2 after[4]={{a.x+k,a.y},{b.x,a.y+k},
+                           {b.x-k,b.y},{a.x,b.y-k}};
+    constexpr float pi=3.14159265358979323846F;
+    std::array<Path,4> paths;
+    for(int n=0;n<4;++n) {
+        auto& p=paths[static_cast<std::size_t>(n)];
+        p.push_back(before[n]);
+        if(r>0.0F) {
+            for(int i=0;i<=6;++i) {
+                const float angle=pi+(static_cast<float>(n)+static_cast<float>(i)/6.0F)*pi*0.5F;
+                p.emplace_back(c[n].x+r*std::cos(angle),c[n].y+r*std::sin(angle));
+            }
+        } else p.push_back(c[n]);
+        p.push_back(after[n]);
+    }
+    return paths;
+}
 void rectangle(ImDrawList* d, const Box& s, ImVec2 a, ImVec2 b) {
     const ImU32 line=rgba(s.stroke.color);
-    if (s.fillAlpha > 0.0F)
-        d->AddRectFilled(a,b,rgba(s.fill,s.fillAlpha));
-    const float w=std::max(0.0F,b.x-a.x),h=std::max(0.0F,b.y-a.y);
-    const float k=std::min({s.cornerPx,w*0.45F,h*0.45F});
-    const bool corners=s.corners!="none";
-    const float m=corners?k:0.0F;
-    const std::array<std::pair<ImVec2,ImVec2>,4> edges{{
-        {{a.x+m,a.y},{b.x-m,a.y}},{{b.x,a.y+m},{b.x,b.y-m}},
-        {{b.x-m,b.y},{a.x+m,b.y}},{{a.x,b.y-m},{a.x,a.y+m}}
-    }};
-    for (const auto& [p,q] : edges)
-        stroke(d,p,q,line,s.stroke.width,s.stroke.pattern);
-    if (corners) {
-        const ImVec2 c[4]={{a.x,a.y},{b.x,a.y},{b.x,b.y},{a.x,b.y}};
-        const float sx[4]={1,-1,-1,1},sy[4]={1,1,-1,-1};
-        for (int n=0;n<4;++n) {
-            stroke(d,c[n],{c[n].x+sx[n]*k,c[n].y},line,
-                   s.stroke.width,s.corners);
-            stroke(d,c[n],{c[n].x,c[n].y+sy[n]*k},line,
-                   s.stroke.width,s.corners);
+    const float w=b.x-a.x,h=b.y-a.y;
+    if(w<=0.0F||h<=0.0F) return;
+    const float radius=std::min(s.roundingPx,std::min(w,h)*0.45F);
+    if (s.fillAlpha>0.0F)
+        d->AddRectFilled(a,b,rgba(s.fill,s.fillAlpha),radius);
+    const auto drawLayer=[&](float inset,bool edges,bool corners) {
+        const ImVec2 lo{a.x+inset,a.y+inset},hi{b.x-inset,b.y-inset};
+        const float span=std::min(hi.x-lo.x,hi.y-lo.y);
+        if(span<=2.0F) return;
+        const float r=std::clamp(radius-inset,0.0F,span*0.45F);
+        const float k=std::min(std::max(s.cornerPx,r),span*0.45F);
+        const bool hasCorners=corners&&s.corners!="none";
+        const auto paths=cornerPaths(lo,hi,hasCorners?k:r,r);
+        if(edges && s.stroke.pattern!="none") {
+            if(hasCorners) {
+                for(std::size_t n=0;n<4;++n)
+                    strokePath(d,{paths[n].back(),paths[(n+1)%4].front()},
+                        line,s.stroke.width,s.stroke.pattern,s.outlineWidth);
+            } else {
+                Path perimeter;
+                for(const auto& p:paths) perimeter.insert(perimeter.end(),p.begin(),p.end());
+                perimeter.push_back(perimeter.front());
+                strokePath(d,perimeter,line,s.stroke.width,s.stroke.pattern,s.outlineWidth);
+            }
+        }
+        if(hasCorners)
+            for(const auto& p:paths)
+                strokePath(d,p,line,s.cornerWidth,s.corners,s.outlineWidth);
+    };
+    drawLayer(0.0F,true,true);
+    if(s.cornerLayers==2||s.frameLayers==2)
+        drawLayer(s.layerGapPx,s.frameLayers==2,s.cornerLayers==2);
+    const float mx=(a.x+b.x)*0.5F,my=(a.y+b.y)*0.5F;
+    const float k=std::min(s.markerPx*0.5F,std::min(w,h)*0.22F);
+    const auto marker=[&](ImVec2 p,ImVec2 q) {
+        strokePath(d,{p,q},line,s.markerWidth,"solid",s.outlineWidth);
+    };
+    if(s.edgeMarkers=="center") {
+        marker({mx-k,a.y},{mx+k,a.y}); marker({mx-k,b.y},{mx+k,b.y});
+        marker({a.x,my-k},{a.x,my+k}); marker({b.x,my-k},{b.x,my+k});
+    } else if(s.edgeMarkers=="outside") {
+        const float g=s.layerGapPx,len=k;
+        for(float x:{a.x,b.x}) for(float y:{a.y,b.y}) {
+            const float sx=x==a.x?-1.0F:1.0F,sy=y==a.y?-1.0F:1.0F;
+            marker({x+sx*g,y},{x+sx*(g+len),y});
+            marker({x,y+sy*g},{x,y+sy*(g+len)});
         }
     }
-    stroke(d,a,b,line,s.stroke.width,s.diagonals);
-    stroke(d,{b.x,a.y},{a.x,b.y},line,s.stroke.width,s.diagonals);
+    strokePath(d,{a,b},line,s.diagonalWidth,s.diagonals,s.outlineWidth);
+    strokePath(d,{{b.x,a.y},{a.x,b.y}},line,s.diagonalWidth,s.diagonals,s.outlineWidth);
+}
+void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
+               ImVec2 min,ImVec2 max) {
+    if(!o.label.show||o.label.text.empty()) return;
+    const auto& s=o.label;
+    const std::string text=sampleLabel(s.text);
+    auto* font=ImGui::GetFont();
+    float px=s.fontPx;
+    const float pad=s.paddingPx;
+    const float availableW=std::max(1.0F,max.x-min.x-2.0F);
+    const float availableH=std::max(1.0F,max.y-min.y-2.0F);
+    const auto measure=[&](){return font->CalcTextSizeA(px,1.0e6F,0.0F,text.c_str());};
+    ImVec2 size=measure();
+    while(px>8.0F && (size.x+2*pad>availableW || size.y+2*pad>availableH)) {
+        px=std::max(8.0F,px-1.0F); size=measure();
+    }
+    const float width=std::min(availableW,size.x+2*pad);
+    const float height=std::min(availableH,size.y+2*pad);
+    const float above=a.y-s.gapPx-height, below=b.y+s.gapPx;
+    const bool topFits=above>=min.y+1.0F;
+    const bool bottomFits=below+height<=max.y-1.0F;
+    float y=above;
+    if(s.place=="bottom_left_outside")
+        y=bottomFits?below:(topFits?above:b.y-height);
+    else
+        y=topFits?above:(bottomFits?below:a.y);
+    y=std::clamp(y,min.y+1.0F,max.y-1.0F-height);
+    const float x=std::clamp(a.x,min.x+1.0F,max.x-1.0F-width);
+    const Color bg=s.boxBackground?o.box.stroke.color:s.background;
+    const Color fg=s.autoColor?contrastingText(bg):s.color;
+    const ImVec2 end{x+width,y+height};
+    d->AddRectFilled({x,y},end,rgba(bg,s.backgroundAlpha),s.roundingPx);
+    d->PushClipRect({x,y},end,true);
+    d->AddText(font,px,{x+pad,y+pad},rgba(fg),text.c_str());
+    d->PopClipRect();
 }
 void outline(ImDrawList* d, const std::vector<ImVec2>& points,
              const Osd& o, bool closed) {
@@ -93,9 +208,13 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     const float width=max.x-min.x, height=max.y-min.y;
     const float srcW=hasPhoto?static_cast<float>(photo.width):320.0F;
     const float srcH=hasPhoto?static_cast<float>(photo.height):168.0F;
-    const float scale=std::min(width/srcW,height/srcH);
+    // Reserve label room before fitting the photo, so labels don't occlude
+    // the aircraft merely because a preview card has tight image margins.
+    const float labelRoom=o.label.show&&!o.label.text.empty()
+        ? std::min(height*0.30F,o.label.fontPx+2.0F*o.label.paddingPx+o.label.gapPx+4.0F) : 0.0F;
+    const float scale=std::min(width/srcW,(height-labelRoom)/srcH);
     const ImVec2 photoMin{min.x+(width-srcW*scale)*0.5F,
-                          min.y+(height-srcH*scale)*0.5F};
+                          min.y+labelRoom+(height-labelRoom-srcH*scale)*0.5F};
     const ImVec2 photoMax{photoMin.x+srcW*scale,photoMin.y+srcH*scale};
     if (hasPhoto) {
         d->AddImage(photo.texture,photoMin,photoMax,photo.uv0,photo.uv1,
@@ -119,20 +238,7 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     const auto& geometry=o.geometry;
     if (geometry=="bbox") {
         rectangle(d,o.box,a,b);
-        if (o.label.show && !o.label.text.empty()) {
-            const std::string text=sampleLabel(o.label.text);
-            const ImVec2 textSize=ImGui::CalcTextSize(text.c_str());
-            const float pad=o.label.paddingPx;
-            const float totalHeight=textSize.y+2.0F*pad;
-            const float ly=o.label.place=="bottom_left_outside"
-                ? b.y+o.label.gapPx : a.y-totalHeight-o.label.gapPx;
-            const float safeY=std::clamp(ly,min.y+2.0F,
-                                         max.y-totalHeight-2.0F);
-            d->AddRectFilled({a.x,safeY},
-                {a.x+textSize.x+2.0F*pad,safeY+totalHeight},
-                rgba(o.label.background,o.label.backgroundAlpha),3.0F);
-            d->AddText({a.x+pad,safeY+pad},rgba(o.label.color),text.c_str());
-        }
+        drawLabel(d,o,a,b,min,max);
     } else if (geometry=="line") {
         stroke(d,img(155,660),img(1105,65),ink,o.osd.stroke.width,
                o.osd.stroke.pattern);
@@ -195,7 +301,7 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
 } // namespace
 
 void drawLegend(Catalog& catalog, std::string& error,
-                const std::filesystem::path& path) {
+                const std::filesystem::path& path, bool selectPrimitives) {
     ImGui::TextUnformatted("VTR  /  Vision To Reg");
     ImGui::SameLine();
     ImGui::TextDisabled("  %zu выходов   |   hash: %s",
@@ -216,48 +322,88 @@ void drawLegend(Catalog& catalog, std::string& error,
         ImGui::TextColored({1.0F,0.43F,0.35F,1.0F},"Ошибка: %s",error.c_str());
     ImGui::Separator();
 
-    // A compact responsive gallery. The previous one-column layout wasted
-    // the entire right-hand side of the Telemetry window.
-    if (ImGui::BeginChild("##vtr-scroll",ImVec2(0.0F,0.0F),ImGuiChildFlags_None)) {
-        const float contentWidth = ImGui::GetContentRegionAvail().x;
-        const int columns = contentWidth >= 840.0F ? 2 : 1;
-        if (ImGui::BeginTable("##vtr-grid",columns,
-                              ImGuiTableFlags_SizingStretchSame)) {
-            for (const auto& o : catalog.outputs) {
-                ImGui::TableNextColumn();
-                ImGui::PushID(static_cast<int>(o.id));
-                const float cellWidth=ImGui::GetContentRegionAvail().x;
-                const bool stacked=cellWidth < 390.0F;
-                if (ImGui::BeginChild("##vtr-output",
-                        ImVec2(0.0F,stacked ? 178.0F : 132.0F),
-                        ImGuiChildFlags_Borders)) {
-                    const float available=ImGui::GetContentRegionAvail().x;
-                    const float previewWidth=stacked
-                        ? available : std::min(245.0F,available*0.49F);
-                    const ImVec2 p=ImGui::GetCursorScreenPos();
-                    constexpr float previewHeight=112.0F;
-                    ImGui::InvisibleButton("##vtr-preview",
-                                           ImVec2(previewWidth,previewHeight));
-                    preview(ImGui::GetWindowDrawList(),o,p,
-                            {p.x+previewWidth,p.y+previewHeight});
-                    if (!stacked)
-                        ImGui::SameLine(0.0F,12.0F);
-                    ImGui::BeginGroup();
-                    ImGui::Text("#%u  %s",
-                        static_cast<unsigned>(o.id),o.key.c_str());
-                    ImGui::TextColored({0.72F,0.78F,0.85F,1.0F},
-                        "%s  /  %s",o.semantic.c_str(),o.geometry.c_str());
-                    ImGui::TextDisabled("GT: %s",o.benchmark.c_str());
-                    ImGui::TextDisabled("Label: %s",
-                                        o.label.show?"ON":"OFF");
-                    ImGui::EndGroup();
+    // Gallery is a library of examples, NOT additional protocol output IDs.
+    // Every sample uses the same Box structure and renderer as the TOML outputs.
+    const auto primitives=[] {
+        std::vector<Output> samples;
+        auto add=[&](const char* name,Box box) {
+            Output o; o.id=static_cast<std::uint16_t>(samples.size()+1);
+            o.key=name; o.geometry="bbox"; o.box=std::move(box);
+            samples.push_back(std::move(o));
+        };
+        Box base; base.stroke.color={0.30F,0.86F,0.78F};
+        base.fill=base.stroke.color; base.stroke.width=2.0F;
+        base.cornerWidth=4.0F; base.cornerPx=17.0F;
+        Box s=base; add("Solid",s);
+        s=base; s.stroke.pattern="dashed"; add("Dashed",s);
+        s=base; s.stroke.pattern="dash_dot"; add("Dash-dot",s);
+        s=base; s.stroke.pattern="none"; s.corners="solid"; add("Corners",s);
+        s=base; s.stroke.pattern="dashed"; s.stroke.width=1.5F;
+        s.corners="solid"; add("Corners + dashed",s);
+        s=base; s.stroke.width=1.0F; s.corners="solid"; add("Corners + thin edges",s);
+        s=base; s.stroke.pattern="none"; s.corners="solid"; s.cornerLayers=2;
+        s.cornerWidth=2.0F; add("Double corners",s);
+        s=base; s.stroke.width=1.5F; s.edgeMarkers="outside"; add("External markers",s);
+        s=base; s.stroke.width=1.0F; s.edgeMarkers="center"; add("Mid-edge markers",s);
+        s=base; s.frameLayers=2; s.stroke.width=1.5F; add("Double frame",s);
+        s=base; s.stroke.pattern="none"; s.fillAlpha=0.24F; add("Fill only",s);
+        s=base; s.stroke.pattern="none"; s.fillAlpha=0.16F; s.corners="solid";
+        add("Fill + corners",s);
+        s=base; s.diagonals="solid"; s.diagonalWidth=1.5F; add("Frame + diagonals",s);
+        s=base; s.stroke.pattern="dashed"; s.diagonals="dashed";
+        s.diagonalWidth=1.5F; add("Dashed + diagonals",s);
+        s=base; s.roundingPx=9.0F; add("Rounded",s);
+        return samples;
+    };
+    const auto gallery=[&](const std::vector<Output>& outputs,bool library) {
+        if (ImGui::BeginChild("##vtr-scroll",ImVec2(0,0),ImGuiChildFlags_None)) {
+            const int columns=ImGui::GetContentRegionAvail().x>=840.0F?2:1;
+            if(ImGui::BeginTable("##vtr-grid",columns,ImGuiTableFlags_SizingStretchSame)) {
+                for(const auto& o:outputs) {
+                    ImGui::TableNextColumn();
+                    ImGui::PushID(static_cast<int>(o.id));
+                    const bool stacked=ImGui::GetContentRegionAvail().x<390.0F;
+                    constexpr float previewHeight=126.0F;
+                    if(ImGui::BeginChild("##vtr-output",
+                        {0,stacked?191.0F:146.0F},ImGuiChildFlags_Borders)) {
+                        const float avail=ImGui::GetContentRegionAvail().x;
+                        const float pw=stacked?avail:std::min(245.0F,avail*0.49F);
+                        const auto p=ImGui::GetCursorScreenPos();
+                        ImGui::InvisibleButton("##vtr-preview",{pw,previewHeight});
+                        preview(ImGui::GetWindowDrawList(),o,p,{p.x+pw,p.y+previewHeight});
+                        if(!stacked) ImGui::SameLine(0,12.0F);
+                        ImGui::BeginGroup();
+                        if(library) ImGui::TextUnformatted(o.key.c_str());
+                        else {
+                            ImGui::Text("#%u  %s",static_cast<unsigned>(o.id),o.key.c_str());
+                            ImGui::TextColored({0.72F,0.78F,0.85F,1.0F},
+                                "%s / %s",o.semantic.c_str(),o.geometry.c_str());
+                            ImGui::TextDisabled("Details");
+                            if(ImGui::IsItemHovered())
+                                ImGui::SetTooltip("GT: %s\\nLabel: %s",o.benchmark.c_str(),
+                                                 o.label.show?"ON":"OFF");
+                        }
+                        ImGui::EndGroup();
+                    }
+                    ImGui::EndChild(); ImGui::PopID();
                 }
-                ImGui::EndChild();
-                ImGui::PopID();
+                ImGui::EndTable();
             }
-            ImGui::EndTable();
         }
+        ImGui::EndChild();
+    };
+    if(ImGui::BeginTabBar("##vtr-gallery")) {
+        if(ImGui::BeginTabItem("Outputs")) {
+            gallery(catalog.outputs,false);
+            ImGui::EndTabItem();
+        }
+        if(ImGui::BeginTabItem("Primitives",nullptr,
+            selectPrimitives?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) {
+            static const auto samples=primitives();
+            gallery(samples,true);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
     }
-    ImGui::EndChild();
 }
 } // namespace reg::vtr

@@ -66,14 +66,37 @@ Color color(const toml::table& t, const char* key, Color fallback) {
 std::string pattern(const toml::table& t, const char* key,
                     std::string fallback) {
     const std::string result = str(t, key, std::move(fallback));
-    if (result != "none" && result != "solid" && result != "dashed")
+    if (result != "none" && result != "solid" && result != "dashed" && result != "dash_dot")
         throw std::runtime_error(std::string("unknown line pattern: ")+result);
     return result;
 }
 void readBox(const toml::table& t, Box& out) {
     out.stroke.color = color(t, "color", out.stroke.color);
-    out.stroke.width = bounded(t, "width", out.stroke.width, 0.5F, 16.0F);
+    // Legacy width remains the default for all stroke components.
+    const float legacyWidth = bounded(t, "width", out.stroke.width, 0.5F, 16.0F);
+    out.stroke.width = bounded(t, "edge_width", legacyWidth, 0.5F, 16.0F);
+    out.cornerWidth = bounded(t, "corner_width", legacyWidth, 0.5F, 16.0F);
+    out.diagonalWidth = bounded(t, "diagonal_width", legacyWidth, 0.5F, 16.0F);
     out.stroke.pattern = pattern(t, "edges", "none");
+    const auto layers = [&](const char* key) {
+        const auto* node = t.get(key);
+        if (!node) return 1;
+        const auto value = t[key].value<std::int64_t>();
+        if (!value || (*value != 1 && *value != 2))
+            throw std::runtime_error(std::string("expected 1 or 2: ") + key);
+        return static_cast<int>(*value);
+    };
+    out.cornerLayers = layers("corner_layers");
+    out.frameLayers = layers("frame_layers");
+    out.layerGapPx = bounded(t, "layer_gap_px", out.layerGapPx, 1.0F, 24.0F);
+    out.edgeMarkers = str(t, "edge_markers", "none");
+    if (out.edgeMarkers != "none" && out.edgeMarkers != "center" &&
+        out.edgeMarkers != "outside")
+        throw std::runtime_error("unknown edge_markers style");
+    out.markerWidth = bounded(t, "marker_width", out.markerWidth, 0.5F, 16.0F);
+    out.markerPx = bounded(t, "marker_px", out.markerPx, 1.0F, 200.0F);
+    out.roundingPx = bounded(t, "rounding_px", out.roundingPx, 0.0F, 100.0F);
+    out.outlineWidth = bounded(t, "outline_width", out.outlineWidth, 0.0F, 8.0F);
     out.corners = pattern(t, "corners", "none");
     out.diagonals = pattern(t, "diagonals", "none");
     out.cornerPx = bounded(t, "corner_px", out.cornerPx, 1.0F, 200.0F);
@@ -86,12 +109,23 @@ void readLabel(const toml::table& t, Label& out, bool isOutput) {
     out.place = str(t, "place", out.place);
     if (out.place != "top_left_outside" && out.place != "bottom_left_outside")
         throw std::runtime_error("unsupported VTR label placement");
-    out.color = color(t, "color", out.color);
-    out.background = color(t, "background", out.background);
+    if (t.contains("color")) {
+        const auto value = t["color"].value<std::string>();
+        if (!value) throw std::runtime_error("expected label color");
+        out.autoColor = *value == "auto";
+        if (!out.autoColor) out.color = hex(*value);
+    }
+    if (t.contains("background")) {
+        const auto value = t["background"].value<std::string>();
+        if (!value) throw std::runtime_error("expected label background");
+        out.boxBackground = *value == "box_color";
+        if (!out.boxBackground) out.background = hex(*value);
+    }
     out.backgroundAlpha = bounded(t, "background_alpha", out.backgroundAlpha, 0.0F, 1.0F);
     out.fontPx = bounded(t, "font_px", out.fontPx, 8.0F, 48.0F);
     out.paddingPx = bounded(t, "padding_px", out.paddingPx, 0.0F, 24.0F);
     out.gapPx = bounded(t, "gap_px", out.gapPx, 0.0F, 24.0F);
+    out.roundingPx = bounded(t, "rounding_px", out.roundingPx, 0.0F, 24.0F);
     if (out.text.size() > 128U) throw std::runtime_error("VTR label template too long");
 }
 void readOsd(const toml::table& t, Osd& out) {
@@ -165,6 +199,17 @@ Catalog readCatalog(const std::filesystem::path& path) {
     std::sort(result.outputs.begin(), result.outputs.end(),
               [](const Output& a, const Output& b) { return a.id < b.id; });
     return result;
+}
+
+Color contrastingText(Color background) {
+    const auto linear = [](float x) {
+        return x <= 0.04045F ? x / 12.92F : std::pow((x+0.055F)/1.055F,2.4F);
+    };
+    const float lum = 0.2126F*linear(background.r) +
+        0.7152F*linear(background.g) + 0.0722F*linear(background.b);
+    // Compare WCAG contrast ratios against black and white.
+    return (lum+0.05F)/0.05F >= 1.05F/(lum+0.05F)
+        ? Color{0,0,0} : Color{1,1,1};
 }
 
 std::string hashHex(std::uint64_t hash) {

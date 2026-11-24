@@ -852,6 +852,10 @@ if(REG_BUILD_TESTS AND WIN32)
         COMMAND reg_vtr_legend_snapshot
             "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml"
             "${CMAKE_CURRENT_BINARY_DIR}/vtr-legend-preview.bmp")
+    add_test(NAME vtr_primitives_snapshot
+        COMMAND reg_vtr_legend_snapshot
+            "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml"
+            "${CMAKE_CURRENT_BINARY_DIR}/vtr-primitives-preview.bmp" primitives)
 endif()
 
 add_executable(reg_launcher WIN32

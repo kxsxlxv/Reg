@@ -17,8 +17,8 @@
 
 int main(int argc,char** argv) {
     try {
-        if (argc != 3) {
-            std::fprintf(stderr,"usage: vtr_legend_snapshot config/vtr.toml output.bmp\n");
+        if (argc != 3 && argc != 4) {
+            std::fprintf(stderr,"usage: vtr_legend_snapshot config/vtr.toml output.bmp [primitives]\n");
             return 2;
         }
         auto catalog=reg::vtr::readCatalog(argv[1]);
@@ -26,7 +26,8 @@ int main(int argc,char** argv) {
             std::fprintf(stderr,"SDL_Init: %s\n",SDL_GetError());
             return 2;
         }
-        constexpr int w=1100,h=1210;
+        constexpr int w=1100,h=1380;
+        const bool primitives=argc==4 && std::string(argv[3])=="primitives";
         SDL_Surface* surface=SDL_CreateSurface(w,h,SDL_PIXELFORMAT_RGBA32);
         if(!surface) { std::fprintf(stderr,"SDL_CreateSurface: %s\n",SDL_GetError());return 2; }
         SDL_Renderer* renderer=SDL_CreateSoftwareRenderer(surface);
@@ -70,7 +71,7 @@ int main(int argc,char** argv) {
                                         ImGuiTabItemFlags_SetSelected)) {
                     legendVisible = true;
                     std::string error;
-                    reg::vtr::drawLegend(catalog,error,argv[1]);
+                    reg::vtr::drawLegend(catalog,error,argv[1],primitives);
                     ImGui::EndTabItem();
                 } else {
                     legendVisible = false;

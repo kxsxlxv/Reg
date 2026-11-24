@@ -32,13 +32,30 @@ photograph, **not parity-tested live rendering**. Mask/heatmap transport,
 actual VTR binary message layout, and Jetson implementation are follow-ups.
 
 For bbox: `edges`, `corners`, `diagonals` take
-`none | solid | dashed`; `fill_alpha` is 0..1.
+`none | solid | dashed | dash_dot`; `fill_alpha` is 0..1.
 The label is optional: `label = { show = true, text = "MOT #{track_id}" }`.
 Supported placeholders in preview:
 `{track_id}`, `{id}`, `{class}`, `{class_id}`, `{conf_pct}`,
 `{producer}`, `{origin}`.
-A label is anchored outside the bbox (top-left or bottom-left) with a
-semi-transparent background.
+A label prefers its specified outside edge, then the opposite edge, then
+inside only if neither outside position fits. New catalogue defaults are
+a solid box-colored background, no gap or rounding, and automatic black/
+white text selected by relative luminance. Explicit legacy hex colors work.
+`font_px`, `padding_px`, `gap_px`, `rounding_px` are honored in the preview.
+
+Composable BBOX fields (all distances in displayed pixels):
+- `width` remains the legacy fallback; `edge_width`, `corner_width`,
+  `diagonal_width` independently override it.
+- `corner_px`, `corner_layers` (1 or 2), `frame_layers` (1 or 2),
+  `layer_gap_px` (inset for the second layer).
+- `edge_markers` = none/center/outside; `marker_px`, `marker_width`.
+- `rounding_px` controls the rounded perimeter; `outline_width` is
+  additional dark contrast stroke on each side, not a second semantic frame.
+- `fill` and `fill_alpha` control the fill independently of outlines.
+The Primitives tab shows 15 neutral-color style combinations through the
+same renderer used by Outputs. Samples are UI-only, not wire IDs.
+The expanded syntax is additive on the Reg parser; senders must implement
+it before consuming the new catalogue. Format and output IDs are unchanged.
 
 ## Constraints before sending binary VTR
 

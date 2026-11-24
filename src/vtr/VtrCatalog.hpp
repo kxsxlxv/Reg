@@ -14,13 +14,23 @@ struct Color {
 struct Stroke {
     Color color{};
     float width{2.0F};
-    std::string pattern{"solid"}; // none, solid, dashed
+    std::string pattern{"solid"}; // none, solid, dashed, dash_dot
 };
 struct Box {
     Stroke stroke{};
     std::string corners{"none"};
     std::string diagonals{"none"};
     float cornerPx{16.0F};
+    float cornerWidth{2.0F};
+    float diagonalWidth{2.0F};
+    int cornerLayers{1};
+    int frameLayers{1};
+    float layerGapPx{4.0F};
+    std::string edgeMarkers{"none"}; // none, center, outside
+    float markerWidth{3.0F};
+    float markerPx{12.0F};
+    float roundingPx{0.0F};
+    float outlineWidth{0.0F}; // extra dark border on each side
     Color fill{};
     float fillAlpha{0.0F};
 };
@@ -34,6 +44,9 @@ struct Label {
     float fontPx{14.0F};
     float paddingPx{4.0F};
     float gapPx{3.0F};
+    float roundingPx{3.0F};
+    bool autoColor{false};
+    bool boxBackground{false};
 };
 struct Osd {
     Stroke stroke{};
@@ -58,4 +71,5 @@ struct Catalog {
 // Consumers should keep the last valid snapshot on a failed manual reload.
 Catalog readCatalog(const std::filesystem::path& path);
 std::string hashHex(std::uint64_t hash);
+Color contrastingText(Color background); // choose black/white by WCAG relative luminance
 } // namespace reg::vtr
