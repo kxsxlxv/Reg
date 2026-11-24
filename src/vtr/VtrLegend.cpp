@@ -24,8 +24,8 @@ void strokePath(ImDrawList* d, const Path& points, ImU32 color,
         if (p.size()<2U) return;
         if (border>0.0F)
             d->AddPolyline(p.data(),static_cast<int>(p.size()),
-                IM_COL32(12,16,20,235),ImDrawFlags_None,width+2.0F*border);
-        d->AddPolyline(p.data(),static_cast<int>(p.size()),color,ImDrawFlags_None,width);
+                IM_COL32(12,16,20,235),width+2.0F*border,ImDrawFlags_None);
+        d->AddPolyline(p.data(),static_cast<int>(p.size()),color,width,ImDrawFlags_None);
     };
     if (pattern=="solid") { paint(points); return; }
     const bool dot=pattern=="dash_dot";
@@ -154,7 +154,7 @@ void rectangle(ImDrawList* d, const Box& s, ImVec2 a, ImVec2 b) {
 }
 void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
                ImVec2 min,ImVec2 max) {
-    if(!o.label.show||o.label.text.empty()) return;
+    if(!o.label.show||o.label.text.empty()||max.x-min.x<=2.0F||max.y-min.y<=2.0F) return;
     const auto& s=o.label;
     const std::string text=sampleLabel(s.text);
     auto* font=ImGui::GetFont();
@@ -300,7 +300,7 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
 }
 } // namespace
 
-void drawLegend(Catalog& catalog, std::string& error,
+LegendPage drawLegend(Catalog& catalog, std::string& error,
                 const std::filesystem::path& path, bool selectPrimitives) {
     ImGui::TextUnformatted("VTR  /  Vision To Reg");
     ImGui::SameLine();
@@ -392,18 +392,22 @@ void drawLegend(Catalog& catalog, std::string& error,
         }
         ImGui::EndChild();
     };
+    LegendPage visible=LegendPage::None;
     if(ImGui::BeginTabBar("##vtr-gallery")) {
         if(ImGui::BeginTabItem("Outputs")) {
+            visible=LegendPage::Outputs;
             gallery(catalog.outputs,false);
             ImGui::EndTabItem();
         }
         if(ImGui::BeginTabItem("Primitives",nullptr,
             selectPrimitives?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) {
             static const auto samples=primitives();
+            visible=LegendPage::Primitives;
             gallery(samples,true);
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
     }
+    return visible;
 }
 } // namespace reg::vtr

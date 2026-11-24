@@ -54,6 +54,7 @@ int main(int argc,char** argv) {
         // SetSelected in BeginTabItem() cannot reliably show content in
         // the first layout pass. Warm up tabs before capturing frame four.
         bool legendVisible = false;
+        auto visiblePage=reg::vtr::LegendPage::None;
         for (int frame = 0; frame < 4; ++frame) {
             ImGui_ImplSDLRenderer3_NewFrame();
             ImGui::NewFrame();
@@ -71,7 +72,7 @@ int main(int argc,char** argv) {
                                         ImGuiTabItemFlags_SetSelected)) {
                     legendVisible = true;
                     std::string error;
-                    reg::vtr::drawLegend(catalog,error,argv[1],primitives);
+                    visiblePage=reg::vtr::drawLegend(catalog,error,argv[1],primitives);
                     ImGui::EndTabItem();
                 } else {
                     legendVisible = false;
@@ -95,7 +96,8 @@ int main(int argc,char** argv) {
                 return 2;
             }
         }
-        if (!legendVisible) {
+        const auto expectedPage=primitives?reg::vtr::LegendPage::Primitives:reg::vtr::LegendPage::Outputs;
+        if (!legendVisible || visiblePage!=expectedPage) {
             std::fprintf(stderr,"VTR tab was never visible; rejecting blank screenshot\n");
             return 3;
         }
