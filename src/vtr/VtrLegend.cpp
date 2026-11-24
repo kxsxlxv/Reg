@@ -63,7 +63,8 @@ std::string sampleLabel(std::string text) {
     text=replace(std::move(text),"{origin}","Canny");
     return text;
 }
-void rectangle(ImDrawList* d,const Box& s,ImVec2 a,ImVec2 b) {
+void rectangle(ImDrawList* d,const Box& style,ImVec2 a,ImVec2 b) {
+    const Box s=boxgeom::adapted(style,std::max(0.0F,std::min(b.x-a.x,b.y-a.y)));
     // Snap the reference centerlines once, not individual vertices.
     // Odd integer widths use half-pixel centers; even use integer centers.
     const float ref=s.stroke.pattern=="none"?s.cornerWidth:s.stroke.width;
@@ -74,7 +75,15 @@ void rectangle(ImDrawList* d,const Box& s,ImVec2 a,ImVec2 b) {
     if(span<=0) return;
     const float radius=std::min(s.roundingPx,span*0.45F);
     if(s.fillAlpha>0) d->AddRectFilled(a,b,rgba(s.fill,s.fillAlpha),radius);
-    const auto lines=boxgeom::build(s,{a.x,a.y},{b.x,b.y});
+    Box effective=s;effective.adaptive=false;
+    auto lines=boxgeom::build(effective,{a.x,a.y},{b.x,b.y});
+    const auto alphaFor=[&](boxgeom::Part part) {
+        return part==boxgeom::Part::Corner?s.cornerAlpha:
+            part==boxgeom::Part::Marker?s.markerAlpha:s.edgeAlpha;
+    };
+    lines.erase(std::remove_if(lines.begin(),lines.end(),[&](const auto& line){
+        return alphaFor(line.part)<=0;
+    }),lines.end());
     // One complete underlay pass, then one complete color pass. Underlays
     // must never erase an adjacent colored edge/corner/marker.
     if(s.outlineWidth>0&&s.outlineAlpha>0) {
@@ -109,22 +118,42 @@ void rectangle(ImDrawList* d,const Box& s,ImVec2 a,ImVec2 b) {
             });
         }
     }
-    for(const auto& line:lines) paintLine(d,line,rgba(s.stroke.color),line.width);
+    // Component colors/alpha are separate semantic layers. Order is
+    // edges/diagonals, then corners, then markers.
+    for(auto part:{boxgeom::Part::Edge,boxgeom::Part::Diagonal,boxgeom::Part::Corner,boxgeom::Part::Marker}) {
+        const Color color=part==boxgeom::Part::Corner?s.cornerColor.value_or(s.stroke.color):
+            part==boxgeom::Part::Marker?s.markerColor.value_or(s.stroke.color):s.stroke.color;
+        for(const auto& line:lines)
+            if(line.part==part) paintLine(d,line,rgba(color,alphaFor(part)),line.width);
+    }
 }
 void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
                ImVec2 min,ImVec2 max) {
     if(!o.label.show||o.label.text.empty()||max.x-min.x<=2.0F||max.y-min.y<=2.0F) return;
     const auto& s=o.label;
-    const std::string text=sampleLabel(s.text);
+    std::string text=sampleLabel(s.text);
     auto* font=ImGui::GetFont();
     float px=s.fontPx;
     const float pad=s.paddingPx;
-    const float availableW=std::max(1.0F,max.x-min.x-2.0F);
+    const float availableW=std::max(1.0F,std::min(max.x-min.x-2.0F,
+        s.maxWidthPx>0?s.maxWidthPx:max.x-min.x-2.0F));
     const float availableH=std::max(1.0F,max.y-min.y-2.0F);
     const auto measure=[&](){return font->CalcTextSizeA(px,1.0e6F,0.0F,text.c_str());};
     ImVec2 size=measure();
     while(px>8.0F && (size.x+2*pad>availableW || size.y+2*pad>availableH)) {
         px=std::max(8.0F,px-1.0F); size=measure();
+    }
+    if(size.x+2*pad>availableW) {
+        // Trim at UTF-8 boundaries and append ASCII ellipsis.
+        while(!text.empty()) {
+            std::size_t cut=text.size()-1;
+            while(cut>0&&(static_cast<unsigned char>(text[cut])&0xC0)==0x80) --cut;
+            text.resize(cut);
+            size=font->CalcTextSizeA(px,1.0e6F,0.0F,(text+"...").c_str());
+            if(size.x+2*pad<=availableW) break;
+        }
+        text+="...";
+        size=measure();
     }
     const float width=std::min(availableW,size.x+2*pad);
     const float height=std::min(availableH,size.y+2*pad);
@@ -155,7 +184,8 @@ void outline(ImDrawList* d, const std::vector<ImVec2>& points,
         stroke(d,points.back(),points.front(),rgba(o.stroke.color,o.alpha),
                o.stroke.width,o.stroke.pattern);
 }
-void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
+void preview(ImDrawList* d,const Output& sample,ImVec2 min,ImVec2 max,
+             int background=0,float zoom=1.0F,const std::vector<Output>* layers=nullptr) {
     d->AddRectFilled(min,max,IM_COL32(12,23,35,255),5.0F);
     d->AddRect(min,max,IM_COL32(66,84,104,180),5.0F);
     d->PushClipRect(min,max,true);
@@ -172,12 +202,14 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     const float sidePad=std::min(12.0F,width*0.12F);
     const float topPad=std::min(26.0F,height*0.22F);
     const float bottomPad=std::min(12.0F,height*0.12F);
-    const float scale=std::min((width-2*sidePad)/srcW,
-                              (height-topPad-bottomPad)/srcH);
+    const float scale=zoom*std::max(0.01F,std::min((width-2*sidePad)/srcW,
+                              (height-topPad-bottomPad)/srcH));
     const ImVec2 photoMin{min.x+(width-srcW*scale)*0.5F,
         min.y+topPad+(height-topPad-bottomPad-srcH*scale)*0.5F};
     const ImVec2 photoMax{photoMin.x+srcW*scale,photoMin.y+srcH*scale};
-    if (hasPhoto) {
+    if(background!=0) {
+        d->AddRectFilled(photoMin,photoMax,background==1?IM_COL32(225,230,235,255):IM_COL32(30,37,47,255));
+    } else if (hasPhoto) {
         d->AddImage(photo.texture,photoMin,photoMax,photo.uv0,photo.uv1,
                     IM_COL32(255,255,255,255));
     } else {
@@ -195,6 +227,7 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     };
     const ImVec2 a=img(130,55),b=img(1111,671);
     const ImVec2 center=img(660,365);
+    const auto drawLayer=[&](const Output& o) {
     const ImU32 ink=rgba(o.osd.stroke.color,o.osd.alpha);
     const auto& geometry=o.geometry;
     if (geometry=="bbox") {
@@ -260,6 +293,13 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     } else if (geometry=="text") {
         d->AddText(img(570,195),ink,"VTR TEXT");
     }
+    };
+    if(layers) {
+        std::vector<const Output*> ordered;
+        for(const auto& o:*layers) if(o.visible) ordered.push_back(&o);
+        std::stable_sort(ordered.begin(),ordered.end(),[](auto a,auto b){return a->zOrder<b->zOrder;});
+        for(const auto* o:ordered) drawLayer(*o);
+    } else drawLayer(sample);
     d->PopClipRect();
 }
 } // namespace
@@ -269,7 +309,7 @@ void drawBbox(ImDrawList* draw,const Box& style,ImVec2 min,ImVec2 max) {
 }
 
 LegendPage drawLegend(Catalog& catalog, std::string& error,
-                const std::filesystem::path& path, bool selectPrimitives) {
+                const std::filesystem::path& path, bool selectPrimitives, bool selectEditor) {
     ImGui::TextUnformatted("VTR  /  Vision To Reg");
     ImGui::SameLine();
     ImGui::TextDisabled("  %zu выходов   |   hash: %s",
@@ -323,6 +363,7 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         s=base; s.roundingPx=9.0F; add("Rounded",s);
         return samples;
     };
+    static const auto samples=primitives();
     const auto gallery=[&](const std::vector<Output>& outputs,bool library) {
         if (ImGui::BeginChild("##vtr-scroll",ImVec2(0,0),ImGuiChildFlags_None)) {
             const int columns=ImGui::GetContentRegionAvail().x>=840.0F?2:1;
@@ -346,6 +387,7 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
                             ImGui::Text("#%u  %s",static_cast<unsigned>(o.id),o.key.c_str());
                             ImGui::TextColored({0.72F,0.78F,0.85F,1.0F},
                                 "%s / %s",o.semantic.c_str(),o.geometry.c_str());
+                            if(!o.visible) ImGui::TextDisabled("Hidden in composite");
                             ImGui::TextDisabled("Details");
                             if(ImGui::IsItemHovered())
                                 ImGui::SetTooltip("GT: %s\\nLabel: %s",o.benchmark.c_str(),
@@ -360,6 +402,208 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         }
         ImGui::EndChild();
     };
+    // Draft is deliberately independent of the active catalogue. No changes
+    // reach disk or Outputs until Save succeeds. A reload invalidates drafts.
+    struct EditorState {
+        std::filesystem::path path;
+        std::uint64_t hash{};
+        int selected{-1};
+        Output draft;
+        bool dirty{},combined{};
+        int background{};
+        float zoom{1};
+        std::string status;
+    };
+    static EditorState editor;
+    auto editorPage=[&]() {
+        if(editor.path!=path||editor.hash!=catalog.hash) {
+            editor=EditorState{};editor.path=path;editor.hash=catalog.hash;
+        }
+        if(catalog.outputs.empty()) { ImGui::TextUnformatted("Load a VTR catalogue first.");return; }
+        auto select=[&](int index) {
+            editor.selected=index;editor.draft=catalog.outputs[static_cast<std::size_t>(index)];
+            editor.dirty=false;editor.status.clear();
+        };
+        if(editor.selected<0||editor.selected>=static_cast<int>(catalog.outputs.size())) select(0);
+        ImGui::SetNextItemWidth(std::min(340.0F,ImGui::GetContentRegionAvail().x));
+        if(ImGui::BeginCombo("Output",editor.draft.key.c_str())) {
+            for(int i=0;i<static_cast<int>(catalog.outputs.size());++i) {
+                if(ImGui::Selectable(catalog.outputs[static_cast<std::size_t>(i)].key.c_str(),i==editor.selected)
+                    &&i!=editor.selected) {
+                    if(editor.dirty) editor.status="Save or discard the draft before selecting another output.";
+                    else select(i);
+                }
+            }
+            ImGui::EndCombo();
+        }
+        auto& o=editor.draft;
+        ImGui::BeginDisabled(!editor.dirty);
+        if(ImGui::Button("Save TOML")) {
+            try {
+                catalog=saveOutputStyle(path,editor.hash,o);
+                editor.hash=catalog.hash;
+                editor.draft=catalog.outputs[static_cast<std::size_t>(editor.selected)];
+                editor.dirty=false;editor.status="Saved. Original: vtr.toml.bak";error.clear();
+            } catch(const std::exception& ex) { editor.status=ex.what(); }
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("Discard changes")) select(editor.selected);
+        ImGui::EndDisabled();
+        if(editor.dirty) {ImGui::SameLine();ImGui::TextDisabled("Unsaved");}
+        if(!editor.status.empty()) ImGui::TextWrapped("%s",editor.status.c_str());
+        ImGui::Separator();
+        const float width=ImGui::GetContentRegionAvail().x;
+        const bool wide=width>=760.0F;
+        const float previewWidth=wide?std::min(460.0F,width*0.52F):width;
+        auto previewPane=[&] {
+            ImGui::TextUnformatted("Live preview");
+            ImGui::SetNextItemWidth(120);
+            ImGui::Combo("Background",&editor.background,"Photo\0Light\0Dark\0");
+            ImGui::SetNextItemWidth(std::min(240.0F,ImGui::GetContentRegionAvail().x));
+            ImGui::SliderFloat("Object scale",&editor.zoom,0.08F,1.0F,"%.2fx");
+            ImGui::Checkbox("Composite layers",&editor.combined);
+            const float pw=ImGui::GetContentRegionAvail().x;
+            const float ph=std::min(300.0F,std::max(165.0F,pw*0.67F));
+            const auto p=ImGui::GetCursorScreenPos();
+            ImGui::InvisibleButton("##live",{pw,ph});
+            std::vector<Output> layers;
+            if(editor.combined) {
+                layers=catalog.outputs;
+                layers[static_cast<std::size_t>(editor.selected)]=o;
+            }
+            preview(ImGui::GetWindowDrawList(),o,p,{p.x+pw,p.y+ph},
+                    editor.background,editor.zoom,editor.combined?&layers:nullptr);
+            ImGui::TextDisabled("Illustrative OSD / no live inference");
+            if(o.geometry=="bbox") {
+                ImGui::TextUnformatted("Small objects (display pixels)");
+                const auto a=ImGui::GetCursorScreenPos();
+                const float available=ImGui::GetContentRegionAvail().x;
+                ImGui::Dummy({available,112});
+                auto* d=ImGui::GetWindowDrawList();
+                d->AddRectFilled(a,{a.x+available,a.y+112},IM_COL32(54,71,85,255));
+                const float sizes[]={16,32,64};
+                for(int i=0;i<3;++i) {
+                    const float x=a.x+available*(i+0.5F)/3,y=a.y+48;
+                    const float s=sizes[i]*0.5F;
+                    d->PushClipRect({a.x+available*i/3,a.y},{a.x+available*(i+1)/3,a.y+112},true);
+                    drawBbox(d,o.box,{x-s,y-s},{x+s,y+s});
+                    const auto label=std::to_string(static_cast<int>(sizes[i]))+" px";
+                    d->AddText({x-ImGui::CalcTextSize(label.c_str()).x/2,a.y+93},IM_COL32_WHITE,label.c_str());
+                    d->PopClipRect();
+                }
+            }
+        };
+        auto controls=[&] {
+            auto edit=[&](bool changed){editor.dirty|=changed;};
+            auto slider=[&](const char* name,float& v,float lo,float hi,const char* fmt="%.1f") {
+                edit(ImGui::SliderFloat(name,&v,lo,hi,fmt));
+            };
+            auto colorEdit=[&](const char* name,Color& color) {
+                float rgb[]={color.r,color.g,color.b};
+                if(ImGui::ColorEdit3(name,rgb,ImGuiColorEditFlags_NoInputs)) {
+                    color={rgb[0],rgb[1],rgb[2]};editor.dirty=true;
+                }
+            };
+            auto choose=[&](const char* name,std::string& value,const std::vector<const char*>& options) {
+                if(ImGui::BeginCombo(name,value.c_str())) {
+                    for(const char* v:options) if(ImGui::Selectable(v,value==v)) {value=v;editor.dirty=true;}
+                    ImGui::EndCombo();
+                }
+            };
+            auto pattern=[&](const char* name,std::string& value) {choose(name,value,{"none","solid","dashed","dash_dot"});};
+            auto optionalColor=[&](const char* name,std::optional<Color>& color,Color inherited) {
+                ImGui::PushID(name);
+                bool custom=color.has_value();
+                if(ImGui::Checkbox("Custom color",&custom)) {
+                    if(custom) color=inherited; else color.reset();
+                    editor.dirty=true;
+                }
+                if(color) colorEdit(name,*color);
+                ImGui::PopID();
+            };
+            edit(ImGui::Checkbox("Visible",&o.visible));
+            edit(ImGui::SliderInt("Z order",&o.zOrder,-1000,1000));
+            if(o.geometry!="bbox") {
+                colorEdit("Color",o.osd.stroke.color);
+                slider("Opacity",o.osd.alpha,0,1,"%.2f");
+                slider("Width",o.osd.stroke.width,0.5F,16);
+                pattern("Pattern",o.osd.stroke.pattern);
+                return;
+            }
+            auto& b=o.box;
+            if(ImGui::BeginCombo("Preset","Apply BBOX geometry")) {
+                for(const auto& p:samples) if(ImGui::Selectable(p.key.c_str())) {
+                    const Box old=b;
+                    b=p.box;b.stroke.color=old.stroke.color;b.fill=old.fill;
+                    b.outlineColor=old.outlineColor;b.outlineWidth=old.outlineWidth;
+                    b.outlineAlpha=old.outlineAlpha;b.adaptive=old.adaptive;
+                    b.edgeAlpha=old.edgeAlpha;b.cornerAlpha=old.cornerAlpha;b.markerAlpha=old.markerAlpha;
+                    b.cornerColor=old.cornerColor;b.markerColor=old.markerColor;
+                    b.dashPx=old.dashPx;b.gapPx=old.gapPx;b.dotPx=old.dotPx;
+                    editor.dirty=true;
+                }
+                ImGui::EndCombo();
+            }
+            edit(ImGui::Checkbox("Adaptive small BBOX",&b.adaptive));
+            if(ImGui::CollapsingHeader("Outline",ImGuiTreeNodeFlags_DefaultOpen)) {
+                colorEdit("Outline color",b.outlineColor);
+                slider("Outline width",b.outlineWidth,0,8);
+                slider("Outline opacity",b.outlineAlpha,0,1,"%.2f");
+            }
+            if(ImGui::CollapsingHeader("Edges and dash pattern",ImGuiTreeNodeFlags_DefaultOpen)) {
+                colorEdit("Edge color",b.stroke.color);pattern("Edges",b.stroke.pattern);
+                slider("Edge width",b.stroke.width,0.5F,16);
+                slider("Edge opacity",b.edgeAlpha,0,1,"%.2f");
+                slider("Dash px (0=auto)",b.dashPx,0,64);
+                slider("Gap px (0=auto)",b.gapPx,0,32);
+                slider("Dot px (0=auto)",b.dotPx,0,16);
+            }
+            if(ImGui::CollapsingHeader("Corners and layers")) {
+                pattern("Corners",b.corners);optionalColor("Corner color",b.cornerColor,b.stroke.color);
+                slider("Corner width",b.cornerWidth,0.5F,16);slider("Corner length",b.cornerPx,1,200);
+                slider("Corner opacity",b.cornerAlpha,0,1,"%.2f");
+                edit(ImGui::SliderInt("Corner layers",&b.cornerLayers,1,2));
+                edit(ImGui::SliderInt("Frame layers",&b.frameLayers,1,2));
+                slider("Layer gap",b.layerGapPx,1,24);
+                slider("Rounding",b.roundingPx,0,100);
+            }
+            if(ImGui::CollapsingHeader("Markers, diagonals and fill")) {
+                choose("Markers",b.edgeMarkers,{"none","center","outside"});
+                optionalColor("Marker color",b.markerColor,b.stroke.color);
+                slider("Marker width",b.markerWidth,0.5F,16);slider("Marker length",b.markerPx,1,200);
+                slider("Marker opacity",b.markerAlpha,0,1,"%.2f");
+                pattern("Diagonals",b.diagonals);slider("Diagonal width",b.diagonalWidth,0.5F,16);
+                colorEdit("Fill color",b.fill);slider("Fill opacity",b.fillAlpha,0,1,"%.2f");
+            }
+            if(ImGui::CollapsingHeader("Label")) {
+                auto& a=o.label;
+                edit(ImGui::Checkbox("Show label",&a.show));
+                std::array<char,129> buf{};
+                std::snprintf(buf.data(),buf.size(),"%s",a.text.c_str());
+                if(ImGui::InputText("Template",buf.data(),buf.size())) {a.text=buf.data();editor.dirty=true;}
+                choose("Placement",a.place,{"top_left_outside","bottom_left_outside"});
+                edit(ImGui::Checkbox("Auto text contrast",&a.autoColor));
+                if(!a.autoColor) colorEdit("Text color",a.color);
+                edit(ImGui::Checkbox("Use box background",&a.boxBackground));
+                if(!a.boxBackground) colorEdit("Background color",a.background);
+                slider("Background opacity",a.backgroundAlpha,0,1,"%.2f");
+                slider("Font px",a.fontPx,8,48);
+                slider("Padding px",a.paddingPx,0,24);
+                slider("Label gap",a.gapPx,0,24);
+                slider("Label rounding",a.roundingPx,0,24);
+                slider("Max width (0=auto)",a.maxWidthPx,0,2048,"%.0f");
+            }
+        };
+        if(wide) {
+            if(ImGui::BeginChild("##editor-preview",{previewWidth,0},ImGuiChildFlags_Borders)) previewPane();
+            ImGui::EndChild();ImGui::SameLine();
+            if(ImGui::BeginChild("##editor-controls",{0,0},ImGuiChildFlags_Borders)) controls();
+            ImGui::EndChild();
+        } else {
+            if(ImGui::BeginChild("##editor-scroll",{0,0})) {previewPane();controls();}
+            ImGui::EndChild();
+        }
+    };
     LegendPage visible=LegendPage::None;
     if(ImGui::BeginTabBar("##vtr-gallery")) {
         if(ImGui::BeginTabItem("Outputs")) {
@@ -369,9 +613,14 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         }
         if(ImGui::BeginTabItem("Primitives",nullptr,
             selectPrimitives?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) {
-            static const auto samples=primitives();
             visible=LegendPage::Primitives;
             gallery(samples,true);
+            ImGui::EndTabItem();
+        }
+        if(ImGui::BeginTabItem("Editor",nullptr,
+            selectEditor?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) {
+            visible=LegendPage::Editor;
+            editorPage();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

@@ -11,7 +11,8 @@
 namespace reg::vtr::boxgeom {
 struct Point { float x{}, y{}; };
 using Path=std::vector<Point>;
-struct Line { Path points; float width{}; bool closed{}; };
+enum class Part { Edge, Corner, Marker, Diagonal };
+struct Line { Path points; float width{}; bool closed{}; Part part{Part::Edge}; };
 using Lines=std::vector<Line>;
 
 inline float distance(Point a,Point b) {
@@ -43,7 +44,7 @@ inline Path interval(const Path& p,float start,float end) {
 // with a small gap at each end; short paths get one centered short dash.
 // The dash-dot cycle is symmetric about its long dash.
 inline void pattern(Lines& out,const Path& raw,float width,std::string_view style,
-                    bool closed=false) {
+                    bool closed=false,float dashPx=0,float gapPx=0,float dotPx=0) {
     if(style=="none") return;
     Path p;
     for(auto q:raw) append(p,q);
@@ -59,7 +60,10 @@ inline void pattern(Lines& out,const Path& raw,float width,std::string_view styl
     for(std::size_t i=1;i<p.size();++i) len+=distance(p[i-1],p[i]);
     if(len<=0.001F) return;
     const bool dot=style=="dash_dot";
-    const float dash=dot?10.0F:7.0F, period=dot?20.0F:12.0F;
+    const float dash=dashPx>0?dashPx:(dot?10.0F:7.0F);
+    const float gap=gapPx>0?gapPx:(dot?4.0F:5.0F);
+    const float dotLen=dotPx>0?dotPx:2.0F;
+    const float period=dot?dash+2*gap+dotLen:dash+gap;
     const float edgeGap=std::min(2.0F,len*0.15F);
     const float mid=len*0.5F;
     auto emit=[&](float center,float length) {
@@ -72,7 +76,7 @@ inline void pattern(Lines& out,const Path& raw,float width,std::string_view styl
     for(int n=1;static_cast<float>(n)*period<mid+period;++n) {
         const float shift=static_cast<float>(n)*period;
         emit(mid-shift,dash); emit(mid+shift,dash);
-        if(dot) { emit(mid-shift+period*0.5F,2); emit(mid+shift-period*0.5F,2); }
+        if(dot) { emit(mid-shift+period*0.5F,dotLen); emit(mid+shift-period*0.5F,dotLen); }
     }
 }
 inline std::array<Path,4> corners(Point a,Point b,float k,float r) {
@@ -97,10 +101,29 @@ inline std::array<Path,4> corners(Point a,Point b,float k,float r) {
     }
     return result;
 }
-inline Lines build(const Box& s,Point a,Point b) {
+inline Box adapted(Box s,float span) {
+    if(!s.adaptive) return s;
+    const float maxWidth=std::max(1.0F,span*0.12F);
+    s.stroke.width=std::min(s.stroke.width,maxWidth);
+    s.cornerWidth=std::min(s.cornerWidth,maxWidth);
+    s.markerWidth=std::min(s.markerWidth,maxWidth);
+    s.diagonalWidth=std::min(s.diagonalWidth,maxWidth);
+    s.outlineWidth=std::min(s.outlineWidth,std::max(0.0F,span*0.04F));
+    s.cornerPx=std::min(s.cornerPx,span*0.30F);
+    s.markerPx=std::min(s.markerPx,span*0.25F);
+    s.roundingPx=std::min(s.roundingPx,span*0.20F);
+    return s;
+}
+inline Lines build(const Box& style,Point a,Point b) {
     Lines lines;
     const float w=b.x-a.x,h=b.y-a.y,span=std::min(w,h);
     if(!std::isfinite(span)||span<=0.0F) return lines;
+    const Box s=adapted(style,span);
+    auto add=[&](const Path& p,float width,std::string_view pat,Part part,bool closed=false) {
+        const auto before=lines.size();
+        pattern(lines,p,width,pat,closed,s.dashPx,s.gapPx,s.dotPx);
+        for(auto i=before;i<lines.size();++i) lines[i].part=part;
+    };
     const float radius=std::min(s.roundingPx,span*0.45F);
     auto layer=[&](float inset,bool edges,bool corner) {
         const Point lo{a.x+inset,a.y+inset},hi{b.x-inset,b.y-inset};
@@ -114,19 +137,19 @@ inline Lines build(const Box& s,Point a,Point b) {
             if(!hasCorners&&s.stroke.pattern=="solid") {
                 Path full;
                 for(const auto& q:p) for(auto v:q) append(full,v);
-                pattern(lines,full,s.stroke.width,"solid",true);
+                add(full,s.stroke.width,"solid",Part::Edge,true);
             } else {
                 // Opposite sides have identical lengths and phase. Separate
                 // rounded arcs are centered too; square corners have no arc.
                 for(std::size_t i=0;i<4;++i)
-                    pattern(lines,{p[i].back(),p[(i+1)%4].front()},
-                        s.stroke.width,s.stroke.pattern);
+                    add({p[i].back(),p[(i+1)%4].front()},
+                        s.stroke.width,s.stroke.pattern,Part::Edge);
                 if(!hasCorners&&r>0.001F)
-                    for(const auto& q:p) pattern(lines,q,s.stroke.width,s.stroke.pattern);
+                    for(const auto& q:p) add(q,s.stroke.width,s.stroke.pattern,Part::Edge);
             }
         }
         if(hasCorners)
-            for(const auto& q:p) pattern(lines,q,s.cornerWidth,s.corners);
+            for(const auto& q:p) add(q,s.cornerWidth,s.corners,Part::Corner);
     };
     layer(0,true,true);
     if(s.cornerLayers==2||s.frameLayers==2) {
@@ -135,7 +158,7 @@ inline Lines build(const Box& s,Point a,Point b) {
     }
     const float mx=(a.x+b.x)*0.5F,my=(a.y+b.y)*0.5F;
     const float k=std::min(s.markerPx*0.5F,span*0.22F);
-    auto marker=[&](Point p,Point q) { pattern(lines,{p,q},s.markerWidth,"solid"); };
+    auto marker=[&](Point p,Point q) { add({p,q},s.markerWidth,"solid",Part::Marker); };
     if(s.edgeMarkers=="center") {
         marker({mx-k,a.y},{mx+k,a.y}); marker({mx-k,b.y},{mx+k,b.y});
         marker({a.x,my-k},{a.x,my+k}); marker({b.x,my-k},{b.x,my+k});
@@ -147,8 +170,8 @@ inline Lines build(const Box& s,Point a,Point b) {
             marker({x,y+sy*gap},{x,y+sy*(gap+k)});
         }
     }
-    pattern(lines,{a,b},s.diagonalWidth,s.diagonals);
-    pattern(lines,{{b.x,a.y},{a.x,b.y}},s.diagonalWidth,s.diagonals);
+    add({a,b},s.diagonalWidth,s.diagonals,Part::Diagonal);
+    add({{b.x,a.y},{a.x,b.y}},s.diagonalWidth,s.diagonals,Part::Diagonal);
     return lines;
 }
 // Exact framebuffer-aligned orthogonal strokes. At 1x DPI the requested

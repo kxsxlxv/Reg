@@ -99,6 +99,25 @@ void readBox(const toml::table& t, Box& out) {
     out.outlineWidth = bounded(t, "outline_width", out.outlineWidth, 0.0F, 8.0F);
     out.outlineColor = color(t, "outline_color", out.outlineColor);
     out.outlineAlpha = bounded(t, "outline_alpha", out.outlineAlpha, 0.0F, 1.0F);
+    out.dashPx = bounded(t,"dash_px",out.dashPx,0,64);
+    out.gapPx = bounded(t,"gap_px",out.gapPx,0,32);
+    out.dotPx = bounded(t,"dot_px",out.dotPx,0,16);
+    if(t.contains("adaptive")) {
+        const auto v=t["adaptive"].value<bool>();
+        if(!v) throw std::runtime_error("expected bool: adaptive");
+        out.adaptive=*v;
+    }
+    out.edgeAlpha=bounded(t,"edge_alpha",out.edgeAlpha,0,1);
+    out.cornerAlpha=bounded(t,"corner_alpha",out.cornerAlpha,0,1);
+    out.markerAlpha=bounded(t,"marker_alpha",out.markerAlpha,0,1);
+    if(t.contains("corner_color")) {
+        if(str(t,"corner_color")=="inherit") out.cornerColor.reset();
+        else out.cornerColor=color(t,"corner_color",out.stroke.color);
+    }
+    if(t.contains("marker_color")) {
+        if(str(t,"marker_color")=="inherit") out.markerColor.reset();
+        else out.markerColor=color(t,"marker_color",out.stroke.color);
+    }
     out.corners = pattern(t, "corners", "none");
     out.diagonals = pattern(t, "diagonals", "none");
     out.cornerPx = bounded(t, "corner_px", out.cornerPx, 1.0F, 200.0F);
@@ -128,6 +147,7 @@ void readLabel(const toml::table& t, Label& out, bool isOutput) {
     out.paddingPx = bounded(t, "padding_px", out.paddingPx, 0.0F, 24.0F);
     out.gapPx = bounded(t, "gap_px", out.gapPx, 0.0F, 24.0F);
     out.roundingPx = bounded(t, "rounding_px", out.roundingPx, 0.0F, 24.0F);
+    out.maxWidthPx = bounded(t,"max_width_px",out.maxWidthPx,0,2048);
     if (out.text.size() > 128U) throw std::runtime_error("VTR label template too long");
 }
 void readOsd(const toml::table& t, Osd& out) {
@@ -187,6 +207,16 @@ Catalog readCatalog(const std::filesystem::path& path) {
         output.semantic = str(*entry, "semantic");
         output.geometry = str(*entry, "geometry");
         output.benchmark = str(*entry, "benchmark", "none");
+        if(entry->contains("visible")) {
+            const auto v=(*entry)["visible"].value<bool>();
+            if(!v) throw std::runtime_error("expected bool: visible");
+            output.visible=*v;
+        }
+        if(entry->contains("z_order")) {
+            const auto z=(*entry)["z_order"].value<std::int64_t>();
+            if(!z||*z< -1000||*z>1000) throw std::runtime_error("invalid z_order");
+            output.zOrder=static_cast<int>(*z);
+        }
         if (output.semantic.empty() || !supported(output.geometry))
             throw std::runtime_error("Missing semantic or unknown geometry for " + output.key);
         output.label = defaults;
@@ -201,6 +231,98 @@ Catalog readCatalog(const std::filesystem::path& path) {
     std::sort(result.outputs.begin(), result.outputs.end(),
               [](const Output& a, const Output& b) { return a.id < b.id; });
     return result;
+}
+
+namespace {
+std::string toHex(Color color) {
+    const auto byte=[](float v) { return static_cast<int>(std::lround(std::clamp(v,0.0F,1.0F)*255)); };
+    std::ostringstream out;
+    out<<'#'<<std::uppercase<<std::hex<<std::setfill('0')
+       <<std::setw(2)<<byte(color.r)<<std::setw(2)<<byte(color.g)<<std::setw(2)<<byte(color.b);
+    return out.str();
+}
+toml::table& ensureTable(toml::table& parent,const char* key) {
+    if(!parent.contains(key)) {
+        toml::table value;
+        value.is_inline(true);
+        parent.insert(key,std::move(value));
+    }
+    auto* table=parent.get_as<toml::table>(key);
+    if(!table) throw std::runtime_error(std::string("expected table: ")+key);
+    return *table;
+}
+void setBox(toml::table& t,const Box& b) {
+    auto set=[&](const char* k,const auto& v) { t.insert_or_assign(k,v); };
+    set("color",toHex(b.stroke.color));set("edges",b.stroke.pattern);
+    set("edge_width",b.stroke.width);set("corners",b.corners);
+    set("corner_width",b.cornerWidth);set("corner_px",b.cornerPx);
+    set("diagonals",b.diagonals);set("diagonal_width",b.diagonalWidth);
+    set("corner_layers",b.cornerLayers);set("frame_layers",b.frameLayers);
+    set("layer_gap_px",b.layerGapPx);set("edge_markers",b.edgeMarkers);
+    set("marker_width",b.markerWidth);set("marker_px",b.markerPx);
+    set("rounding_px",b.roundingPx);set("outline_width",b.outlineWidth);
+    set("outline_color",toHex(b.outlineColor));set("outline_alpha",b.outlineAlpha);
+    set("fill",toHex(b.fill));set("fill_alpha",b.fillAlpha);
+    set("dash_px",b.dashPx);set("gap_px",b.gapPx);set("dot_px",b.dotPx);
+    set("adaptive",b.adaptive);set("edge_alpha",b.edgeAlpha);
+    set("corner_alpha",b.cornerAlpha);set("marker_alpha",b.markerAlpha);
+    set("corner_color",b.cornerColor?toHex(*b.cornerColor):std::string("inherit"));
+    set("marker_color",b.markerColor?toHex(*b.markerColor):std::string("inherit"));
+}
+void setLabel(toml::table& t,const Label& b) {
+    auto set=[&](const char* k,const auto& v) { t.insert_or_assign(k,v); };
+    set("show",b.show);set("text",b.text);set("place",b.place);
+    set("color",b.autoColor?std::string("auto"):toHex(b.color));
+    set("background",b.boxBackground?std::string("box_color"):toHex(b.background));
+    set("background_alpha",b.backgroundAlpha);set("font_px",b.fontPx);
+    set("padding_px",b.paddingPx);set("gap_px",b.gapPx);
+    set("rounding_px",b.roundingPx);set("max_width_px",b.maxWidthPx);
+}
+} // namespace
+Catalog saveOutputStyle(const std::filesystem::path& path,std::uint64_t expectedHash,
+                        const Output& style) {
+    const auto current=readCatalog(path);
+    if(current.hash!=expectedHash) throw std::runtime_error("TOML changed on disk; reload before saving");
+    const auto match=std::find_if(current.outputs.begin(),current.outputs.end(),
+        [&](const Output& o){return o.id==style.id&&o.key==style.key;});
+    if(match==current.outputs.end()||match->geometry!=style.geometry)
+        throw std::runtime_error("VTR output identity changed");
+    auto document=toml::parse_file(path.string());
+    auto* outputs=document.get_as<toml::table>("output");
+    auto* entry=outputs?outputs->get_as<toml::table>(style.key):nullptr;
+    if(!entry) throw std::runtime_error("VTR output is missing");
+    entry->insert_or_assign("visible",style.visible);
+    entry->insert_or_assign("z_order",style.zOrder);
+    if(style.geometry=="bbox") {
+        setBox(ensureTable(*entry,"box"),style.box);
+        setLabel(ensureTable(*entry,"label"),style.label);
+    } else {
+        auto& osd=ensureTable(*entry,"osd");
+        osd.insert_or_assign("color",toHex(style.osd.stroke.color));
+        osd.insert_or_assign("width",style.osd.stroke.width);
+        osd.insert_or_assign("pattern",style.osd.stroke.pattern);
+        osd.insert_or_assign("alpha",style.osd.alpha);
+    }
+    auto tmp=path;tmp+=L".tmp";
+    auto backup=path;backup+=L".bak";
+    try {
+        {
+            std::ofstream out(tmp,std::ios::binary|std::ios::trunc);
+            out<<document<<'\n';
+            out.close();
+            if(!out) throw std::runtime_error("Cannot write VTR temporary config");
+        }
+        auto verified=readCatalog(tmp);
+        if(readCatalog(path).hash!=expectedHash)
+            throw std::runtime_error("TOML changed during save; reload before saving");
+        std::filesystem::copy_file(path,backup,std::filesystem::copy_options::overwrite_existing);
+        std::filesystem::rename(tmp,path);
+        return verified;
+    } catch(...) {
+        std::error_code ignored;
+        std::filesystem::remove(tmp,ignored);
+        throw;
+    }
 }
 
 Color contrastingText(Color background) {

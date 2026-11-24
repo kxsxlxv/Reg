@@ -116,3 +116,27 @@ of stroke strips and joins. The opaque fast path is unchanged. Overlapping
 separate BBOX objects remain separate layers. The SDL raster regression checks
 color, alpha, overlap and disable behavior. Mixed translucent rendering cost
 has not yet been benchmarked for live video; VTR is still preview-only.
+
+### Interactive style editor
+
+The Editor tab edits one draft at a time, with the same renderer as Outputs.
+Photo/light/dark backgrounds, object zoom, 16/32/64 px examples and optional
+composite preview are UI-only. The composite draws visible outputs in ascending
+`z_order` (stable order by ID for equal values). Single-output previews remain
+available even when hidden. `visible` defaults true and `z_order` defaults zero.
+Live VTR receiving is not implemented: these metadata are exercised in previews.
+
+BBOX `dash_px`, `gap_px`, `dot_px` use zero for pattern-specific legacy lengths.
+`adaptive` defaults false for old files; the shipped styles enable it. It caps
+stroke widths, corner/marker sizes, rounding and outline on small BBOX without
+changing source geometry. `edge_alpha`, `corner_alpha`, `marker_alpha` default 1.
+`corner_color` and `marker_color` accept hex or inherit. Component layers are
+painted separately (edge/diagonal, corner, marker), so different translucent
+components intentionally composite at intersections. Outline union is separate.
+Label `max_width_px` caps width (zero auto) and truncates overly long text.
+
+Save validates a temporary TOML and refuses stale hashes, preserves unknown keys
+and output identity, backs up exact original bytes to `vtr.toml.bak` and replaces
+the file. toml++ serialization can change formatting/comment placement or remove
+comments; the backup retains them. Save only updates selected output values.
+The Windows CI publishes `vtr-editor-preview.bmp` and tests parser/save round-trip.

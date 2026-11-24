@@ -55,6 +55,15 @@ void testPixelRects() {
 int main() {
     try {
         testPixelRects();
+        Box adaptive;adaptive.adaptive=true;adaptive.cornerWidth=8;adaptive.cornerPx=40;
+        const auto small=adapted(adaptive,16);
+        require(small.cornerWidth<=2&&small.cornerPx<=5,"Small BBOX adaptation failed");
+        Lines dash;
+        pattern(dash,{{0,0},{100,0}},2,"dashed",false,12,4,2);
+        require(dash.size()>2,"custom dash missing");
+        for(const auto& line:dash)
+            require(std::abs(distance(line.points.front(),line.points.back())-12)<0.01F,
+                    "Custom dash length ignored");
         Box base; base.stroke.width=2; base.cornerWidth=4; base.cornerPx=17;
         std::vector<Box> styles;
         Box s=base; styles.push_back(s);

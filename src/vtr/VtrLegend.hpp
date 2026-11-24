@@ -9,7 +9,7 @@ namespace reg::vtr {
 // The preview uses the embedded reference photo, not incoming video.
 // Shared production and raster-regression entry point.
 void drawBbox(ImDrawList* draw,const Box& style,ImVec2 min,ImVec2 max);
-enum class LegendPage { None, Outputs, Primitives };
+enum class LegendPage { None, Outputs, Primitives, Editor };
 LegendPage drawLegend(Catalog& catalog, std::string& error,
-                const std::filesystem::path& path, bool selectPrimitives = false);
+                const std::filesystem::path& path, bool selectPrimitives = false, bool selectEditor = false);
 } // namespace reg::vtr

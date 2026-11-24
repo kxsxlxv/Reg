@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 
@@ -102,6 +103,33 @@ int main() {
         try { (void)readCatalog(tmp); } catch(const std::exception&) { rejected=true; }
         require(rejected,"Invalid outline style accepted");
     }
+    write(tmp,"format=1\ncustom_root='preserve'\n[output.a]\nid=1\nsemantic='detection'\ngeometry='bbox'\n"
+              "custom_key='keep'\nbox={edges='dashed',custom_style=99}\n"
+              "[output.b]\nid=2\nsemantic='tracking'\ngeometry='bbox'\n");
+    auto before=readCatalog(tmp);
+    auto draft=before.outputs[0];draft.visible=false;draft.zOrder=42;
+    draft.box.dashPx=12;draft.box.gapPx=3;draft.box.dotPx=2;
+    draft.box.adaptive=true;draft.box.edgeAlpha=0.5F;
+    draft.box.cornerColor=Color{1,0,0};draft.label.maxWidthPx=80;
+    const auto saved=saveOutputStyle(tmp,before.hash,draft);
+    const auto& edited=saved.outputs[0];
+    require(saved.hash!=before.hash&&saved.outputs.size()==2&&
+        saved.outputs[1].id==2&&!edited.visible&&edited.zOrder==42&&
+        edited.box.dashPx==12&&edited.box.gapPx==3&&edited.box.dotPx==2&&
+        edited.box.adaptive&&edited.box.edgeAlpha==0.5F&&
+        edited.box.cornerColor&&edited.box.cornerColor->r==1&&
+        edited.label.maxWidthPx==80,"Editor round-trip failed");
+    {
+        std::ifstream in(tmp);std::string bytes((std::istreambuf_iterator<char>(in)),{});
+        require(bytes.find("custom_root")!=std::string::npos&&bytes.find("custom_style")!=std::string::npos&&
+            bytes.find("custom_key")!=std::string::npos,"Editor removed unknown keys");
+    }
+    auto bak=tmp;bak+=L".bak";
+    require(readCatalog(bak).hash==before.hash,"Backup must preserve exact bytes");
+    rejected=false;
+    try { (void)saveOutputStyle(tmp,before.hash,draft); } catch(const std::exception&) { rejected=true; }
+    require(rejected&&readCatalog(tmp).hash==saved.hash,"Stale draft overwrote current file");
+    std::filesystem::remove(bak);
     std::filesystem::remove(tmp);
     std::cout<<"VTR TOML catalogue: PASS\n";
 }

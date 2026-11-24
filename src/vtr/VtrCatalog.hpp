@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,11 @@ struct Box {
     float outlineWidth{0.0F}; // extra border on each side
     Color outlineColor{12.0F/255.0F,16.0F/255.0F,20.0F/255.0F};
     float outlineAlpha{1.0F};
+    // Zero selects the legacy pattern-specific default.
+    float dashPx{0},gapPx{0},dotPx{0};
+    bool adaptive{false};
+    float edgeAlpha{1},cornerAlpha{1},markerAlpha{1};
+    std::optional<Color> cornerColor,markerColor;
     Color fill{};
     float fillAlpha{0.0F};
 };
@@ -47,6 +53,7 @@ struct Label {
     float paddingPx{4.0F};
     float gapPx{3.0F};
     float roundingPx{3.0F};
+    float maxWidthPx{0}; // 0 = unconstrained, except viewport
     bool autoColor{false};
     bool boxBackground{false};
 };
@@ -60,6 +67,8 @@ struct Output {
     std::string semantic;
     std::string geometry;
     std::string benchmark{"none"};
+    bool visible{true};
+    int zOrder{0};
     Box box{};
     Label label{};
     Osd osd{};
@@ -72,6 +81,10 @@ struct Catalog {
 // Throws on invalid TOML, unknown geometry, duplicate IDs or unsupported format.
 // Consumers should keep the last valid snapshot on a failed manual reload.
 Catalog readCatalog(const std::filesystem::path& path);
+// Preserve unknown TOML values and output identity; refuse stale edits.
+// Writes validated temporary file, keeps original as .bak, then replaces.
+Catalog saveOutputStyle(const std::filesystem::path& path,std::uint64_t expectedHash,
+                        const Output& style);
 std::string hashHex(std::uint64_t hash);
 Color contrastingText(Color background); // choose black/white by WCAG relative luminance
 } // namespace reg::vtr

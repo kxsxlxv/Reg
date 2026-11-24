@@ -19,7 +19,7 @@
 int main(int argc,char** argv) {
     try {
         if (argc != 3 && argc != 4) {
-            std::fprintf(stderr,"usage: vtr_legend_snapshot config/vtr.toml output.bmp [primitives|raster]\n");
+            std::fprintf(stderr,"usage: vtr_legend_snapshot config/vtr.toml output.bmp [primitives|raster|editor]\n");
             return 2;
         }
         auto catalog=reg::vtr::readCatalog(argv[1]);
@@ -30,6 +30,7 @@ int main(int argc,char** argv) {
         constexpr int w=1100,h=1560;
         const bool primitives=argc==4 && std::string(argv[3])=="primitives";
         const bool raster=argc==4 && std::string(argv[3])=="raster";
+        const bool editor=argc==4 && std::string(argv[3])=="editor";
         SDL_Surface* surface=SDL_CreateSurface(w,h,SDL_PIXELFORMAT_RGBA32);
         if(!surface) { std::fprintf(stderr,"SDL_CreateSurface: %s\n",SDL_GetError());return 2; }
         SDL_Renderer* renderer=SDL_CreateSoftwareRenderer(surface);
@@ -103,7 +104,7 @@ int main(int argc,char** argv) {
                                         ImGuiTabItemFlags_SetSelected)) {
                     legendVisible = true;
                     std::string error;
-                    visiblePage=reg::vtr::drawLegend(catalog,error,argv[1],primitives);
+                    visiblePage=reg::vtr::drawLegend(catalog,error,argv[1],primitives,editor);
                     ImGui::EndTabItem();
                 } else {
                     legendVisible = false;
@@ -128,7 +129,7 @@ int main(int argc,char** argv) {
                 return 2;
             }
         }
-        const auto expectedPage=primitives?reg::vtr::LegendPage::Primitives:reg::vtr::LegendPage::Outputs;
+        const auto expectedPage=editor?reg::vtr::LegendPage::Editor:(primitives?reg::vtr::LegendPage::Primitives:reg::vtr::LegendPage::Outputs);
         if (!legendVisible || (!raster && visiblePage!=expectedPage)) {
             std::fprintf(stderr,"VTR tab was never visible; rejecting blank screenshot\n");
             return 3;
