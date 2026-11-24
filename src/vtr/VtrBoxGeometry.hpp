@@ -1,0 +1,153 @@
+#pragma once
+#include "vtr/VtrCatalog.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <string_view>
+#include <vector>
+
+namespace reg::vtr::boxgeom {
+struct Point { float x{}, y{}; };
+using Path=std::vector<Point>;
+struct Line { Path points; float width{}; bool closed{}; };
+using Lines=std::vector<Line>;
+
+inline float distance(Point a,Point b) {
+    return std::hypot(b.x-a.x,b.y-a.y);
+}
+inline void append(Path& p,Point q) {
+    if(p.empty()||distance(p.back(),q)>0.001F) p.push_back(q);
+}
+inline Point interpolate(Point a,Point b,float t) {
+    return {a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t};
+}
+// Extract an arc-length interval, preserving genuine corner vertices.
+inline Path interval(const Path& p,float start,float end) {
+    Path result;
+    float offset=0;
+    for(std::size_t i=1;i<p.size();++i) {
+        const float len=distance(p[i-1],p[i]);
+        if(len<=0.001F) continue;
+        const float lo=std::max(start,offset),hi=std::min(end,offset+len);
+        if(hi-lo>0.001F) {
+            append(result,interpolate(p[i-1],p[i],(lo-offset)/len));
+            append(result,interpolate(p[i-1],p[i],(hi-offset)/len));
+        }
+        offset+=len;
+    }
+    return result;
+}
+// Center a symmetric repeating pattern on each path. Complete dashes only,
+// with a small gap at each end; short paths get one centered short dash.
+// The dash-dot cycle is symmetric about its long dash.
+inline void pattern(Lines& out,const Path& raw,float width,std::string_view style,
+                    bool closed=false) {
+    if(style=="none") return;
+    Path p;
+    for(auto q:raw) append(p,q);
+    if(closed&&p.size()>1&&distance(p.front(),p.back())<=0.001F) p.pop_back();
+    if(p.size()<2) return;
+    if(style=="solid") {
+        const bool loop=closed&&p.size()>2;
+        out.push_back({std::move(p),width,loop});
+        return;
+    }
+    if(closed) append(p,p.front());
+    float len=0;
+    for(std::size_t i=1;i<p.size();++i) len+=distance(p[i-1],p[i]);
+    if(len<=0.001F) return;
+    const bool dot=style=="dash_dot";
+    const float dash=dot?10.0F:7.0F, period=dot?20.0F:12.0F;
+    const float edgeGap=std::min(2.0F,len*0.15F);
+    const float mid=len*0.5F;
+    auto emit=[&](float center,float length) {
+        const float a=center-length*0.5F,b=center+length*0.5F;
+        if(a<edgeGap-0.001F||b>len-edgeGap+0.001F) return;
+        auto q=interval(p,a,b);
+        if(q.size()>=2) out.push_back({std::move(q),width,false});
+    };
+    emit(mid,std::min(dash,len-2*edgeGap));
+    for(int n=1;static_cast<float>(n)*period<mid+period;++n) {
+        const float shift=static_cast<float>(n)*period;
+        emit(mid-shift,dash); emit(mid+shift,dash);
+        if(dot) { emit(mid-shift+period*0.5F,2); emit(mid+shift-period*0.5F,2); }
+    }
+}
+inline std::array<Path,4> corners(Point a,Point b,float k,float r) {
+    const Point centers[4]={{a.x+r,a.y+r},{b.x-r,a.y+r},
+                            {b.x-r,b.y-r},{a.x+r,b.y-r}};
+    const Point before[4]={{a.x,a.y+k},{b.x-k,a.y},{b.x,b.y-k},{a.x+k,b.y}};
+    const Point after[4]={{a.x+k,a.y},{b.x,a.y+k},{b.x-k,b.y},{a.x,b.y-k}};
+    constexpr float pi=3.14159265358979323846F;
+    std::array<Path,4> result;
+    for(int n=0;n<4;++n) {
+        auto& p=result[static_cast<std::size_t>(n)];
+        append(p,before[n]);
+        if(r>0.001F) {
+            const int steps=std::clamp(static_cast<int>(std::ceil(r*0.7F)),4,32);
+            for(int i=0;i<=steps;++i) {
+                const float angle=pi+(static_cast<float>(n)+
+                    static_cast<float>(i)/static_cast<float>(steps))*pi*0.5F;
+                append(p,{centers[n].x+r*std::cos(angle),centers[n].y+r*std::sin(angle)});
+            }
+        } else append(p,centers[n]);
+        append(p,after[n]);
+    }
+    return result;
+}
+inline Lines build(const Box& s,Point a,Point b) {
+    Lines lines;
+    const float w=b.x-a.x,h=b.y-a.y,span=std::min(w,h);
+    if(!std::isfinite(span)||span<=0.0F) return lines;
+    const float radius=std::min(s.roundingPx,span*0.45F);
+    auto layer=[&](float inset,bool edges,bool corner) {
+        const Point lo{a.x+inset,a.y+inset},hi{b.x-inset,b.y-inset};
+        const float side=std::min(hi.x-lo.x,hi.y-lo.y);
+        if(side<=2.0F) return;
+        const float r=std::clamp(radius-inset,0.0F,side*0.45F);
+        const bool hasCorners=corner&&s.corners!="none";
+        const float k=hasCorners?std::min(std::max(s.cornerPx,r),side*0.45F):r;
+        const auto p=corners(lo,hi,k,r);
+        if(edges&&s.stroke.pattern!="none") {
+            if(!hasCorners&&s.stroke.pattern=="solid") {
+                Path full;
+                for(const auto& q:p) for(auto v:q) append(full,v);
+                pattern(lines,full,s.stroke.width,"solid",true);
+            } else {
+                // Opposite sides have identical lengths and phase. Separate
+                // rounded arcs are centered too; square corners have no arc.
+                for(std::size_t i=0;i<4;++i)
+                    pattern(lines,{p[i].back(),p[(i+1)%4].front()},
+                        s.stroke.width,s.stroke.pattern);
+                if(!hasCorners&&r>0.001F)
+                    for(const auto& q:p) pattern(lines,q,s.stroke.width,s.stroke.pattern);
+            }
+        }
+        if(hasCorners)
+            for(const auto& q:p) pattern(lines,q,s.cornerWidth,s.corners);
+    };
+    layer(0,true,true);
+    if(s.cornerLayers==2||s.frameLayers==2) {
+        const float gap=std::min(s.layerGapPx,span*0.24F);
+        layer(gap,s.frameLayers==2,s.cornerLayers==2);
+    }
+    const float mx=(a.x+b.x)*0.5F,my=(a.y+b.y)*0.5F;
+    const float k=std::min(s.markerPx*0.5F,span*0.22F);
+    auto marker=[&](Point p,Point q) { pattern(lines,{p,q},s.markerWidth,"solid"); };
+    if(s.edgeMarkers=="center") {
+        marker({mx-k,a.y},{mx+k,a.y}); marker({mx-k,b.y},{mx+k,b.y});
+        marker({a.x,my-k},{a.x,my+k}); marker({b.x,my-k},{b.x,my+k});
+    } else if(s.edgeMarkers=="outside") {
+        const float gap=s.layerGapPx;
+        for(float x:{a.x,b.x}) for(float y:{a.y,b.y}) {
+            const float sx=x==a.x?-1.0F:1.0F,sy=y==a.y?-1.0F:1.0F;
+            marker({x+sx*gap,y},{x+sx*(gap+k),y});
+            marker({x,y+sy*gap},{x,y+sy*(gap+k)});
+        }
+    }
+    pattern(lines,{a,b},s.diagonalWidth,s.diagonals);
+    pattern(lines,{{b.x,a.y},{a.x,b.y}},s.diagonalWidth,s.diagonals);
+    return lines;
+}
+} // namespace reg::vtr::boxgeom

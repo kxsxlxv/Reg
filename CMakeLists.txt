@@ -827,6 +827,13 @@ target_include_directories(reg_launcher_imgui PUBLIC
 )
 target_link_libraries(reg_launcher_imgui PUBLIC SDL3::SDL3)
 
+# Renderer-independent regression of BBOX paths, including small boxes.
+if(REG_BUILD_TESTS)
+    add_executable(reg_vtr_box_geometry_tests tests/vtr_box_geometry_tests.cpp)
+    target_include_directories(reg_vtr_box_geometry_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    add_test(NAME vtr_box_geometry COMMAND reg_vtr_box_geometry_tests)
+endif()
+
 # Offline screenshot uses the SAME ImGui VTR legend draw function as Telemetry,
 # with SDL's software renderer (no physical GPU or running Jetson needed).
 if(REG_BUILD_TESTS AND WIN32)

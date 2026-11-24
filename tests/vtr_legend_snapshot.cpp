@@ -26,7 +26,7 @@ int main(int argc,char** argv) {
             std::fprintf(stderr,"SDL_Init: %s\n",SDL_GetError());
             return 2;
         }
-        constexpr int w=1100,h=1380;
+        constexpr int w=1100,h=1560;
         const bool primitives=argc==4 && std::string(argv[3])=="primitives";
         SDL_Surface* surface=SDL_CreateSurface(w,h,SDL_PIXELFORMAT_RGBA32);
         if(!surface) { std::fprintf(stderr,"SDL_CreateSurface: %s\n",SDL_GetError());return 2; }

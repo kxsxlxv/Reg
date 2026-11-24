@@ -1,4 +1,5 @@
 #include "vtr/VtrLegend.hpp"
+#include "vtr/VtrBoxGeometry.hpp"
 #include "vtr/VtrPhoto.hpp"
 #include <imgui.h>
 
@@ -15,48 +16,22 @@ namespace {
 ImU32 rgba(Color c, float alpha = 1.0F) {
     return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r,c.g,c.b,alpha));
 }
-// Continuous dash phase along a path, including rounded corners.
-using Path = std::vector<ImVec2>;
-void strokePath(ImDrawList* d, const Path& points, ImU32 color,
-                float width, std::string_view pattern, float border=0.0F) {
-    if (pattern=="none" || points.size()<2U) return;
-    const auto paint=[&](const Path& p) {
-        if (p.size()<2U) return;
-        if (border>0.0F)
-            d->AddPolyline(p.data(),static_cast<int>(p.size()),
-                IM_COL32(12,16,20,235),width+2.0F*border,ImDrawFlags_None);
-        d->AddPolyline(p.data(),static_cast<int>(p.size()),color,width,ImDrawFlags_None);
-    };
-    if (pattern=="solid") { paint(points); return; }
-    const bool dot=pattern=="dash_dot";
-    const std::array<float,4> lengths=dot
-        ? std::array<float,4>{10,4,2,4}
-        : std::array<float,4>{7,5,7,5};
-    int phase=0;
-    float remaining=lengths[0];
-    Path run;
-    for (std::size_t i=1;i<points.size();++i) {
-        const ImVec2 a=points[i-1], b=points[i];
-        const float dx=b.x-a.x,dy=b.y-a.y,len=std::hypot(dx,dy);
-        if (len<0.001F) continue;
-        for (float s=0;s<len-0.0001F;) {
-            const float step=std::min(remaining,len-s);
-            if ((phase%2)==0) {
-                if (run.empty()) run.emplace_back(a.x+dx*s/len,a.y+dy*s/len);
-                run.emplace_back(a.x+dx*(s+step)/len,a.y+dy*(s+step)/len);
-            }
-            s+=step; remaining-=step;
-            if (remaining<0.0001F) {
-                if ((phase%2)==0) { paint(run); run.clear(); }
-                phase=(phase+1)%4; remaining=lengths[static_cast<std::size_t>(phase)];
-            }
-        }
-    }
-    paint(run);
+using Path=std::vector<ImVec2>;
+void paintLine(ImDrawList* d,const boxgeom::Line& line,ImU32 color,float width) {
+    Path points;
+    points.reserve(line.points.size());
+    for(auto p:line.points) points.emplace_back(p.x,p.y);
+    if(points.size()<2) return;
+    // Closed paths have unique vertices, and open L corners have exactly
+    // three non-coincident points: ImGui can generate a proper miter join.
+    d->AddPolyline(points.data(),static_cast<int>(points.size()),color,width,
+        line.closed?ImDrawFlags_Closed:ImDrawFlags_None);
 }
-void stroke(ImDrawList* d, ImVec2 a, ImVec2 b, ImU32 color,
-            float width, std::string_view pattern) {
-    strokePath(d,{a,b},color,width,pattern);
+void stroke(ImDrawList* d,ImVec2 a,ImVec2 b,ImU32 color,
+            float width,std::string_view pattern) {
+    boxgeom::Lines lines;
+    boxgeom::pattern(lines,{{a.x,a.y},{b.x,b.y}},width,pattern);
+    for(const auto& line:lines) paintLine(d,line,color,line.width);
 }
 std::string replace(std::string text,std::string_view key,
                     std::string_view value) {
@@ -75,82 +50,24 @@ std::string sampleLabel(std::string text) {
     text=replace(std::move(text),"{origin}","Canny");
     return text;
 }
-// Construct four corner paths clockwise. Their straight legs may have
-// different lengths from the rounding radius. The underlying BBOX is unchanged.
-std::array<Path,4> cornerPaths(ImVec2 a,ImVec2 b,float k,float r) {
-    const ImVec2 c[4]={{a.x+r,a.y+r},{b.x-r,a.y+r},
-                      {b.x-r,b.y-r},{a.x+r,b.y-r}};
-    const ImVec2 before[4]={{a.x,a.y+k},{b.x-k,a.y},
-                            {b.x,b.y-k},{a.x+k,b.y}};
-    const ImVec2 after[4]={{a.x+k,a.y},{b.x,a.y+k},
-                           {b.x-k,b.y},{a.x,b.y-k}};
-    constexpr float pi=3.14159265358979323846F;
-    std::array<Path,4> paths;
-    for(int n=0;n<4;++n) {
-        auto& p=paths[static_cast<std::size_t>(n)];
-        p.push_back(before[n]);
-        if(r>0.0F) {
-            for(int i=0;i<=6;++i) {
-                const float angle=pi+(static_cast<float>(n)+static_cast<float>(i)/6.0F)*pi*0.5F;
-                p.emplace_back(c[n].x+r*std::cos(angle),c[n].y+r*std::sin(angle));
-            }
-        } else p.push_back(c[n]);
-        p.push_back(after[n]);
-    }
-    return paths;
-}
-void rectangle(ImDrawList* d, const Box& s, ImVec2 a, ImVec2 b) {
-    const ImU32 line=rgba(s.stroke.color);
-    const float w=b.x-a.x,h=b.y-a.y;
-    if(w<=0.0F||h<=0.0F) return;
-    const float radius=std::min(s.roundingPx,std::min(w,h)*0.45F);
-    if (s.fillAlpha>0.0F)
-        d->AddRectFilled(a,b,rgba(s.fill,s.fillAlpha),radius);
-    const auto drawLayer=[&](float inset,bool edges,bool corners) {
-        const ImVec2 lo{a.x+inset,a.y+inset},hi{b.x-inset,b.y-inset};
-        const float span=std::min(hi.x-lo.x,hi.y-lo.y);
-        if(span<=2.0F) return;
-        const float r=std::clamp(radius-inset,0.0F,span*0.45F);
-        const float k=std::min(std::max(s.cornerPx,r),span*0.45F);
-        const bool hasCorners=corners&&s.corners!="none";
-        const auto paths=cornerPaths(lo,hi,hasCorners?k:r,r);
-        if(edges && s.stroke.pattern!="none") {
-            if(hasCorners) {
-                for(std::size_t n=0;n<4;++n)
-                    strokePath(d,{paths[n].back(),paths[(n+1)%4].front()},
-                        line,s.stroke.width,s.stroke.pattern,s.outlineWidth);
-            } else {
-                Path perimeter;
-                for(const auto& p:paths) perimeter.insert(perimeter.end(),p.begin(),p.end());
-                perimeter.push_back(perimeter.front());
-                strokePath(d,perimeter,line,s.stroke.width,s.stroke.pattern,s.outlineWidth);
-            }
-        }
-        if(hasCorners)
-            for(const auto& p:paths)
-                strokePath(d,p,line,s.cornerWidth,s.corners,s.outlineWidth);
-    };
-    drawLayer(0.0F,true,true);
-    if(s.cornerLayers==2||s.frameLayers==2)
-        drawLayer(s.layerGapPx,s.frameLayers==2,s.cornerLayers==2);
-    const float mx=(a.x+b.x)*0.5F,my=(a.y+b.y)*0.5F;
-    const float k=std::min(s.markerPx*0.5F,std::min(w,h)*0.22F);
-    const auto marker=[&](ImVec2 p,ImVec2 q) {
-        strokePath(d,{p,q},line,s.markerWidth,"solid",s.outlineWidth);
-    };
-    if(s.edgeMarkers=="center") {
-        marker({mx-k,a.y},{mx+k,a.y}); marker({mx-k,b.y},{mx+k,b.y});
-        marker({a.x,my-k},{a.x,my+k}); marker({b.x,my-k},{b.x,my+k});
-    } else if(s.edgeMarkers=="outside") {
-        const float g=s.layerGapPx,len=k;
-        for(float x:{a.x,b.x}) for(float y:{a.y,b.y}) {
-            const float sx=x==a.x?-1.0F:1.0F,sy=y==a.y?-1.0F:1.0F;
-            marker({x+sx*g,y},{x+sx*(g+len),y});
-            marker({x,y+sy*g},{x,y+sy*(g+len)});
-        }
-    }
-    strokePath(d,{a,b},line,s.diagonalWidth,s.diagonals,s.outlineWidth);
-    strokePath(d,{{b.x,a.y},{a.x,b.y}},line,s.diagonalWidth,s.diagonals,s.outlineWidth);
+void rectangle(ImDrawList* d,const Box& s,ImVec2 a,ImVec2 b) {
+    // Snap the reference centerlines once, not individual vertices.
+    // Odd integer widths use half-pixel centers; even use integer centers.
+    const float ref=s.stroke.pattern=="none"?s.cornerWidth:s.stroke.width;
+    const float offset=(static_cast<int>(std::round(ref))%2)?0.5F:0.0F;
+    const auto snap=[&](float x) { return std::round(x-offset)+offset; };
+    a={snap(a.x),snap(a.y)}; b={snap(b.x),snap(b.y)};
+    const float span=std::min(b.x-a.x,b.y-a.y);
+    if(span<=0) return;
+    const float radius=std::min(s.roundingPx,span*0.45F);
+    if(s.fillAlpha>0) d->AddRectFilled(a,b,rgba(s.fill,s.fillAlpha),radius);
+    const auto lines=boxgeom::build(s,{a.x,a.y},{b.x,b.y});
+    // One complete underlay pass, then one complete color pass. Underlays
+    // must never erase an adjacent colored edge/corner/marker.
+    if(s.outlineWidth>0)
+        for(const auto& line:lines)
+            paintLine(d,line,IM_COL32(12,16,20,235),line.width+2*s.outlineWidth);
+    for(const auto& line:lines) paintLine(d,line,rgba(s.stroke.color),line.width);
 }
 void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
                ImVec2 min,ImVec2 max) {
@@ -208,13 +125,15 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     const float width=max.x-min.x, height=max.y-min.y;
     const float srcW=hasPhoto?static_cast<float>(photo.width):320.0F;
     const float srcH=hasPhoto?static_cast<float>(photo.height):168.0F;
-    // Reserve label room before fitting the photo, so labels don't occlude
-    // the aircraft merely because a preview card has tight image margins.
-    const float labelRoom=o.label.show&&!o.label.text.empty()
-        ? std::min(height*0.30F,o.label.fontPx+2.0F*o.label.paddingPx+o.label.gapPx+4.0F) : 0.0F;
-    const float scale=std::min(width/srcW,(height-labelRoom)/srcH);
+    // Common safe area for ALL cards, including labels and external markers.
+    // The reference photo/annotation stay identical between styles.
+    const float sidePad=std::min(12.0F,width*0.12F);
+    const float topPad=std::min(26.0F,height*0.22F);
+    const float bottomPad=std::min(12.0F,height*0.12F);
+    const float scale=std::min((width-2*sidePad)/srcW,
+                              (height-topPad-bottomPad)/srcH);
     const ImVec2 photoMin{min.x+(width-srcW*scale)*0.5F,
-                          min.y+labelRoom+(height-labelRoom-srcH*scale)*0.5F};
+        min.y+topPad+(height-topPad-bottomPad-srcH*scale)*0.5F};
     const ImVec2 photoMax{photoMin.x+srcW*scale,photoMin.y+srcH*scale};
     if (hasPhoto) {
         d->AddImage(photo.texture,photoMin,photoMax,photo.uv0,photo.uv1,
@@ -237,8 +156,11 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     const ImU32 ink=rgba(o.osd.stroke.color,o.osd.alpha);
     const auto& geometry=o.geometry;
     if (geometry=="bbox") {
-        rectangle(d,o.box,a,b);
-        drawLabel(d,o,a,b,min,max);
+        const bool roi=o.semantic=="search_region";
+        const ImVec2 lo=roi?img(50,10):a;
+        const ImVec2 hi=roi?img(1191,735):b;
+        rectangle(d,o.box,lo,hi);
+        drawLabel(d,o,lo,hi,min,max);
     } else if (geometry=="line") {
         stroke(d,img(155,660),img(1105,65),ink,o.osd.stroke.width,
                o.osd.stroke.pattern);
@@ -344,7 +266,7 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         s=base; s.stroke.pattern="none"; s.corners="solid"; s.cornerLayers=2;
         s.cornerWidth=2.0F; add("Double corners",s);
         s=base; s.stroke.width=1.5F; s.edgeMarkers="outside"; add("External markers",s);
-        s=base; s.stroke.width=1.0F; s.edgeMarkers="center"; add("Mid-edge markers",s);
+        s=base; s.stroke.width=1.0F; s.edgeMarkers="center"; s.markerPx=18.0F; s.markerWidth=4.0F; add("Mid-edge markers",s);
         s=base; s.frameLayers=2; s.stroke.width=1.5F; add("Double frame",s);
         s=base; s.stroke.pattern="none"; s.fillAlpha=0.24F; add("Fill only",s);
         s=base; s.stroke.pattern="none"; s.fillAlpha=0.16F; s.corners="solid";
@@ -363,9 +285,9 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
                     ImGui::TableNextColumn();
                     ImGui::PushID(static_cast<int>(o.id));
                     const bool stacked=ImGui::GetContentRegionAvail().x<390.0F;
-                    constexpr float previewHeight=126.0F;
+                    constexpr float previewHeight=152.0F;
                     if(ImGui::BeginChild("##vtr-output",
-                        {0,stacked?191.0F:146.0F},ImGuiChildFlags_Borders)) {
+                        {0,stacked?217.0F:172.0F},ImGuiChildFlags_Borders)) {
                         const float avail=ImGui::GetContentRegionAvail().x;
                         const float pw=stacked?avail:std::min(245.0F,avail*0.49F);
                         const auto p=ImGui::GetCursorScreenPos();

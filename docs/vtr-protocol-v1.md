@@ -85,3 +85,13 @@ styles in `config/vtr.toml` are drawn dynamically over the original photo
 through the existing `ImDrawList` primitives. Contour, sky and motion samples
 are **illustrative only**, not pixel-accurate segmentation/GT or detector output.
 The photo never modifies RTSP Raw frames, recordings, or CV algorithm inputs.
+
+### BBOX renderer regression
+
+The pure path builder in `VtrBoxGeometry.hpp` deduplicates vertices, closes solid
+perimeters explicitly, and centers dashed/dash-dot patterns on opposite sides.
+All contrast strokes are painted before colored strokes. The preview uses common
+photo margins and a larger illustrative search ROI. `vtr_box_geometry` checks
+17 style combinations at five sizes and two aspect ratios, including reflection
+symmetry, non-degenerate segments and bounds. SDL snapshots remain visual smoke
+tests; Vulkan pixel parity is not asserted.
