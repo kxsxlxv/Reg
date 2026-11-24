@@ -2215,7 +2215,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                 }
             }
             const bool vtrOpen = ImGui::BeginTabItem(
-                "VTR / OSD", nullptr, vtrFlags);
+                "OSD###VTR / OSD", nullptr, vtrFlags);
             if (ImGui::IsItemClicked()) {
                 app::setTelemetryPage(app::TelemetryPage::VtrLegend);
             }

@@ -169,3 +169,12 @@ No new Jetson code or network transport is introduced in this phase.
 Before freezing transport, benchmark standalone primitive workloads on the
 actual Jetson, recording CPU/GPU time, p95/p99, frame drops and memory copies.
 Do not silently claim complex style parity based on Reg SDL previews.
+
+### OSD editor layout and draft switching
+
+The OSD panel uses Russian UI labels (output IDs, TOML keys and domain acronyms
+are unchanged). Editor preview occupies full width above the controls. Switching
+outputs with a dirty draft requires an explicit Save / Discard / Cancel choice;
+failed saves do not switch. Reload is disabled while the draft is dirty. Label
+anchors use the snapped outer edge/corner stroke footprint including outline;
+detached external markers do not change the label anchor.

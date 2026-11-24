@@ -67,10 +67,8 @@ void rectangle(ImDrawList* d,const Box& style,ImVec2 a,ImVec2 b) {
     const Box s=boxgeom::adapted(style,std::max(0.0F,std::min(b.x-a.x,b.y-a.y)));
     // Snap the reference centerlines once, not individual vertices.
     // Odd integer widths use half-pixel centers; even use integer centers.
-    const float ref=s.stroke.pattern=="none"?s.cornerWidth:s.stroke.width;
-    const float offset=(static_cast<int>(std::round(ref))%2)?0.5F:0.0F;
-    const auto snap=[&](float x) { return std::round(x-offset)+offset; };
-    a={snap(a.x),snap(a.y)}; b={snap(b.x),snap(b.y)};
+    const auto sa=boxgeom::snapPoint(s,{a.x,a.y}),sb=boxgeom::snapPoint(s,{b.x,b.y});
+    a={sa.x,sa.y}; b={sb.x,sb.y};
     const float span=std::min(b.x-a.x,b.y-a.y);
     if(span<=0) return;
     const float radius=std::min(s.roundingPx,span*0.45F);
@@ -157,7 +155,8 @@ void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
     }
     const float width=std::min(availableW,size.x+2*pad);
     const float height=std::min(availableH,size.y+2*pad);
-    const float above=a.y-s.gapPx-height, below=b.y+s.gapPx;
+    const auto border=boxgeom::labelBounds(o.box,{a.x,a.y},{b.x,b.y});
+    const float above=border.top-s.gapPx-height, below=border.bottom+s.gapPx;
     const bool topFits=above>=min.y+1.0F;
     const bool bottomFits=below+height<=max.y-1.0F;
     float y=above;
@@ -166,7 +165,7 @@ void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
     else
         y=topFits?above:(bottomFits?below:a.y);
     y=std::clamp(y,min.y+1.0F,max.y-1.0F-height);
-    const float x=std::clamp(a.x,min.x+1.0F,max.x-1.0F-width);
+    const float x=std::clamp(border.left,min.x+1.0F,max.x-1.0F-width);
     const Color bg=s.boxBackground?o.box.stroke.color:s.background;
     const Color fg=s.autoColor?contrastingText(bg):s.color;
     const ImVec2 end{x+width,y+height};
@@ -246,7 +245,7 @@ void preview(ImDrawList* d,const Output& sample,ImVec2 min,ImVec2 max,
                     IM_COL32(255,255,255,255));
     } else {
         d->AddText({min.x+8,min.y+8},IM_COL32(255,115,100,255),
-                   "VTR photo unavailable");
+                   "Фото недоступно");
     }
 
     // The reference BBOX is a prior manually measured annotation, not GT
@@ -326,7 +325,7 @@ void preview(ImDrawList* d,const Output& sample,ImVec2 min,ImVec2 max,
                 rgba(o.osd.outlineColor,o.osd.outlineAlpha));
         d->AddCircleFilled(center,o.osd.pointRadiusPx,ink);
     } else if (geometry=="text") {
-        d->AddText(img(570,195),ink,"VTR TEXT");
+        d->AddText(img(570,195),ink,"ТЕКСТ OSD");
     }
     };
     if(layers) {
@@ -345,11 +344,29 @@ void drawBbox(ImDrawList* draw,const Box& style,ImVec2 min,ImVec2 max) {
 
 LegendPage drawLegend(Catalog& catalog, std::string& error,
                 const std::filesystem::path& path, bool selectPrimitives, bool selectEditor) {
-    ImGui::TextUnformatted("VTR  /  Vision To Reg");
+    // Draft is deliberately independent of the active catalogue. No changes
+    // reach disk or Outputs until Save succeeds. A reload invalidates drafts.
+    struct EditorState {
+        std::filesystem::path path;
+        std::uint64_t hash{};
+        int selected{-1};
+        int pending{-1};
+        Output draft;
+        bool dirty{},combined{};
+        int background{};
+        float zoom{1};
+        std::string status;
+    };
+    static EditorState editor;
+    if(editor.path!=path||editor.hash!=catalog.hash) {
+        editor=EditorState{};editor.path=path;editor.hash=catalog.hash;
+    }
+    ImGui::TextUnformatted("OSD");
     ImGui::SameLine();
-    ImGui::TextDisabled("  %zu выходов   |   hash: %s",
+    ImGui::TextDisabled("  %zu выходов   |   хеш: %s",
         catalog.outputs.size(), hashHex(catalog.hash).c_str());
     ImGui::SameLine();
+    ImGui::BeginDisabled(editor.dirty);
     if (ImGui::Button("Обновить TOML")) {
         try {
             auto next=readCatalog(path);
@@ -359,8 +376,9 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
             error=ex.what(); // Keep last valid catalogue visible.
         }
     }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Перечитать локальный config/vtr.toml. SSH не требуется.");
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip(editor.dirty?"Сначала сохраните или отмените правки в редакторе.":"Перечитать локальный config/vtr.toml.");
     if (!error.empty())
         ImGui::TextColored({1.0F,0.43F,0.35F,1.0F},"Ошибка: %s",error.c_str());
     ImGui::Separator();
@@ -377,25 +395,25 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         Box base; base.stroke.color={0.30F,0.86F,0.78F};
         base.fill=base.stroke.color; base.stroke.width=2.0F;
         base.cornerWidth=4.0F; base.cornerPx=17.0F;
-        Box s=base; add("Solid",s);
-        s=base; s.stroke.pattern="dashed"; add("Dashed",s);
-        s=base; s.stroke.pattern="dash_dot"; add("Dash-dot",s);
-        s=base; s.stroke.pattern="none"; s.corners="solid"; add("Corners",s);
+        Box s=base; add("Сплошная",s);
+        s=base; s.stroke.pattern="dashed"; add("Пунктир",s);
+        s=base; s.stroke.pattern="dash_dot"; add("Штрихпунктир",s);
+        s=base; s.stroke.pattern="none"; s.corners="solid"; add("Углы",s);
         s=base; s.stroke.pattern="dashed"; s.stroke.width=1.5F;
-        s.corners="solid"; add("Corners + dashed",s);
-        s=base; s.stroke.width=1.0F; s.corners="solid"; add("Corners + thin edges",s);
+        s.corners="solid"; add("Углы + пунктир",s);
+        s=base; s.stroke.width=1.0F; s.corners="solid"; add("Углы + тонкие грани",s);
         s=base; s.stroke.pattern="none"; s.corners="solid"; s.cornerLayers=2;
-        s.cornerWidth=2.0F; add("Double corners",s);
-        s=base; s.stroke.width=1.5F; s.edgeMarkers="outside"; add("External markers",s);
-        s=base; s.stroke.width=1.0F; s.edgeMarkers="center"; s.markerPx=18.0F; s.markerWidth=4.0F; add("Mid-edge markers",s);
-        s=base; s.frameLayers=2; s.stroke.width=1.5F; add("Double frame",s);
-        s=base; s.stroke.pattern="none"; s.fillAlpha=0.24F; add("Fill only",s);
+        s.cornerWidth=2.0F; add("Двойные углы",s);
+        s=base; s.stroke.width=1.5F; s.edgeMarkers="outside"; add("Внешние маркеры",s);
+        s=base; s.stroke.width=1.0F; s.edgeMarkers="center"; s.markerPx=18.0F; s.markerWidth=4.0F; add("Маркеры по центру",s);
+        s=base; s.frameLayers=2; s.stroke.width=1.5F; add("Двойная рамка",s);
+        s=base; s.stroke.pattern="none"; s.fillAlpha=0.24F; add("Только заливка",s);
         s=base; s.stroke.pattern="none"; s.fillAlpha=0.16F; s.corners="solid";
-        add("Fill + corners",s);
-        s=base; s.diagonals="solid"; s.diagonalWidth=1.5F; add("Frame + diagonals",s);
+        add("Заливка + углы",s);
+        s=base; s.diagonals="solid"; s.diagonalWidth=1.5F; add("Рамка + диагонали",s);
         s=base; s.stroke.pattern="dashed"; s.diagonals="dashed";
-        s.diagonalWidth=1.5F; add("Dashed + diagonals",s);
-        s=base; s.roundingPx=9.0F; add("Rounded",s);
+        s.diagonalWidth=1.5F; add("Пунктир + диагонали",s);
+        s=base; s.roundingPx=9.0F; add("Скруглённая",s);
         for(const char* kind:{"line","arrow","polyline","polygon","circle","ellipse","point","text","mask","heatmap"}) {
             Output o;o.id=static_cast<std::uint16_t>(samples.size()+1);o.key=kind;o.geometry=kind;
             o.osd.stroke.color=base.stroke.color;o.osd.stroke.width=2;o.osd.alpha=1;
@@ -406,6 +424,37 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         return samples;
     };
     static const auto samples=primitives();
+    const auto localized=[](std::string_view value)->const char* {
+        if(value=="none") return "Нет";
+        if(value=="solid") return "Сплошная";
+        if(value=="dashed") return "Пунктир";
+        if(value=="dash_dot") return "Штрихпунктир";
+        if(value=="center") return "По центру";
+        if(value=="outside") return "Снаружи";
+        if(value=="top_left_outside") return "Сверху слева";
+        if(value=="bottom_left_outside") return "Снизу слева";
+        if(value=="line") return "Линия";
+        if(value=="arrow") return "Стрелка";
+        if(value=="polyline") return "Полилиния";
+        if(value=="polygon") return "Полигон";
+        if(value=="circle") return "Окружность";
+        if(value=="ellipse") return "Эллипс";
+        if(value=="point") return "Точка";
+        if(value=="text") return "Текст";
+        if(value=="mask") return "Маска";
+        if(value=="heatmap") return "Тепловая карта";
+        if(value=="bbox") return "BBOX";
+        if(value=="detection") return "Детекция";
+        if(value=="tracking") return "Трекинг";
+        if(value=="propagation") return "Пропагация";
+        if(value=="prediction") return "Прогноз";
+        if(value=="sky") return "Небо";
+        if(value=="motion") return "Движение";
+        if(value=="contour") return "Контур";
+        if(value=="rejected") return "Отклонено";
+        if(value=="search_region") return "Область поиска";
+        return nullptr;
+    };
     const auto gallery=[&](const std::vector<Output>& outputs,bool library) {
         if (ImGui::BeginChild("##vtr-scroll",ImVec2(0,0),ImGuiChildFlags_None)) {
             const int columns=ImGui::GetContentRegionAvail().x>=840.0F?2:1;
@@ -424,16 +473,17 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
                         preview(ImGui::GetWindowDrawList(),o,p,{p.x+pw,p.y+previewHeight});
                         if(!stacked) ImGui::SameLine(0,12.0F);
                         ImGui::BeginGroup();
-                        if(library) ImGui::TextUnformatted(o.key.c_str());
+                        if(library) ImGui::TextUnformatted(localized(o.key)?localized(o.key):o.key.c_str());
                         else {
                             ImGui::Text("#%u  %s",static_cast<unsigned>(o.id),o.key.c_str());
                             ImGui::TextColored({0.72F,0.78F,0.85F,1.0F},
-                                "%s / %s",o.semantic.c_str(),o.geometry.c_str());
-                            if(!o.visible) ImGui::TextDisabled("Hidden in composite");
-                            ImGui::TextDisabled("Details");
+                                "%s / %s",localized(o.semantic)?localized(o.semantic):o.semantic.c_str(),
+                                localized(o.geometry)?localized(o.geometry):o.geometry.c_str());
+                            if(!o.visible) ImGui::TextDisabled("Скрыт в общих слоях");
+                            ImGui::TextDisabled("Подробности");
                             if(ImGui::IsItemHovered())
-                                ImGui::SetTooltip("GT: %s\\nLabel: %s",o.benchmark.c_str(),
-                                                 o.label.show?"ON":"OFF");
+                                ImGui::SetTooltip("GT: %s\nЛейбл: %s",o.benchmark.c_str(),
+                                                 o.label.show?"Вкл.":"Выкл.");
                         }
                         ImGui::EndGroup();
                     }
@@ -444,83 +494,88 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         }
         ImGui::EndChild();
     };
-    // Draft is deliberately independent of the active catalogue. No changes
-    // reach disk or Outputs until Save succeeds. A reload invalidates drafts.
-    struct EditorState {
-        std::filesystem::path path;
-        std::uint64_t hash{};
-        int selected{-1};
-        Output draft;
-        bool dirty{},combined{};
-        int background{};
-        float zoom{1};
-        std::string status;
-    };
-    static EditorState editor;
     auto editorPage=[&]() {
         if(editor.path!=path||editor.hash!=catalog.hash) {
             editor=EditorState{};editor.path=path;editor.hash=catalog.hash;
         }
-        if(catalog.outputs.empty()) { ImGui::TextUnformatted("Load a VTR catalogue first.");return; }
+        if(catalog.outputs.empty()) { ImGui::TextUnformatted("Сначала загрузите каталог OSD.");return; }
         auto select=[&](int index) {
             editor.selected=index;editor.draft=catalog.outputs[static_cast<std::size_t>(index)];
             editor.dirty=false;editor.status.clear();
         };
         if(editor.selected<0||editor.selected>=static_cast<int>(catalog.outputs.size())) select(0);
         ImGui::SetNextItemWidth(std::min(340.0F,ImGui::GetContentRegionAvail().x));
-        if(ImGui::BeginCombo("Output",editor.draft.key.c_str())) {
+        if(ImGui::BeginCombo("Выход",editor.draft.key.c_str())) {
             for(int i=0;i<static_cast<int>(catalog.outputs.size());++i) {
                 if(ImGui::Selectable(catalog.outputs[static_cast<std::size_t>(i)].key.c_str(),i==editor.selected)
                     &&i!=editor.selected) {
-                    if(editor.dirty) editor.status="Save or discard the draft before selecting another output.";
+                    if(editor.dirty) editor.pending=i;
                     else select(i);
                 }
             }
             ImGui::EndCombo();
         }
         auto& o=editor.draft;
-        ImGui::BeginDisabled(!editor.dirty);
-        if(ImGui::Button("Save TOML")) {
+        auto save=[&]() {
             try {
                 catalog=saveOutputStyle(path,editor.hash,o);
                 editor.hash=catalog.hash;
                 editor.draft=catalog.outputs[static_cast<std::size_t>(editor.selected)];
-                editor.dirty=false;editor.status="Saved. Original: vtr.toml.bak";error.clear();
-            } catch(const std::exception& ex) { editor.status=ex.what(); }
+                editor.dirty=false;editor.status="Сохранено. Копия: vtr.toml.bak";error.clear();
+                return true;
+            } catch(const std::exception& ex) {editor.status=ex.what();return false;}
+        };
+        if(editor.pending>=0&&!ImGui::IsPopupOpen("Несохранённые изменения###osd-switch"))
+            ImGui::OpenPopup("Несохранённые изменения###osd-switch");
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),ImGuiCond_Appearing,{0.5F,0.5F});
+        if(ImGui::BeginPopupModal("Несохранённые изменения###osd-switch",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Есть несохранённые изменения: %s",o.key.c_str());
+            ImGui::TextUnformatted("Сохранить перед переключением?");
+            if(!editor.status.empty()) ImGui::TextWrapped("%s",editor.status.c_str());
+            if(ImGui::Button("Сохранить")) {
+                if(save()) {const int next=editor.pending;editor.pending=-1;select(next);ImGui::CloseCurrentPopup();}
+            }
+            ImGui::SameLine();
+            if(ImGui::Button("Не сохранять")) {
+                const int next=editor.pending;editor.pending=-1;select(next);ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if(ImGui::Button("Отмена")) {editor.pending=-1;ImGui::CloseCurrentPopup();}
+            ImGui::EndPopup();
         }
+        ImGui::BeginDisabled(!editor.dirty);
+        if(ImGui::Button("Сохранить TOML")) save();
         ImGui::SameLine();
-        if(ImGui::Button("Discard changes")) select(editor.selected);
+        if(ImGui::Button("Отменить правки")) select(editor.selected);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if(ImGui::Button("Factory style")) {
+        if(ImGui::Button("Заводской стиль")) {
             try {
                 const auto factory=factoryCatalog();
                 const auto found=std::find_if(factory.outputs.begin(),factory.outputs.end(),[&](const auto& f){
                     return f.id==o.id&&f.key==o.key&&f.geometry==o.geometry;
                 });
-                if(found==factory.outputs.end()) editor.status="No factory style for custom output.";
+                if(found==factory.outputs.end()) editor.status="Для пользовательского выхода нет заводского стиля.";
                 else {
                     o.box=found->box;o.osd=found->osd;o.label=found->label;
                     o.visible=found->visible;o.zOrder=found->zOrder;
-                    editor.dirty=true;editor.status="Factory style loaded into draft. Save to apply.";
+                    editor.dirty=true;editor.status="Заводской стиль загружен. Сохраните для применения.";
                 }
             } catch(const std::exception& ex) {editor.status=ex.what();}
         }
-        if(editor.dirty) {ImGui::SameLine();ImGui::TextDisabled("Unsaved");}
+        if(editor.dirty) {ImGui::SameLine();ImGui::TextDisabled("Не сохранено");}
         if(!editor.status.empty()) ImGui::TextWrapped("%s",editor.status.c_str());
         ImGui::Separator();
-        const float width=ImGui::GetContentRegionAvail().x;
-        const bool wide=width>=760.0F;
-        const float previewWidth=wide?std::min(460.0F,width*0.52F):width;
+        // Preview uses the full panel width, controls scroll below it.
         auto previewPane=[&] {
-            ImGui::TextUnformatted("Live preview");
+            ImGui::TextUnformatted("Предпросмотр");
             ImGui::SetNextItemWidth(120);
-            ImGui::Combo("Background",&editor.background,"Photo\0Light\0Dark\0");
+            ImGui::Combo("Фон",&editor.background,"Фото\0Светлый\0Тёмный\0");
             ImGui::SetNextItemWidth(std::min(240.0F,ImGui::GetContentRegionAvail().x));
-            ImGui::SliderFloat("Object scale",&editor.zoom,0.08F,1.0F,"%.2fx");
-            ImGui::Checkbox("Composite layers",&editor.combined);
+            ImGui::SliderFloat("Масштаб объекта",&editor.zoom,0.08F,1.0F,"%.2fx");
+            ImGui::Checkbox("Все слои",&editor.combined);
             const float pw=ImGui::GetContentRegionAvail().x;
-            const float ph=std::min(300.0F,std::max(165.0F,pw*0.67F));
+            const float ph=std::max(150.0F,std::min(pw*0.57F+38.0F,ImGui::GetContentRegionAvail().y*0.60F));
             const auto p=ImGui::GetCursorScreenPos();
             ImGui::InvisibleButton("##live",{pw,ph});
             std::vector<Output> layers;
@@ -530,9 +585,9 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
             }
             preview(ImGui::GetWindowDrawList(),o,p,{p.x+pw,p.y+ph},
                     editor.background,editor.zoom,editor.combined?&layers:nullptr);
-            ImGui::TextDisabled("Illustrative OSD / no live inference");
+            ImGui::TextDisabled("Демонстрация OSD");
             if(o.geometry=="bbox") {
-                ImGui::TextUnformatted("Small objects (display pixels)");
+                ImGui::TextUnformatted("Малые BBOX (px)");
                 const auto a=ImGui::GetCursorScreenPos();
                 const float available=ImGui::GetContentRegionAvail().x;
                 ImGui::Dummy({available,112});
@@ -562,8 +617,12 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
                 }
             };
             auto choose=[&](const char* name,std::string& value,const std::vector<const char*>& options) {
-                if(ImGui::BeginCombo(name,value.c_str())) {
-                    for(const char* v:options) if(ImGui::Selectable(v,value==v)) {value=v;editor.dirty=true;}
+                if(ImGui::BeginCombo(name,localized(value)?localized(value):value.c_str())) {
+                    for(const char* v:options) {
+                        ImGui::PushID(v);
+                        if(ImGui::Selectable(localized(v)?localized(v):v,value==v)) {value=v;editor.dirty=true;}
+                        ImGui::PopID();
+                    }
                     ImGui::EndCombo();
                 }
             };
@@ -571,41 +630,41 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
             auto optionalColor=[&](const char* name,std::optional<Color>& color,Color inherited) {
                 ImGui::PushID(name);
                 bool custom=color.has_value();
-                if(ImGui::Checkbox("Custom color",&custom)) {
+                if(ImGui::Checkbox("Свой цвет",&custom)) {
                     if(custom) color=inherited; else color.reset();
                     editor.dirty=true;
                 }
                 if(color) colorEdit(name,*color);
                 ImGui::PopID();
             };
-            edit(ImGui::Checkbox("Visible",&o.visible));
-            edit(ImGui::SliderInt("Z order",&o.zOrder,-1000,1000));
+            edit(ImGui::Checkbox("Видимость",&o.visible));
+            edit(ImGui::SliderInt("Порядок слоёв",&o.zOrder,-1000,1000));
             if(o.geometry!="bbox") {
-                colorEdit("Color",o.osd.stroke.color);
-                slider("Opacity",o.osd.alpha,0,1,"%.2f");
-                slider("Width",o.osd.stroke.width,0.5F,16);
-                pattern("Pattern",o.osd.stroke.pattern);
+                colorEdit("Цвет",o.osd.stroke.color);
+                slider("Непрозрачность",o.osd.alpha,0,1,"%.2f");
+                slider("Толщина",o.osd.stroke.width,0.5F,16);
+                pattern("Тип линии",o.osd.stroke.pattern);
                 if(o.geometry=="line"||o.geometry=="arrow"||o.geometry=="polyline"||
                    o.geometry=="polygon"||o.geometry=="circle"||o.geometry=="ellipse") {
-                    slider("Dash px (0=auto)",o.osd.dashPx,0,64);
-                    slider("Gap px (0=auto)",o.osd.gapPx,0,32);
-                    slider("Dot px (0=auto)",o.osd.dotPx,0,16);
+                    slider("Штрих, px (0 = авто)",o.osd.dashPx,0,64);
+                    slider("Интервал, px (0 = авто)",o.osd.gapPx,0,32);
+                    slider("Точка, px (0 = авто)",o.osd.dotPx,0,16);
                 }
                 if(o.geometry!="mask"&&o.geometry!="heatmap"&&o.geometry!="text") {
-                    colorEdit("Outline color",o.osd.outlineColor);
-                    slider("Outline width",o.osd.outlineWidth,0,8);
-                    slider("Outline opacity",o.osd.outlineAlpha,0,1,"%.2f");
+                    colorEdit("Цвет обводки",o.osd.outlineColor);
+                    slider("Толщина обводки",o.osd.outlineWidth,0,8);
+                    slider("Непрозрачность обводки",o.osd.outlineAlpha,0,1,"%.2f");
                 }
                 if(o.geometry=="polygon"||o.geometry=="circle"||o.geometry=="ellipse") {
-                    optionalColor("Fill color",o.osd.fill,o.osd.stroke.color);
-                    slider("Fill opacity",o.osd.fillAlpha,0,1,"%.2f");
+                    optionalColor("Цвет заливки",o.osd.fill,o.osd.stroke.color);
+                    slider("Непрозрачность заливки",o.osd.fillAlpha,0,1,"%.2f");
                 }
-                if(o.geometry=="point") slider("Point radius",o.osd.pointRadiusPx,1,64);
-                if(o.geometry=="arrow") slider("Arrow head",o.osd.arrowHeadPx,2,64);
+                if(o.geometry=="point") slider("Радиус точки",o.osd.pointRadiusPx,1,64);
+                if(o.geometry=="arrow") slider("Наконечник стрелки",o.osd.arrowHeadPx,2,64);
                 return;
             }
             auto& b=o.box;
-            if(ImGui::BeginCombo("Preset","Apply BBOX geometry")) {
+            if(ImGui::BeginCombo("Шаблон","Выбрать геометрию BBOX")) {
                 for(const auto& p:samples) if(p.geometry=="bbox"&&ImGui::Selectable(p.key.c_str())) {
                     const Box old=b;
                     b=p.box;b.stroke.color=old.stroke.color;b.fill=old.fill;
@@ -618,80 +677,80 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
                 }
                 ImGui::EndCombo();
             }
-            edit(ImGui::Checkbox("Adaptive small BBOX",&b.adaptive));
-            if(ImGui::CollapsingHeader("Outline",ImGuiTreeNodeFlags_DefaultOpen)) {
-                colorEdit("Outline color",b.outlineColor);
-                slider("Outline width",b.outlineWidth,0,8);
-                slider("Outline opacity",b.outlineAlpha,0,1,"%.2f");
+            edit(ImGui::Checkbox("Адаптация малых BBOX",&b.adaptive));
+            if(ImGui::CollapsingHeader("Обводка",ImGuiTreeNodeFlags_DefaultOpen)) {
+                colorEdit("Цвет обводки",b.outlineColor);
+                slider("Толщина обводки",b.outlineWidth,0,8);
+                slider("Непрозрачность обводки",b.outlineAlpha,0,1,"%.2f");
             }
-            if(ImGui::CollapsingHeader("Edges and dash pattern",ImGuiTreeNodeFlags_DefaultOpen)) {
-                colorEdit("Edge color",b.stroke.color);pattern("Edges",b.stroke.pattern);
-                slider("Edge width",b.stroke.width,0.5F,16);
-                slider("Edge opacity",b.edgeAlpha,0,1,"%.2f");
-                slider("Dash px (0=auto)",b.dashPx,0,64);
-                slider("Gap px (0=auto)",b.gapPx,0,32);
-                slider("Dot px (0=auto)",b.dotPx,0,16);
+            if(ImGui::CollapsingHeader("Грани и пунктир",ImGuiTreeNodeFlags_DefaultOpen)) {
+                colorEdit("Цвет граней",b.stroke.color);pattern("Грани",b.stroke.pattern);
+                slider("Толщина граней",b.stroke.width,0.5F,16);
+                slider("Непрозрачность граней",b.edgeAlpha,0,1,"%.2f");
+                slider("Штрих, px (0 = авто)",b.dashPx,0,64);
+                slider("Интервал, px (0 = авто)",b.gapPx,0,32);
+                slider("Точка, px (0 = авто)",b.dotPx,0,16);
             }
-            if(ImGui::CollapsingHeader("Corners and layers")) {
-                pattern("Corners",b.corners);optionalColor("Corner color",b.cornerColor,b.stroke.color);
-                slider("Corner width",b.cornerWidth,0.5F,16);slider("Corner length",b.cornerPx,1,200);
-                slider("Corner opacity",b.cornerAlpha,0,1,"%.2f");
-                edit(ImGui::SliderInt("Corner layers",&b.cornerLayers,1,2));
-                edit(ImGui::SliderInt("Frame layers",&b.frameLayers,1,2));
-                slider("Layer gap",b.layerGapPx,1,24);
-                slider("Rounding",b.roundingPx,0,100);
+            if(ImGui::CollapsingHeader("Углы и контуры")) {
+                pattern("Углы",b.corners);optionalColor("Цвет углов",b.cornerColor,b.stroke.color);
+                slider("Толщина углов",b.cornerWidth,0.5F,16);slider("Длина углов",b.cornerPx,1,200);
+                slider("Непрозрачность углов",b.cornerAlpha,0,1,"%.2f");
+                edit(ImGui::SliderInt("Слои углов",&b.cornerLayers,1,2));
+                edit(ImGui::SliderInt("Слои рамки",&b.frameLayers,1,2));
+                slider("Интервал слоёв",b.layerGapPx,1,24);
+                slider("Скругление",b.roundingPx,0,100);
             }
-            if(ImGui::CollapsingHeader("Markers, diagonals and fill")) {
-                choose("Markers",b.edgeMarkers,{"none","center","outside"});
-                optionalColor("Marker color",b.markerColor,b.stroke.color);
-                slider("Marker width",b.markerWidth,0.5F,16);slider("Marker length",b.markerPx,1,200);
-                slider("Marker opacity",b.markerAlpha,0,1,"%.2f");
-                pattern("Diagonals",b.diagonals);slider("Diagonal width",b.diagonalWidth,0.5F,16);
-                colorEdit("Fill color",b.fill);slider("Fill opacity",b.fillAlpha,0,1,"%.2f");
+            if(ImGui::CollapsingHeader("Маркеры, диагонали, заливка")) {
+                choose("Маркеры",b.edgeMarkers,{"none","center","outside"});
+                optionalColor("Цвет маркеров",b.markerColor,b.stroke.color);
+                slider("Толщина маркеров",b.markerWidth,0.5F,16);slider("Длина маркеров",b.markerPx,1,200);
+                slider("Непрозрачность маркеров",b.markerAlpha,0,1,"%.2f");
+                pattern("Диагонали",b.diagonals);slider("Толщина диагоналей",b.diagonalWidth,0.5F,16);
+                colorEdit("Цвет заливки",b.fill);slider("Непрозрачность заливки",b.fillAlpha,0,1,"%.2f");
             }
-            if(ImGui::CollapsingHeader("Label")) {
+            if(ImGui::CollapsingHeader("Лейбл")) {
                 auto& a=o.label;
-                edit(ImGui::Checkbox("Show label",&a.show));
+                edit(ImGui::Checkbox("Показать лейбл",&a.show));
                 std::array<char,129> buf{};
                 std::snprintf(buf.data(),buf.size(),"%s",a.text.c_str());
-                if(ImGui::InputText("Template",buf.data(),buf.size())) {a.text=buf.data();editor.dirty=true;}
-                choose("Placement",a.place,{"top_left_outside","bottom_left_outside"});
-                edit(ImGui::Checkbox("Auto text contrast",&a.autoColor));
-                if(!a.autoColor) colorEdit("Text color",a.color);
-                edit(ImGui::Checkbox("Use box background",&a.boxBackground));
-                if(!a.boxBackground) colorEdit("Background color",a.background);
-                slider("Background opacity",a.backgroundAlpha,0,1,"%.2f");
-                slider("Font px",a.fontPx,8,48);
-                slider("Padding px",a.paddingPx,0,24);
-                slider("Label gap",a.gapPx,0,24);
-                slider("Label rounding",a.roundingPx,0,24);
-                slider("Max width (0=auto)",a.maxWidthPx,0,2048,"%.0f");
+                if(ImGui::InputText("Шаблон текста",buf.data(),buf.size())) {a.text=buf.data();editor.dirty=true;}
+                choose("Положение",a.place,{"top_left_outside","bottom_left_outside"});
+                edit(ImGui::Checkbox("Автоконтраст текста",&a.autoColor));
+                if(!a.autoColor) colorEdit("Цвет текста",a.color);
+                edit(ImGui::Checkbox("Фон цвета BBOX",&a.boxBackground));
+                if(!a.boxBackground) colorEdit("Цвет фона",a.background);
+                slider("Непрозрачность фона",a.backgroundAlpha,0,1,"%.2f");
+                slider("Шрифт, px",a.fontPx,8,48);
+                slider("Поля, px",a.paddingPx,0,24);
+                slider("Отступ лейбла",a.gapPx,0,24);
+                slider("Скругление лейбла",a.roundingPx,0,24);
+                slider("Макс. ширина (0 = авто)",a.maxWidthPx,0,2048,"%.0f");
             }
         };
-        if(wide) {
-            if(ImGui::BeginChild("##editor-preview",{previewWidth,0},ImGuiChildFlags_Borders)) previewPane();
-            ImGui::EndChild();ImGui::SameLine();
-            if(ImGui::BeginChild("##editor-controls",{0,0},ImGuiChildFlags_Borders)) controls();
-            ImGui::EndChild();
-        } else {
-            if(ImGui::BeginChild("##editor-scroll",{0,0})) {previewPane();controls();}
-            ImGui::EndChild();
+        if(ImGui::BeginChild("##editor-scroll",{0,0})) {
+            previewPane();
+            ImGui::Separator();
+            ImGui::PushID(static_cast<int>(o.id));
+            ImGui::SetNextItemWidth(-1);
+            controls();
+            ImGui::PopID();
         }
+        ImGui::EndChild();
     };
     LegendPage visible=LegendPage::None;
     if(ImGui::BeginTabBar("##vtr-gallery")) {
-        if(ImGui::BeginTabItem("Outputs")) {
+        if(ImGui::BeginTabItem("Выходы###Outputs")) {
             visible=LegendPage::Outputs;
             gallery(catalog.outputs,false);
             ImGui::EndTabItem();
         }
-        if(ImGui::BeginTabItem("Primitives",nullptr,
+        if(ImGui::BeginTabItem("Примитивы###Primitives",nullptr,
             selectPrimitives?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) {
             visible=LegendPage::Primitives;
             gallery(samples,true);
             ImGui::EndTabItem();
         }
-        if(ImGui::BeginTabItem("Editor",nullptr,
+        if(ImGui::BeginTabItem("Редактор###Editor",nullptr,
             selectEditor?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) {
             visible=LegendPage::Editor;
             editorPage();

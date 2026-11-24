@@ -55,6 +55,15 @@ void testPixelRects() {
 int main() {
     try {
         testPixelRects();
+        Box labelBox;labelBox.stroke.width=4;labelBox.outlineWidth=1;
+        auto bounds=labelBounds(labelBox,{20,30},{100,90});
+        require(bounds.left==17&&bounds.top==27&&bounds.bottom==93,"Label must follow outer stroke");
+        labelBox.stroke.width=1;labelBox.outlineWidth=0;
+        bounds=labelBounds(labelBox,{20.5F,30.5F},{100.5F,90.5F});
+        require(bounds.left==20&&bounds.top==30&&bounds.bottom==91,"Odd-width label alignment");
+        labelBox.stroke.pattern="none";labelBox.corners="solid";labelBox.cornerWidth=8;
+        bounds=labelBounds(labelBox,{20,30},{100,90});
+        require(bounds.left==16&&bounds.top==26,"Corner-only label alignment");
         Box adaptive;adaptive.adaptive=true;adaptive.cornerWidth=8;adaptive.cornerPx=40;
         const auto small=adapted(adaptive,16);
         require(small.cornerWidth<=2&&small.cornerPx<=5,"Small BBOX adaptation failed");

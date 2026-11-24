@@ -114,6 +114,34 @@ inline Box adapted(Box s,float span) {
     s.roundingPx=std::min(s.roundingPx,span*0.20F);
     return s;
 }
+struct LabelBounds { float left{},top{},bottom{}; };
+// Match the renderer's reference centerline snap and the integer raster
+// footprint of outer edge/corner strokes. External markers are intentionally
+// excluded: a label belongs to the main box, not to detached decorations.
+inline Point snapPoint(const Box& s,Point p) {
+    const float ref=s.stroke.pattern=="none"?s.cornerWidth:s.stroke.width;
+    const float offset=(static_cast<int>(std::round(ref))%2)?0.5F:0.0F;
+    return {std::round(p.x-offset)+offset,std::round(p.y-offset)+offset};
+}
+inline LabelBounds labelBounds(const Box& style,Point a,Point b) {
+    const Box s=adapted(style,std::max(0.0F,std::min(b.x-a.x,b.y-a.y)));
+    a=snapPoint(s,a);b=snapPoint(s,b);
+    float width=0;
+    if(s.stroke.pattern!="none"&&s.edgeAlpha>0) width=s.stroke.width;
+    if(s.corners!="none"&&s.cornerAlpha>0) width=std::max(width,s.cornerWidth);
+    if(width<=0) return {a.x,a.y,b.y};
+    if(s.outlineAlpha>0) width+=2*s.outlineWidth;
+    const float thick=std::max(1.0F,std::round(width));
+    const auto low=[&](float x){return std::floor(x-thick*0.5F+0.5F);};
+    if(s.roundingPx>0) {
+        // Curves use geometric AA; take the conservative union with the
+        // orthogonal footprint where a rounded frame has straight sides.
+        return {std::min(low(a.x),a.x-width*0.5F),
+            std::min(low(a.y),a.y-width*0.5F),
+            std::max(low(b.y)+thick,b.y+width*0.5F)};
+    }
+    return {low(a.x),low(a.y),low(b.y)+thick};
+}
 inline Lines build(const Box& style,Point a,Point b) {
     Lines lines;
     const float w=b.x-a.x,h=b.y-a.y,span=std::min(w,h);
