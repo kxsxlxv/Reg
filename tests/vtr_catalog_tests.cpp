@@ -83,6 +83,25 @@ int main() {
         rejected=std::string(ex.what()).find("expected 1 or 2: corner_layers")!=std::string::npos;
     }
     require(rejected,"Invalid corner_layers must be rejected by the catalogue validator");
+    require(styled.box.outlineAlpha==1.0F&&
+            styled.box.outlineColor.r==12.0F/255.0F&&
+            styled.box.outlineColor.g==16.0F/255.0F&&
+            styled.box.outlineColor.b==20.0F/255.0F,
+            "Legacy outline defaults changed");
+    write(tmp,"format=1\n[output.a]\nid=1\nsemantic='detection'\ngeometry='bbox'\n"
+              "box={outline_width=2,outline_color='#FF0080',outline_alpha=0.5}\n");
+    const auto outline=readCatalog(tmp).outputs.at(0).box;
+    require(outline.outlineWidth==2&&outline.outlineAlpha==0.5F&&
+        outline.outlineColor.r==1&&outline.outlineColor.g==0&&
+        outline.outlineColor.b==128.0F/255.0F,"Outline style parse failed");
+    for(const char* value:{"outline_alpha=1.01","outline_alpha=-0.1","outline_color='black'"}) {
+        const std::string fixture="format=1\n[output.a]\nid=1\nsemantic='detection'\ngeometry='bbox'\nbox={"+
+            std::string(value)+"}\n";
+        write(tmp,fixture.c_str());
+        rejected=false;
+        try { (void)readCatalog(tmp); } catch(const std::exception&) { rejected=true; }
+        require(rejected,"Invalid outline style accepted");
+    }
     std::filesystem::remove(tmp);
     std::cout<<"VTR TOML catalogue: PASS\n";
 }

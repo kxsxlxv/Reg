@@ -97,6 +97,8 @@ void readBox(const toml::table& t, Box& out) {
     out.markerPx = bounded(t, "marker_px", out.markerPx, 1.0F, 200.0F);
     out.roundingPx = bounded(t, "rounding_px", out.roundingPx, 0.0F, 100.0F);
     out.outlineWidth = bounded(t, "outline_width", out.outlineWidth, 0.0F, 8.0F);
+    out.outlineColor = color(t, "outline_color", out.outlineColor);
+    out.outlineAlpha = bounded(t, "outline_alpha", out.outlineAlpha, 0.0F, 1.0F);
     out.corners = pattern(t, "corners", "none");
     out.diagonals = pattern(t, "diagonals", "none");
     out.cornerPx = bounded(t, "corner_px", out.cornerPx, 1.0F, 200.0F);

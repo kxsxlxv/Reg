@@ -30,7 +30,9 @@ struct Box {
     float markerWidth{3.0F};
     float markerPx{12.0F};
     float roundingPx{0.0F};
-    float outlineWidth{0.0F}; // extra dark border on each side
+    float outlineWidth{0.0F}; // extra border on each side
+    Color outlineColor{12.0F/255.0F,16.0F/255.0F,20.0F/255.0F};
+    float outlineAlpha{1.0F};
     Color fill{};
     float fillAlpha{0.0F};
 };

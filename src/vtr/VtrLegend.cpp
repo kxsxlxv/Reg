@@ -77,9 +77,38 @@ void rectangle(ImDrawList* d,const Box& s,ImVec2 a,ImVec2 b) {
     const auto lines=boxgeom::build(s,{a.x,a.y},{b.x,b.y});
     // One complete underlay pass, then one complete color pass. Underlays
     // must never erase an adjacent colored edge/corner/marker.
-    if(s.outlineWidth>0)
-        for(const auto& line:lines)
-            paintLine(d,line,IM_COL32(12,16,20,255),line.width+2*s.outlineWidth);
+    if(s.outlineWidth>0&&s.outlineAlpha>0) {
+        const float extra=2*s.outlineWidth;
+        const auto ink=rgba(s.outlineColor,s.outlineAlpha);
+        if(s.outlineAlpha>=1.0F) {
+            // Preserve the established opaque renderer and its fast path.
+            for(const auto& line:lines) paintLine(d,line,ink,line.width+extra);
+        } else if(std::all_of(lines.begin(),lines.end(),boxgeom::orthogonal)) {
+            std::vector<boxgeom::PixelRect> pieces;
+            for(const auto& line:lines) {
+                auto rects=boxgeom::rawPixelRects(line,line.width+extra);
+                pieces.insert(pieces.end(),rects.begin(),rects.end());
+            }
+            // Union across ALL components, not only each path.
+            for(const auto& r:boxgeom::unionRects(pieces))
+                d->AddRectFilled({float(r.x0),float(r.y0)},{float(r.x1),float(r.y1)},ink);
+        } else {
+            // Bound CPU coverage to the visible bbox + maximum stroke extent.
+            const float pad=2*(std::max({s.stroke.width,s.cornerWidth,
+                s.markerWidth,s.diagonalWidth})+extra)+s.layerGapPx+s.markerPx+3;
+            const auto lo=d->GetClipRectMin(),hi=d->GetClipRectMax();
+            const boxgeom::PixelRect clip{
+                int(std::floor(std::max(lo.x,a.x-pad))),
+                int(std::floor(std::max(lo.y,a.y-pad))),
+                int(std::ceil(std::min(hi.x,b.x+pad))),
+                int(std::ceil(std::min(hi.y,b.y+pad)))};
+            boxgeom::mixedCoverage(lines,extra,clip,[&](boxgeom::CoverageRun run) {
+                d->AddRectFilled({float(run.x0),float(run.y)},
+                    {float(run.x1),float(run.y+1)},
+                    rgba(s.outlineColor,s.outlineAlpha*float(run.samples)/16.0F));
+            });
+        }
+    }
     for(const auto& line:lines) paintLine(d,line,rgba(s.stroke.color),line.width);
 }
 void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,

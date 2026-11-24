@@ -10,6 +10,7 @@
 #include <imgui_impl_sdlrenderer3.h>
 
 #include <cstdio>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -74,6 +75,18 @@ int main(int argc,char** argv) {
                     box.cornerWidth=static_cast<float>(n);box.cornerPx=16;
                     reg::vtr::drawBbox(draw,box,{x,y+100},{x+64,y+164});
                 }
+                // Red 50% underlay on a green frame/markers, including
+                // their overlapping spans; then a mixed diagonal crossing.
+                reg::vtr::Box box;
+                box.stroke.color={0,1,0};box.stroke.width=2;
+                box.outlineWidth=2;box.outlineColor={1,0,0};box.outlineAlpha=0.5F;
+                box.edgeMarkers="center";box.markerWidth=4;box.markerPx=16;
+                reg::vtr::drawBbox(draw,box,{500,300},{564,364});
+                box.stroke.pattern="none";box.edgeMarkers="none";
+                box.diagonals="solid";box.diagonalWidth=2;
+                reg::vtr::drawBbox(draw,box,{600,300},{664,364});
+                box.outlineAlpha=0;
+                reg::vtr::drawBbox(draw,box,{700,300},{764,364});
                 legendVisible=true;
             } else {
             ImGui::SetNextWindowPos({0,0},ImGuiCond_Always);
@@ -157,7 +170,24 @@ int main(int argc,char** argv) {
                     }
                 }
             }
-            std::printf("VTR pixel raster regression: widths 1..4 PASS\n");
+            const auto checkColor=[&](int x,int y,int r,int g,int b) {
+                const auto* p=pixels+static_cast<std::size_t>(y)*surface->pitch+
+                    static_cast<std::size_t>(x)*4;
+                if(std::abs(int(p[0])-r)>4||std::abs(int(p[1])-g)>4||
+                   std::abs(int(p[2])-b)>4) {
+                    std::fprintf(stderr,"Outline color/alpha at %d,%d: got %d,%d,%d expected %d,%d,%d\n",
+                        x,y,int(p[0]),int(p[1]),int(p[2]),r,g,b);
+                    return false;
+                }
+                return true;
+            };
+            // SDL clear is RGB(18,22,30); 50% red -> about (137,11,15).
+            // These samples lie outside the green core, but in the underlay.
+            if(!checkColor(515,297,137,11,15)||
+               !checkColor(532,297,137,11,15)||
+               !checkColor(635,332,137,11,15)||
+               !checkColor(735,332,18,22,30)) return 3;
+            std::printf("VTR pixel raster regression: widths 1..4 and outline alpha union PASS\n");
         }
         const auto* firstRow=pixels+static_cast<std::size_t>(3)*surface->pitch;
         std::uint32_t background=0;

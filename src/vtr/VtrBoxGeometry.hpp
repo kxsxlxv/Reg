@@ -165,7 +165,7 @@ inline bool orthogonal(const Line& line) {
     }
     return true;
 }
-inline std::vector<PixelRect> pixelRects(const Line& line,float width) {
+inline std::vector<PixelRect> rawPixelRects(const Line& line,float width) {
     if(!orthogonal(line)) return {};
     const int thick=std::max(1,static_cast<int>(std::round(width)));
     const auto round=[](float x) { return static_cast<int>(std::floor(x+0.5F)); };
@@ -188,6 +188,9 @@ inline std::vector<PixelRect> pixelRects(const Line& line,float width) {
         const auto p=line.points[i];
         add({lo(p.x),lo(p.y),lo(p.x)+thick,lo(p.y)+thick});
     }
+    return source;
+}
+inline std::vector<PixelRect> unionRects(const std::vector<PixelRect>& source) {
     // Decompose the rectangle union into disjoint x-slabs, coalescing y
     // intervals. This is bounded by the small number of path vertices.
     std::vector<int> xs;
@@ -210,5 +213,103 @@ inline std::vector<PixelRect> pixelRects(const Line& line,float width) {
         }
     }
     return result;
+}
+inline std::vector<PixelRect> pixelRects(const Line& line,float width) {
+    return unionRects(rawPixelRects(line,width));
+}
+
+// For translucent mixed (axis + curved/diagonal) underlays, compose the
+// entire stroke union before blending. Scan-convert convex stroke pieces
+// at 4x subpixel coverage; never blend each individual overlapping stroke.
+struct CoverageRun { int x0{},x1{},y{}; unsigned samples{}; };
+template<class Emit>
+void mixedCoverage(const Lines& lines,float extra,PixelRect clip,Emit emit) {
+    constexpr int S=4;
+    const int width=clip.x1-clip.x0,height=clip.y1-clip.y0;
+    if(width<=0||height<=0) return;
+    using Span=std::pair<int,int>;
+    std::vector<std::vector<Span>> rows(static_cast<std::size_t>(height)*S);
+    auto polygon=[&](const Path& p) {
+        if(p.size()<3) return;
+        float ymin=p.front().y,ymax=ymin;
+        for(auto q:p) { ymin=std::min(ymin,q.y);ymax=std::max(ymax,q.y); }
+        const int first=std::max(0,static_cast<int>(std::ceil((ymin-clip.y0)*S-0.5F)));
+        const int last=std::min(height*S,static_cast<int>(std::ceil((ymax-clip.y0)*S-0.5F)));
+        for(int y=first;y<last;++y) {
+            const float sy=clip.y0+(y+0.5F)/S;
+            float lo=1.0e30F,hi=-1.0e30F;
+            for(std::size_t i=0;i<p.size();++i) {
+                const auto a=p[i],b=p[(i+1)%p.size()];
+                if((a.y<=sy&&sy<b.y)||(b.y<=sy&&sy<a.y)) {
+                    const float x=a.x+(b.x-a.x)*(sy-a.y)/(b.y-a.y);
+                    lo=std::min(lo,x);hi=std::max(hi,x);
+                }
+            }
+            if(lo>=hi) continue;
+            const int x0=std::max(0,static_cast<int>(std::ceil((lo-clip.x0)*S-0.5F)));
+            const int x1=std::min(width*S,static_cast<int>(std::ceil((hi-clip.x0)*S-0.5F)));
+            if(x1>x0) rows[static_cast<std::size_t>(y)].emplace_back(x0,x1);
+        }
+    };
+    for(const auto& line:lines) {
+        const float thick=line.width+extra;
+        if(orthogonal(line)) {
+            for(auto r:rawPixelRects(line,thick))
+                polygon({{float(r.x0),float(r.y0)},{float(r.x1),float(r.y0)},
+                         {float(r.x1),float(r.y1)},{float(r.x0),float(r.y1)}});
+            continue;
+        }
+        const auto& p=line.points;
+        const std::size_t n=p.size(),count=line.closed?n:n-1;
+        const float half=thick*0.5F;
+        std::vector<Point> normals;
+        normals.reserve(count);
+        for(std::size_t i=0;i<count;++i) {
+            auto a=p[i],b=p[(i+1)%n];
+            const float len=distance(a,b);
+            normals.push_back(len>0.001F?Point{-(b.y-a.y)/len,(b.x-a.x)/len}:Point{});
+        }
+        // Segment strips and bounded miter wedges. All pieces are convex.
+        for(std::size_t i=0;i<count;++i) {
+            const auto a=p[i],b=p[(i+1)%n],q=normals[i];
+            polygon({{a.x+q.x*half,a.y+q.y*half},{b.x+q.x*half,b.y+q.y*half},
+                     {b.x-q.x*half,b.y-q.y*half},{a.x-q.x*half,a.y-q.y*half}});
+        }
+        for(std::size_t i=line.closed?0:1;i<(line.closed?n:n-1);++i) {
+            const auto a=p[i],u=normals[(i+count-1)%count],v=normals[i%count];
+            const float den=1+u.x*v.x+u.y*v.y;
+            for(float sign:{-1.0F,1.0F}) {
+                const Point q{a.x+sign*u.x*half,a.y+sign*u.y*half};
+                const Point r{a.x+sign*v.x*half,a.y+sign*v.y*half};
+                // Bevel extremely acute joins instead of emitting a spike.
+                if(den>0.125F) {
+                    const Point m{a.x+sign*(u.x+v.x)*half/den,
+                                  a.y+sign*(u.y+v.y)*half/den};
+                    polygon({a,q,m,r});
+                } else polygon({a,q,r});
+            }
+        }
+    }
+    std::vector<unsigned> coverage(static_cast<std::size_t>(width));
+    for(int y=0;y<height;++y) {
+        std::fill(coverage.begin(),coverage.end(),0U);
+        for(int sy=0;sy<S;++sy) {
+            auto& spans=rows[static_cast<std::size_t>(y*S+sy)];
+            std::sort(spans.begin(),spans.end());
+            for(std::size_t j=0;j<spans.size();) {
+                const int x0=spans[j].first;
+                int x1=spans[j++].second;
+                while(j<spans.size()&&spans[j].first<=x1)
+                    x1=std::max(x1,spans[j++].second);
+                for(int x=x0;x<x1;++x) ++coverage[static_cast<std::size_t>(x/S)];
+            }
+        }
+        for(int x=0;x<width;) {
+            const int begin=x;
+            const unsigned value=coverage[static_cast<std::size_t>(x++)];
+            while(x<width&&coverage[static_cast<std::size_t>(x)]==value) ++x;
+            if(value) emit(CoverageRun{begin+clip.x0,x+clip.x0,y+clip.y0,value});
+        }
+    }
 }
 } // namespace reg::vtr::boxgeom

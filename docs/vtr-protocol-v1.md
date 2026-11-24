@@ -100,7 +100,19 @@ Orthogonal BBOX paths now render as non-overlapping pixel-aligned filled
 rectangles with square miter joins and butt caps. Requested widths round to
 whole display pixels (minimum 1) for orthogonal strokes; curves and diagonals
 retain fractional widths and geometric anti-aliasing without baked line textures.
-The contrast underlay is opaque. The geometry test checks pixel-union coverage
+The contrast underlay is opaque by default. The geometry test checks pixel-union coverage
 for frame and L-corner widths 1, 2, 3, 4, 5 and 8. The Windows SDL raster test
 checks actual output pixels for 1–4 px frames and corner coverage, and publishes
 `vtr-bbox-raster.bmp`. It does not establish Vulkan raster parity.
+
+### Configurable outline
+
+`box.outline_color` accepts #RRGGBB, default #0C1014; `box.outline_alpha`
+accepts 0..1, default 1. Both fields are optional for older catalogues.
+`outline_width=0` or `outline_alpha=0` disables the underlay. The alpha is
+applied once to the union of its components within one BBOX. Translucent
+orthogonal strokes use a rectangle union; mixed paths use clipped 4x4 coverage
+of stroke strips and joins. The opaque fast path is unchanged. Overlapping
+separate BBOX objects remain separate layers. The SDL raster regression checks
+color, alpha, overlap and disable behavior. Mixed translucent rendering cost
+has not yet been benchmarked for live video; VTR is still preview-only.

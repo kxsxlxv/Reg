@@ -3,6 +3,9 @@
 # format is the TOML contract version. A hash of this file identifies its exact contents.
 format = 1
 
+# outline_width: added thickness on each side; outline_color: #RRGGBB.
+# outline_alpha: 0 = invisible, 1 = opaque. Width 0 disables the outline.
+
 [defaults.label]
 place = "top_left_outside"
 color = "auto"
@@ -20,7 +23,7 @@ id = 1
 semantic = "detection"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#F5C542", edges = "solid", edge_width = 2, outline_width = 0.6 }
+box = { color = "#F5C542", edges = "solid", edge_width = 2, outline_width = 0.6, outline_color = "#0C1014", outline_alpha = 1.0 }
 label = { show = true, text = "NN {conf_pct}%" }
 
 [output.canny_detection]
@@ -28,7 +31,7 @@ id = 2
 semantic = "detection"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#32D5E8", edges = "solid", edge_width = 1, edge_markers = "center", marker_width = 3, marker_px = 12, outline_width = 0.5 }
+box = { color = "#32D5E8", edges = "solid", edge_width = 1, edge_markers = "center", marker_width = 3, marker_px = 12, outline_width = 0.5, outline_color = "#0C1014", outline_alpha = 1.0 }
 label = { show = false, text = "Canny" }
 
 [output.motion_detection]
@@ -36,7 +39,7 @@ id = 3
 semantic = "detection"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#FF8E40", edges = "none", corners = "solid", corner_width = 2.5, corner_px = 13, fill_alpha = 0.13, outline_width = 0.5 }
+box = { color = "#FF8E40", edges = "none", corners = "solid", corner_width = 2.5, corner_px = 13, fill_alpha = 0.13, outline_width = 0.5, outline_color = "#0C1014", outline_alpha = 1.0 }
 
 # Operator-only extrapolation between neural detector updates (~20 Hz on 60 FPS).
 # No outline and no label; intentionally not included in benchmark.
@@ -77,7 +80,7 @@ id = 20
 semantic = "detection"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#F2F2F2", edges = "none", corners = "solid", corner_width = 4, corner_px = 18, outline_width = 0.8 }
+box = { color = "#F2F2F2", edges = "none", corners = "solid", corner_width = 4, corner_px = 18, outline_width = 0.8, outline_color = "#0C1014", outline_alpha = 1.0 }
 label = { show = false, text = "ACCEPT {origin}" }
 
 [output.supervisor_rejected]
@@ -85,7 +88,7 @@ id = 21
 semantic = "rejected"
 geometry = "bbox"
 benchmark = "none"
-box = { color = "#8F9299", edges = "solid", edge_width = 1.5, diagonals = "solid", diagonal_width = 1.5, outline_width = 0.5 }
+box = { color = "#8F9299", edges = "solid", edge_width = 1.5, diagonals = "solid", diagonal_width = 1.5, outline_width = 0.5, outline_color = "#0C1014", outline_alpha = 1.0 }
 
 # MOT states and propagated geometry are not tied to TrackTrack or Kalman.
 
@@ -94,7 +97,7 @@ id = 30
 semantic = "tracking"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#28DF7D", edges = "solid", edge_width = 1.5, corners = "solid", corner_width = 3.5, corner_px = 15, outline_width = 0.5 }
+box = { color = "#28DF7D", edges = "solid", edge_width = 1.5, corners = "solid", corner_width = 3.5, corner_px = 15, outline_width = 0.5, outline_color = "#0C1014", outline_alpha = 1.0 }
 label = { show = true, text = "MOT #{track_id}" }
 
 [output.mot_prediction]
@@ -102,14 +105,14 @@ id = 31
 semantic = "prediction"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#28DF7D", edges = "dashed", edge_width = 2, outline_width = 0.5 }
+box = { color = "#28DF7D", edges = "dashed", edge_width = 2, outline_width = 0.5, outline_color = "#0C1014", outline_alpha = 1.0 }
 
 [output.mot_ofa]
 id = 32
 semantic = "propagation"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#28DF7D", edges = "dash_dot", edge_width = 2, outline_width = 0.5 }
+box = { color = "#28DF7D", edges = "dash_dot", edge_width = 2, outline_width = 0.5, outline_color = "#0C1014", outline_alpha = 1.0 }
 
 # SOT and its auxiliary search ROI.
 
@@ -118,7 +121,7 @@ id = 40
 semantic = "tracking"
 geometry = "bbox"
 benchmark = "bbox_iou"
-box = { color = "#E966FF", edges = "dashed", edge_width = 1.5, corners = "solid", corner_width = 4, corner_px = 20, outline_width = 0.8 }
+box = { color = "#E966FF", edges = "dashed", edge_width = 1.5, corners = "solid", corner_width = 4, corner_px = 20, outline_width = 0.8, outline_color = "#0C1014", outline_alpha = 1.0 }
 label = { show = false, text = "SOT #{track_id}" }
 
 [output.sot_search_roi]
@@ -126,4 +129,4 @@ id = 41
 semantic = "search_region"
 geometry = "bbox"
 benchmark = "none"
-box = { color = "#AD8BFF", edges = "dashed", edge_width = 1.5, rounding_px = 8, outline_width = 0.5 }
+box = { color = "#AD8BFF", edges = "dashed", edge_width = 1.5, rounding_px = 8, outline_width = 0.5, outline_color = "#0C1014", outline_alpha = 1.0 }
