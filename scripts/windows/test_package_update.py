@@ -28,6 +28,9 @@ class PackagingTests(unittest.TestCase):
         (self.root / "fonts" / "Roboto.ttf").write_bytes(b"font")
         (self.root / "shaders").mkdir()
         (self.root / "shaders" / "video.vert.spv").write_bytes(b"spv")
+        (self.root / "config").mkdir()
+        (self.root / "config" / "vtr.default.toml").write_text("format = 1\n", encoding="utf-8")
+        (self.root / "config" / "vtr.toml").write_text("# user edits\n", encoding="utf-8")
 
     def test_manifest_contains_verified_individual_assets(self):
         manifest = MODULE.package(self.root, self.out, "dev", "dev-" + "a" * 40)
@@ -47,6 +50,9 @@ class PackagingTests(unittest.TestCase):
         with zipfile.ZipFile(self.out / "portable.zip") as archive:
             self.assertIn("VideoConsole/Launcher.exe", archive.namelist())
             self.assertIn("VideoConsole/manifest.json", archive.namelist())
+            self.assertIn("VideoConsole/config/vtr.default.toml", archive.namelist())
+            self.assertNotIn("VideoConsole/config/vtr.toml", archive.namelist())
+        self.assertFalse(any(p.startswith("config/") for p in names))
 
     def test_transitional_release_keeps_cpp_dll_in_portable(self):
         (self.root / "libstdc++-6.dll").write_bytes(b"mingw dll")
@@ -71,6 +77,11 @@ class PackagingTests(unittest.TestCase):
             MODULE.package(self.root, self.out, "dev", "v1.2.3")
         with self.assertRaises(ValueError):
             MODULE.package(self.root, self.out, "stable", "dev-" + "a" * 40)
+
+    def test_rejects_missing_factory_catalogue(self):
+        (self.root / "config" / "vtr.default.toml").unlink()
+        with self.assertRaises(ValueError):
+            MODULE.package(self.root, self.out, "dev", "dev-" + "a" * 40)
 
     def test_rejects_missing_assets(self):
         (self.root / "shaders" / "video.vert.spv").unlink()

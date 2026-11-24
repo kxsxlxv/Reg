@@ -13,6 +13,7 @@ enum class TelemetryPage : std::uint8_t {
     NetImgui,
     Gt,
     Events,
+    VtrLegend,
 };
 
 inline std::atomic<TelemetryPage> gTelemetryPage{

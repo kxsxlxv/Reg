@@ -118,8 +118,9 @@ void getHttps(
         path.c_str(), nullptr, WINHTTP_NO_REFERER,
         WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
     ensureWin(request.value != nullptr, "WinHttpOpenRequest");
-    const wchar_t* headers = L"Accept: application/vnd.github+json\r\n"
-                             L"X-GitHub-Api-Version: 2022-11-28\r\n";
+    const wchar_t* headers = host==L"api.github.com"
+        ? L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n"
+        : L"Accept: */*\r\n";
     ensureWin(WinHttpAddRequestHeaders(
         request.value, headers, static_cast<DWORD>(-1),
         WINHTTP_ADDREQ_FLAG_ADD), "WinHttpAddRequestHeaders");
@@ -136,7 +137,26 @@ void getHttps(
         WINHTTP_HEADER_NAME_BY_INDEX, &status, &length, WINHTTP_NO_HEADER_INDEX),
         "WinHttpQueryHeaders");
     if (status != HTTP_STATUS_OK) {
-        throw std::runtime_error("GitHub returned HTTP " + std::to_string(status));
+        const auto header=[&](const wchar_t* name) {
+            wchar_t buf[128]{}; DWORD size=sizeof(buf);
+            if(!WinHttpQueryHeaders(request.value,WINHTTP_QUERY_CUSTOM,name,buf,&size,WINHTTP_NO_HEADER_INDEX))
+                return std::string{};
+            std::string value;
+            for(auto ch:buf) {if(!ch) break;if(ch>=32&&ch<=126) value.push_back(static_cast<char>(ch));}
+            return value;
+        };
+        // Original URL only: never log signed CDN redirect query strings.
+        std::string message="GitHub HTTP "+std::to_string(status)+" ["+
+            url.substr(0,url.find('?'))+"]";
+        const auto remaining=header(L"X-RateLimit-Remaining");
+        const auto reset=header(L"X-RateLimit-Reset");
+        const auto retry=header(L"Retry-After");
+        if(!remaining.empty()) message+="; rate remaining="+remaining;
+        if(!reset.empty()) message+="; reset Unix="+reset;
+        if(!retry.empty()) message+="; Retry-After="+retry;
+        if(status==403||status==429)
+            message+=remaining=="0"?"; API limit exhausted; retry after reset.":"; check GitHub access/proxy or retry later.";
+        throw std::runtime_error(message);
     }
     std::array<char, 64 * 1024> buffer{};
     for (;;) {
