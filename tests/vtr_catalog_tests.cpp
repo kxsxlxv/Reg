@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 namespace {
 void require(bool condition,const char* msg) {
@@ -66,20 +67,22 @@ int main() {
     const auto hash1=readCatalog(tmp).hash;
     write(tmp,"format = 1\n# changed\n[output.a]\nid=1\nsemantic='detection'\ngeometry='bbox'\n");
     require(readCatalog(tmp).hash!=hash1,"Hash did not change");
-    write(tmp,"format=1\\n[output.a]\\nid=1\\nsemantic='detection'\\ngeometry='bbox'\\n"
+    write(tmp,"format=1\n[output.a]\nid=1\nsemantic='detection'\ngeometry='bbox'\n"
               "box={width=3,edge_width=1,corners='solid',corner_layers=2,frame_layers=2,"
-              "edge_markers='outside',rounding_px=5,outline_width=1}\\n"
-              "label={color='#FFFFFF',background='#000000',gap_px=3}\\n");
+              "edge_markers='outside',rounding_px=5,outline_width=1}\n"
+              "label={color='#FFFFFF',background='#000000',gap_px=3}\n");
     const auto styled=readCatalog(tmp).outputs.at(0);
     require(styled.box.stroke.width==1&&styled.box.cornerWidth==3&&
         styled.box.cornerLayers==2&&styled.box.frameLayers==2&&
         styled.box.edgeMarkers=="outside"&&styled.box.roundingPx==5&&
         styled.box.outlineWidth==1&&!styled.label.autoColor&&!styled.label.boxBackground,
         "Composable styles or legacy color compatibility failed");
-    write(tmp,"format=1\\n[output.a]\\nid=1\\nsemantic='detection'\\ngeometry='bbox'\\nbox={corner_layers=3}\\n");
+    write(tmp,"format=1\n[output.a]\nid=1\nsemantic='detection'\ngeometry='bbox'\nbox={corner_layers=3}\n");
     rejected=false;
-    try { (void)readCatalog(tmp); } catch(const std::exception&) { rejected=true; }
-    require(rejected,"Unsupported corner layer count accepted");
+    try { (void)readCatalog(tmp); } catch(const std::exception& ex) {
+        rejected=std::string(ex.what()).find("expected 1 or 2: corner_layers")!=std::string::npos;
+    }
+    require(rejected,"Invalid corner_layers must be rejected by the catalogue validator");
     std::filesystem::remove(tmp);
     std::cout<<"VTR TOML catalogue: PASS\n";
 }
