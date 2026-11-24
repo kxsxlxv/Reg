@@ -175,14 +175,46 @@ void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
     d->AddText(font,px,{x+pad,y+pad},rgba(fg),text.c_str());
     d->PopClipRect();
 }
-void outline(ImDrawList* d, const std::vector<ImVec2>& points,
-             const Osd& o, bool closed) {
-    for (size_t i=1;i<points.size();++i)
-        stroke(d,points[i-1],points[i],rgba(o.stroke.color,o.alpha),
-               o.stroke.width,o.stroke.pattern);
-    if(closed && points.size()>2U)
-        stroke(d,points.back(),points.front(),rgba(o.stroke.color,o.alpha),
-               o.stroke.width,o.stroke.pattern);
+void outline(ImDrawList* d,const std::vector<ImVec2>& points,const Osd& o,bool closed) {
+    if(points.size()<2||points.size()>4096||o.alpha<=0) return;
+    boxgeom::Path path;
+    for(auto p:points) boxgeom::append(path,{p.x,p.y});
+    boxgeom::Lines lines;
+    boxgeom::pattern(lines,path,o.stroke.width,o.stroke.pattern,closed,o.dashPx,o.gapPx,o.dotPx);
+    if(o.outlineWidth>0&&o.outlineAlpha>0) {
+        // Same clipped union coverage as BBOX for a translucent underlay.
+        const float extra=2*o.outlineWidth;
+        if(o.outlineAlpha>=1) {
+            for(const auto& line:lines) paintLine(d,line,rgba(o.outlineColor),line.width+extra);
+        } else if(!lines.empty()) {
+            float x0=points[0].x,x1=x0,y0=points[0].y,y1=y0;
+            for(auto p:points) {x0=std::min(x0,p.x);x1=std::max(x1,p.x);y0=std::min(y0,p.y);y1=std::max(y1,p.y);}
+            const auto lo=d->GetClipRectMin(),hi=d->GetClipRectMax();
+            const float pad=4*(o.stroke.width+extra)+2;
+            boxgeom::PixelRect clip{int(std::floor(std::max(lo.x,x0-pad))),int(std::floor(std::max(lo.y,y0-pad))),
+                int(std::ceil(std::min(hi.x,x1+pad))),int(std::ceil(std::min(hi.y,y1+pad)))};
+            boxgeom::mixedCoverage(lines,extra,clip,[&](boxgeom::CoverageRun run){
+                d->AddRectFilled({float(run.x0),float(run.y)},{float(run.x1),float(run.y+1)},
+                    rgba(o.outlineColor,o.outlineAlpha*float(run.samples)/16));
+            });
+        }
+    }
+    for(const auto& line:lines) paintLine(d,line,rgba(o.stroke.color,o.alpha),line.width);
+}
+std::vector<ImVec2> ellipsePath(ImVec2 center,float rx,float ry) {
+    std::vector<ImVec2> p;
+    // Cap tessellation; approximate curve in display coordinates.
+    const int count=std::clamp(int(std::ceil(std::max(rx,ry)*0.8F)),16,96);
+    for(int i=0;i<count;++i) {
+        const float angle=6.28318530718F*i/count;
+        p.emplace_back(center.x+rx*std::cos(angle),center.y+ry*std::sin(angle));
+    }
+    return p;
+}
+void filledPath(ImDrawList* d,const std::vector<ImVec2>& p,const Osd& o) {
+    if(p.size()<3||o.fillAlpha<=0) return;
+    d->AddConvexPolyFilled(p.data(),static_cast<int>(p.size()),
+        rgba(o.fill.value_or(o.stroke.color),o.fillAlpha));
 }
 void preview(ImDrawList* d,const Output& sample,ImVec2 min,ImVec2 max,
              int background=0,float zoom=1.0F,const std::vector<Output>* layers=nullptr) {
@@ -237,12 +269,19 @@ void preview(ImDrawList* d,const Output& sample,ImVec2 min,ImVec2 max,
         drawBbox(d,o.box,lo,hi);
         drawLabel(d,o,lo,hi,min,max);
     } else if (geometry=="line") {
-        stroke(d,img(155,660),img(1105,65),ink,o.osd.stroke.width,
-               o.osd.stroke.pattern);
+        outline(d,{img(155,660),img(1105,65)},o.osd,false);
     } else if (geometry=="arrow") {
         const ImVec2 p=img(630,290),q=img(915,460);
-        stroke(d,p,q,ink,o.osd.stroke.width,o.osd.stroke.pattern);
-        d->AddTriangleFilled(q,{q.x-10,q.y-13},{q.x-12,q.y+5},ink);
+        const float len=std::hypot(q.x-p.x,q.y-p.y);
+        if(len>0.01F&&o.osd.stroke.pattern!="none") {
+            const float head=std::min(o.osd.arrowHeadPx,len*0.45F);
+            const float ux=(q.x-p.x)/len,uy=(q.y-p.y)/len;
+            const ImVec2 left{q.x-ux*head-uy*head*0.45F,q.y-uy*head+ux*head*0.45F};
+            const ImVec2 right{q.x-ux*head+uy*head*0.45F,q.y-uy*head-ux*head*0.45F};
+            outline(d,{p,q},o.osd,false);
+            Osd cap=o.osd;cap.stroke.pattern="solid";
+            outline(d,{left,q,right},cap,false);
+        }
     } else if (geometry=="polyline") {
         // Handpicked, approximate aircraft boundary points; visualization
         // only, not a pixel-accurate segmentation mask or a GT source.
@@ -271,25 +310,21 @@ void preview(ImDrawList* d,const Output& sample,ImVec2 min,ImVec2 max,
             const ImVec2 points[]={
                 img(520,325),img(713,249),img(915,455),
                 img(818,501),img(594,410)};
-            const float alpha=geometry=="mask"?o.osd.alpha:0.22F;
-            d->AddConvexPolyFilled(points,5,rgba(o.osd.stroke.color,alpha));
+            const float alpha=geometry=="mask"?o.osd.alpha:o.osd.fillAlpha;
+            d->AddConvexPolyFilled(points,5,rgba(geometry=="mask"?o.osd.stroke.color:o.osd.fill.value_or(o.osd.stroke.color),alpha));
             if (geometry=="polygon")
                 outline(d,{points[0],points[1],points[2],points[3],
                            points[4]},o.osd,true);
         }
-    } else if (geometry=="circle") {
-        d->AddCircle(center,30.0F,ink,0,o.osd.stroke.width);
-    } else if (geometry=="ellipse") {
-        std::vector<ImVec2> points;
-        for (int i=0;i<=48;++i) {
-            constexpr float pi=3.14159265358979323846F;
-            const float angle=2.0F*pi*static_cast<float>(i)/48.0F;
-            points.emplace_back(center.x+50.0F*std::cos(angle),
-                                center.y+25.0F*std::sin(angle));
-        }
-        outline(d,points,o.osd,false);
+    } else if (geometry=="circle"||geometry=="ellipse") {
+        const auto points=geometry=="circle"?ellipsePath(center,30,30):ellipsePath(center,50,25);
+        if(o.osd.fill) filledPath(d,points,o.osd);
+        outline(d,points,o.osd,true);
     } else if (geometry=="point") {
-        d->AddCircleFilled(center,7.0F,ink);
+        if(o.osd.outlineWidth>0)
+            d->AddCircleFilled(center,o.osd.pointRadiusPx+o.osd.outlineWidth,
+                rgba(o.osd.outlineColor,o.osd.outlineAlpha));
+        d->AddCircleFilled(center,o.osd.pointRadiusPx,ink);
     } else if (geometry=="text") {
         d->AddText(img(570,195),ink,"VTR TEXT");
     }
@@ -361,6 +396,13 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         s=base; s.stroke.pattern="dashed"; s.diagonals="dashed";
         s.diagonalWidth=1.5F; add("Dashed + diagonals",s);
         s=base; s.roundingPx=9.0F; add("Rounded",s);
+        for(const char* kind:{"line","arrow","polyline","polygon","circle","ellipse","point","text","mask","heatmap"}) {
+            Output o;o.id=static_cast<std::uint16_t>(samples.size()+1);o.key=kind;o.geometry=kind;
+            o.osd.stroke.color=base.stroke.color;o.osd.stroke.width=2;o.osd.alpha=1;
+            if(o.geometry=="mask") {o.semantic="sky";o.osd.alpha=0.3F;}
+            if(o.geometry=="heatmap") o.osd.alpha=0.8F;
+            samples.push_back(std::move(o));
+        }
         return samples;
     };
     static const auto samples=primitives();
@@ -449,6 +491,21 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
         ImGui::SameLine();
         if(ImGui::Button("Discard changes")) select(editor.selected);
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        if(ImGui::Button("Factory style")) {
+            try {
+                const auto factory=factoryCatalog();
+                const auto found=std::find_if(factory.outputs.begin(),factory.outputs.end(),[&](const auto& f){
+                    return f.id==o.id&&f.key==o.key&&f.geometry==o.geometry;
+                });
+                if(found==factory.outputs.end()) editor.status="No factory style for custom output.";
+                else {
+                    o.box=found->box;o.osd=found->osd;o.label=found->label;
+                    o.visible=found->visible;o.zOrder=found->zOrder;
+                    editor.dirty=true;editor.status="Factory style loaded into draft. Save to apply.";
+                }
+            } catch(const std::exception& ex) {editor.status=ex.what();}
+        }
         if(editor.dirty) {ImGui::SameLine();ImGui::TextDisabled("Unsaved");}
         if(!editor.status.empty()) ImGui::TextWrapped("%s",editor.status.c_str());
         ImGui::Separator();
@@ -528,11 +585,28 @@ LegendPage drawLegend(Catalog& catalog, std::string& error,
                 slider("Opacity",o.osd.alpha,0,1,"%.2f");
                 slider("Width",o.osd.stroke.width,0.5F,16);
                 pattern("Pattern",o.osd.stroke.pattern);
+                if(o.geometry=="line"||o.geometry=="arrow"||o.geometry=="polyline"||
+                   o.geometry=="polygon"||o.geometry=="circle"||o.geometry=="ellipse") {
+                    slider("Dash px (0=auto)",o.osd.dashPx,0,64);
+                    slider("Gap px (0=auto)",o.osd.gapPx,0,32);
+                    slider("Dot px (0=auto)",o.osd.dotPx,0,16);
+                }
+                if(o.geometry!="mask"&&o.geometry!="heatmap"&&o.geometry!="text") {
+                    colorEdit("Outline color",o.osd.outlineColor);
+                    slider("Outline width",o.osd.outlineWidth,0,8);
+                    slider("Outline opacity",o.osd.outlineAlpha,0,1,"%.2f");
+                }
+                if(o.geometry=="polygon"||o.geometry=="circle"||o.geometry=="ellipse") {
+                    optionalColor("Fill color",o.osd.fill,o.osd.stroke.color);
+                    slider("Fill opacity",o.osd.fillAlpha,0,1,"%.2f");
+                }
+                if(o.geometry=="point") slider("Point radius",o.osd.pointRadiusPx,1,64);
+                if(o.geometry=="arrow") slider("Arrow head",o.osd.arrowHeadPx,2,64);
                 return;
             }
             auto& b=o.box;
             if(ImGui::BeginCombo("Preset","Apply BBOX geometry")) {
-                for(const auto& p:samples) if(ImGui::Selectable(p.key.c_str())) {
+                for(const auto& p:samples) if(p.geometry=="bbox"&&ImGui::Selectable(p.key.c_str())) {
                     const Box old=b;
                     b=p.box;b.stroke.color=old.stroke.color;b.fill=old.fill;
                     b.outlineColor=old.outlineColor;b.outlineWidth=old.outlineWidth;

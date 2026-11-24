@@ -60,6 +60,12 @@ struct Label {
 struct Osd {
     Stroke stroke{};
     float alpha{1.0F};
+    float outlineWidth{0},outlineAlpha{1};
+    Color outlineColor{12.0F/255,16.0F/255,20.0F/255};
+    float dashPx{0},gapPx{0},dotPx{0};
+    std::optional<Color> fill;
+    float fillAlpha{0.22F};
+    float pointRadiusPx{7},arrowHeadPx{14};
 };
 struct Output {
     std::uint16_t id{};
@@ -81,6 +87,9 @@ struct Catalog {
 // Throws on invalid TOML, unknown geometry, duplicate IDs or unsupported format.
 // Consumers should keep the last valid snapshot on a failed manual reload.
 Catalog readCatalog(const std::filesystem::path& path);
+Catalog factoryCatalog();
+// Never overwrites an existing user file, including invalid files.
+bool seedFactoryCatalog(const std::filesystem::path& path);
 // Preserve unknown TOML values and output identity; refuse stale edits.
 // Writes validated temporary file, keeps original as .bak, then replaces.
 Catalog saveOutputStyle(const std::filesystem::path& path,std::uint64_t expectedHash,

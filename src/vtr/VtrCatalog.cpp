@@ -1,4 +1,6 @@
 #include "vtr/VtrCatalog.hpp"
+#include "VtrFactory.hpp"
+#include <chrono>
 #include <toml++/toml.hpp>
 
 #include <algorithm>
@@ -155,6 +157,19 @@ void readOsd(const toml::table& t, Osd& out) {
     out.stroke.width = bounded(t, "width", out.stroke.width, 0.5F, 16.0F);
     out.stroke.pattern = pattern(t, "pattern", "solid");
     out.alpha = bounded(t, "alpha", out.alpha, 0.0F, 1.0F);
+    out.outlineWidth=bounded(t,"outline_width",out.outlineWidth,0,8);
+    out.outlineColor=color(t,"outline_color",out.outlineColor);
+    out.outlineAlpha=bounded(t,"outline_alpha",out.outlineAlpha,0,1);
+    out.dashPx=bounded(t,"dash_px",out.dashPx,0,64);
+    out.gapPx=bounded(t,"gap_px",out.gapPx,0,32);
+    out.dotPx=bounded(t,"dot_px",out.dotPx,0,16);
+    if(t.contains("fill")) {
+        if(str(t,"fill")=="inherit") out.fill.reset();
+        else out.fill=color(t,"fill",out.stroke.color);
+    }
+    out.fillAlpha=bounded(t,"fill_alpha",out.fillAlpha,0,1);
+    out.pointRadiusPx=bounded(t,"point_radius_px",out.pointRadiusPx,1,64);
+    out.arrowHeadPx=bounded(t,"arrow_head_px",out.arrowHeadPx,2,64);
 }
 bool supported(std::string_view s) {
     constexpr std::array<std::string_view, 11> supportedTypes{
@@ -165,11 +180,7 @@ bool supported(std::string_view s) {
 }
 } // namespace
 
-Catalog readCatalog(const std::filesystem::path& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) throw std::runtime_error("VTR config not found: " + path.string());
-    const std::string bytes{std::istreambuf_iterator<char>(file),
-                            std::istreambuf_iterator<char>()};
+static Catalog parseCatalog(const std::string& bytes,const std::filesystem::path& path) {
     if (bytes.size() > 256U * 1024U)
         throw std::runtime_error("VTR catalogue exceeds 256 KiB");
     const toml::table document = toml::parse(bytes, path.string());
@@ -233,6 +244,31 @@ Catalog readCatalog(const std::filesystem::path& path) {
     return result;
 }
 
+Catalog readCatalog(const std::filesystem::path& path) {
+    std::ifstream file(path,std::ios::binary);
+    if(!file) throw std::runtime_error("VTR config not found: "+path.string());
+    const std::string bytes{std::istreambuf_iterator<char>(file),std::istreambuf_iterator<char>()};
+    return parseCatalog(bytes,path);
+}
+Catalog factoryCatalog() { return parseCatalog(std::string(kFactoryToml),"embedded-factory"); }
+bool seedFactoryCatalog(const std::filesystem::path& path) {
+    if(std::filesystem::exists(path)) return false;
+    (void)factoryCatalog();
+    if(!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
+    auto tmp=path;
+    tmp+=".seed-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    try {
+        std::ofstream out(tmp,std::ios::binary|std::ios::trunc);
+        out.write(kFactoryToml.data(),static_cast<std::streamsize>(kFactoryToml.size()));
+        out.close();
+        if(!out) throw std::runtime_error("Cannot write VTR factory seed");
+        const bool created=std::filesystem::copy_file(tmp,path,std::filesystem::copy_options::skip_existing);
+        std::filesystem::remove(tmp);
+        return created;
+    } catch(...) {
+        std::error_code ignored;std::filesystem::remove(tmp,ignored);throw;
+    }
+}
 namespace {
 std::string toHex(Color color) {
     const auto byte=[](float v) { return static_cast<int>(std::lround(std::clamp(v,0.0F,1.0F)*255)); };
@@ -302,6 +338,16 @@ Catalog saveOutputStyle(const std::filesystem::path& path,std::uint64_t expected
         osd.insert_or_assign("width",style.osd.stroke.width);
         osd.insert_or_assign("pattern",style.osd.stroke.pattern);
         osd.insert_or_assign("alpha",style.osd.alpha);
+        osd.insert_or_assign("outline_width",style.osd.outlineWidth);
+        osd.insert_or_assign("outline_color",toHex(style.osd.outlineColor));
+        osd.insert_or_assign("outline_alpha",style.osd.outlineAlpha);
+        osd.insert_or_assign("dash_px",style.osd.dashPx);
+        osd.insert_or_assign("gap_px",style.osd.gapPx);
+        osd.insert_or_assign("dot_px",style.osd.dotPx);
+        osd.insert_or_assign("fill",style.osd.fill?toHex(*style.osd.fill):std::string("inherit"));
+        osd.insert_or_assign("fill_alpha",style.osd.fillAlpha);
+        osd.insert_or_assign("point_radius_px",style.osd.pointRadiusPx);
+        osd.insert_or_assign("arrow_head_px",style.osd.arrowHeadPx);
     }
     auto tmp=path;tmp+=L".tmp";
     auto backup=path;backup+=L".bak";

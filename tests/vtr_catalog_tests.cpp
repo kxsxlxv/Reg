@@ -131,5 +131,23 @@ int main() {
     require(rejected&&readCatalog(tmp).hash==saved.hash,"Stale draft overwrote current file");
     std::filesystem::remove(bak);
     std::filesystem::remove(tmp);
+    require(seedFactoryCatalog(tmp),"Factory seed not created");
+    require(readCatalog(tmp).hash==factoryCatalog().hash,"Factory seed differs from compiled default");
+    write(tmp,"# user data: do not overwrite");
+    require(!seedFactoryCatalog(tmp),"Existing user config overwritten");
+    {
+        std::ifstream in(tmp);std::string bytes((std::istreambuf_iterator<char>(in)),{});
+        require(bytes=="# user data: do not overwrite","User config changed");
+    }
+    write(tmp,"format=1\n[output.a]\nid=1\nsemantic='contour'\ngeometry='polyline'\n"
+              "osd={outline_width=1,outline_alpha=0.5,outline_color='#FF0000',dash_px=9,gap_px=4,fill_alpha=0.3}\n");
+    const auto primitive=readCatalog(tmp);
+    auto primitiveDraft=primitive.outputs[0];primitiveDraft.osd.dotPx=3;
+    const auto savedPrimitive=saveOutputStyle(tmp,primitive.hash,primitiveDraft);
+    require(savedPrimitive.outputs[0].osd.outlineAlpha==0.5F&&
+        savedPrimitive.outputs[0].osd.dashPx==9&&savedPrimitive.outputs[0].osd.dotPx==3,
+        "OSD primitive style round trip failed");
+    std::filesystem::remove(bak);
+    std::filesystem::remove(tmp);
     std::cout<<"VTR TOML catalogue: PASS\n";
 }

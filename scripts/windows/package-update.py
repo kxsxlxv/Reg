@@ -71,6 +71,9 @@ def package(root: Path, output: Path, channel: str, tag: str,
     if channel == "stable" and not tag.startswith("v"):
         raise ValueError("Stable channel needs a version tag")
 
+    factory = root / "config" / "vtr.default.toml"
+    if not factory.is_file():
+        raise ValueError(f"Missing VTR factory catalogue: {factory}")
     inputs = collect(root)
     if sum(x.stat().st_size for x in inputs.values()) > MAX_BYTES:
         raise ValueError("Package exceeds the size limit")
@@ -81,6 +84,10 @@ def package(root: Path, output: Path, channel: str, tag: str,
     portable = output / "portable"
     assets.mkdir(parents=True)
     portable.mkdir(parents=True)
+    # Only a read-only template is shipped outside the managed manifest.
+    # The executable seeds config/vtr.toml if absent; never overwrite it.
+    (portable / "config").mkdir()
+    shutil.copy2(factory, portable / "config" / "vtr.default.toml")
     records = []
     for index, (relative, source) in enumerate(sorted(inputs.items())):
         checksum = sha256(source)

@@ -7,6 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Embed the factory catalogue in every target that uses VtrCatalog.cpp.
+# A delta update needs only its existing managed binary paths.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml" REG_VTR_FACTORY_TOML)
+configure_file(cmake/VtrFactory.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/VtrFactory.hpp" @ONLY)
+include_directories("${CMAKE_CURRENT_BINARY_DIR}/generated")
+
 option(REG_FETCH_SDL3 "Fetch a pinned SDL3 release instead of using a system package" ON)
 option(REG_ENABLE_VALIDATION "Enable Vulkan validation-layer integration in development builds" ON)
 option(REG_BUILD_TESTS "Build lightweight unit tests" ON)
@@ -741,7 +749,7 @@ add_custom_command(TARGET reg_probe POST_BUILD
         "$<TARGET_FILE_DIR:reg_probe>/config/gt-range-ui.json"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml"
-        "$<TARGET_FILE_DIR:reg_probe>/config/vtr.toml"
+        "$<TARGET_FILE_DIR:reg_probe>/config/vtr.default.toml"
     VERBATIM)
 
 
@@ -897,7 +905,7 @@ endif()
 install(DIRECTORY "${REG_FONT_OUTPUT_DIR}/" DESTINATION bin/fonts)
 install(DIRECTORY "${REG_SHADER_OUTPUT_DIR}/" DESTINATION bin/shaders)
 # VTR legend and the future binary receiver read the same relocatable catalogue.
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml" DESTINATION bin/config)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/vtr.toml" DESTINATION bin/config RENAME vtr.default.toml)
 if(UNIX AND NOT APPLE)
     # install(FILES) cannot follow soname symlink chains. This variant can.
     # Delay the copy until installation so the built SDL3 library exists.

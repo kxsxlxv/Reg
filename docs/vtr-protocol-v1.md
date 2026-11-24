@@ -140,3 +140,32 @@ and output identity, backs up exact original bytes to `vtr.toml.bak` and replace
 the file. toml++ serialization can change formatting/comment placement or remove
 comments; the backup retains them. Save only updates selected output values.
 The Windows CI publishes `vtr-editor-preview.bmp` and tests parser/save round-trip.
+
+### Factory config and portable package
+
+The exact source catalogue is embedded at CMake configure time, so existing
+installations can seed a missing config/vtr.toml after a binary-only update.
+The portable ZIP includes config/vtr.default.toml (reference only), never the
+mutable config/vtr.toml or its backups. First visit to VTR seeds a missing user
+catalogue, leaving existing files (even malformed ones) untouched. Factory style
+restores the selected built-in output into the draft, not the entire catalogue.
+
+### Primitive compatibility checkpoint (before network integration)
+
+Reg now previews the 10 non-BBOX primitive kinds alongside the original 15
+BBOX examples. Vector OSD uses shared width, alpha, dash/dot/gap and outline
+parameters; ellipse tessellation is capped at 96, preview paths at 4096 points.
+Polygon fill is currently convex; raster mask and heatmap examples are still
+illustrative, not actual image decoders. Arrow heads and point radius have
+explicit size fields. These are Reg preview controls, not claims of live parity.
+
+Read-only Jetson audit: kernel-vision master source/video/overlay.cpp and
+source/video/overlay.hpp use NvDsDisplayMeta on a separate NVMM RGBA preview
+branch; sky paint uses CUDA/EGL. The measured Nov 13 report
+(docs/research/2026-11-13-semantic-osd.md in kernel-vision) reports 64 objects,
+up to 12 line segments per patterned box, CPU OSD solid/dashed/corners and
+about 60 FPS; GPU configuration currently validates solid-only styles.
+No new Jetson code or network transport is introduced in this phase.
+Before freezing transport, benchmark standalone primitive workloads on the
+actual Jetson, recording CPU/GPU time, p95/p99, frame drops and memory copies.
+Do not silently claim complex style parity based on Reg SDL previews.

@@ -2117,6 +2117,7 @@ struct ImGuiTelemetryRenderer::Impl final : VideoOverlayRecorder {
                     vtrFile=std::filesystem::path(base)/"config/vtr.toml";
             }
             try {
+                vtr::seedFactoryCatalog(vtrFile);
                 vtrCatalog=vtr::readCatalog(vtrFile);
                 vtrError.clear();
             } catch (const std::exception& ex) {
