@@ -95,3 +95,12 @@ photo margins and a larger illustrative search ROI. `vtr_box_geometry` checks
 17 style combinations at five sizes and two aspect ratios, including reflection
 symmetry, non-degenerate segments and bounds. SDL snapshots remain visual smoke
 tests; Vulkan pixel parity is not asserted.
+
+Orthogonal BBOX paths now render as non-overlapping pixel-aligned filled
+rectangles with square miter joins and butt caps. Requested widths round to
+whole display pixels (minimum 1) for orthogonal strokes; curves and diagonals
+retain fractional widths and geometric anti-aliasing without baked line textures.
+The contrast underlay is opaque. The geometry test checks pixel-union coverage
+for frame and L-corner widths 1, 2, 3, 4, 5 and 8. The Windows SDL raster test
+checks actual output pixels for 1–4 px frames and corner coverage, and publishes
+`vtr-bbox-raster.bmp`. It does not establish Vulkan raster parity.

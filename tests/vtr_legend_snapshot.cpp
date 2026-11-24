@@ -18,7 +18,7 @@
 int main(int argc,char** argv) {
     try {
         if (argc != 3 && argc != 4) {
-            std::fprintf(stderr,"usage: vtr_legend_snapshot config/vtr.toml output.bmp [primitives]\n");
+            std::fprintf(stderr,"usage: vtr_legend_snapshot config/vtr.toml output.bmp [primitives|raster]\n");
             return 2;
         }
         auto catalog=reg::vtr::readCatalog(argv[1]);
@@ -28,6 +28,7 @@ int main(int argc,char** argv) {
         }
         constexpr int w=1100,h=1560;
         const bool primitives=argc==4 && std::string(argv[3])=="primitives";
+        const bool raster=argc==4 && std::string(argv[3])=="raster";
         SDL_Surface* surface=SDL_CreateSurface(w,h,SDL_PIXELFORMAT_RGBA32);
         if(!surface) { std::fprintf(stderr,"SDL_CreateSurface: %s\n",SDL_GetError());return 2; }
         SDL_Renderer* renderer=SDL_CreateSoftwareRenderer(surface);
@@ -58,6 +59,23 @@ int main(int argc,char** argv) {
         for (int frame = 0; frame < 4; ++frame) {
             ImGui_ImplSDLRenderer3_NewFrame();
             ImGui::NewFrame();
+            if(raster) {
+                // Exercise actual ImGui/SDL raster output, not just vertices.
+                // Use exact integer/half-pixel centers for each width.
+                auto* draw=ImGui::GetForegroundDrawList();
+                for(int n=1;n<=4;++n) {
+                    reg::vtr::Box box;
+                    box.stroke.color={0,1,0};
+                    box.stroke.width=static_cast<float>(n);
+                    const float off=n%2?0.5F:0.0F;
+                    const float x=30.0F+100.0F*n+off,y=100.0F+off;
+                    reg::vtr::drawBbox(draw,box,{x,y},{x+64,y+64});
+                    box.stroke.pattern="none";box.corners="solid";
+                    box.cornerWidth=static_cast<float>(n);box.cornerPx=16;
+                    reg::vtr::drawBbox(draw,box,{x,y+100},{x+64,y+164});
+                }
+                legendVisible=true;
+            } else {
             ImGui::SetNextWindowPos({0,0},ImGuiCond_Always);
             ImGui::SetNextWindowSize({static_cast<float>(w),static_cast<float>(h)},
                                      ImGuiCond_Always);
@@ -81,6 +99,7 @@ int main(int argc,char** argv) {
                 ImGui::EndTabBar();
             }
             ImGui::End();
+            }
             ImGui::Render();
             ImDrawData* data=ImGui::GetDrawData();
             std::printf("VTR screenshot frame=%d legend=%d vertices=%d\n",
@@ -97,13 +116,49 @@ int main(int argc,char** argv) {
             }
         }
         const auto expectedPage=primitives?reg::vtr::LegendPage::Primitives:reg::vtr::LegendPage::Outputs;
-        if (!legendVisible || visiblePage!=expectedPage) {
+        if (!legendVisible || (!raster && visiblePage!=expectedPage)) {
             std::fprintf(stderr,"VTR tab was never visible; rejecting blank screenshot\n");
             return 3;
         }
         // Count pixels differing from the normal ImGui background in the
         // interior, ignoring borders. A blank shot must fail CI, not pass.
         const auto* pixels=static_cast<const std::uint8_t*>(surface->pixels);
+        if(raster) {
+            // RGBA32 guarantees byte order R,G,B,A. Check the entire
+            // reference stroke, not just a few sample pixels.
+            const auto green=[&](int x,int y) {
+                const auto* p=pixels+static_cast<std::size_t>(y)*surface->pitch+
+                    static_cast<std::size_t>(x)*4;
+                return p[1]>200&&p[0]<30&&p[2]<30;
+            };
+            for(int n=1;n<=4;++n) {
+                const int x=30+100*n-(n/2),y=100-(n/2);
+                const int outer=64+n;
+                for(int row=-1;row<=outer;++row) for(int col=-1;col<=outer;++col) {
+                    const bool within=col>=0&&col<outer&&row>=0&&row<outer;
+                    const bool inside=col>=n&&col<64&&row>=n&&row<64;
+                    const bool expected=within&&!inside;
+                    if(green(x+col,y+row)!=expected) {
+                        std::fprintf(stderr,"Raster frame width=%d x=%d y=%d expected=%d\n",
+                            n,col,row,expected?1:0);
+                        return 3;
+                    }
+                }
+                // Check four corner caps and miter squares, away from
+                // endpoint rounding differences for odd-width strokes.
+                for(int row=0;row<outer;++row) for(int col=0;col<outer;++col) {
+                    const bool left=col<n,right=col>=64,top=row<n,bottom=row>=64;
+                    const bool nearX=col<15||col>=outer-15;
+                    const bool nearY=row<15||row>=outer-15;
+                    const bool required=((left||right)&&nearY)||((top||bottom)&&nearX);
+                    if(required&&!green(x+col,y+100+row)) {
+                        std::fprintf(stderr,"Raster L corner gap width=%d x=%d y=%d\n",n,col,row);
+                        return 3;
+                    }
+                }
+            }
+            std::printf("VTR pixel raster regression: widths 1..4 PASS\n");
+        }
         const auto* firstRow=pixels+static_cast<std::size_t>(3)*surface->pitch;
         std::uint32_t background=0;
         std::memcpy(&background,firstRow+static_cast<std::size_t>(3)*4,4);
@@ -117,7 +172,7 @@ int main(int argc,char** argv) {
             }
         }
         std::printf("VTR screenshot pixel diversity=%zu (sampled)\n",varied);
-        if (varied<1500) {
+        if (!raster && varied<1500) {
             std::fprintf(stderr,"VTR screenshot blank; failing visual smoke test\n");
             return 3;
         }

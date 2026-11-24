@@ -20,8 +20,41 @@ std::vector<Segment> segments(const Lines& lines) {
     }
     return result;
 }
+void testPixelRects() {
+    const auto covered=[](const std::vector<PixelRect>& rs,int x,int y) {
+        int n=0;
+        for(auto r:rs) if(x>=r.x0&&x<r.x1&&y>=r.y0&&y<r.y1) ++n;
+        return n;
+    };
+    for(int width:{1,2,3,4,5,8}) {
+        const float center=width%2?20.5F:20.0F;
+        const float end=center+32;
+        Line frame{{{center,center},{end,center},{end,end},{center,end}},
+            static_cast<float>(width),true};
+        const auto r=pixelRects(frame,frame.width);
+        const int lo=static_cast<int>(std::round(center-width*0.5F));
+        const int hi=lo+32+width;
+        for(int y=lo-1;y<=hi;++y) for(int x=lo-1;x<=hi;++x) {
+            const bool outer=x>=lo&&x<hi&&y>=lo&&y<hi;
+            const bool inner=x>=lo+width&&x<hi-width&&y>=lo+width&&y<hi-width;
+            require(covered(r,x,y)==static_cast<int>(outer&&!inner),
+                "pixel frame has gap, protrusion, wrong width or overlap");
+        }
+        Line corner{{{center,center+12},{center,center},{center+12,center}},
+            static_cast<float>(width),false};
+        const auto c=pixelRects(corner,corner.width);
+        const int cap=static_cast<int>(std::round(center+12));
+        for(int y=lo-1;y<=cap;++y) for(int x=lo-1;x<=cap;++x) {
+            const bool expected=(x>=lo&&x<lo+width&&y>=lo&&y<cap)||
+                (y>=lo&&y<lo+width&&x>=lo&&x<cap);
+            require(covered(c,x,y)==static_cast<int>(expected),
+                "L corner has gap, protrusion or non-butt cap");
+        }
+    }
+}
 int main() {
     try {
+        testPixelRects();
         Box base; base.stroke.width=2; base.cornerWidth=4; base.cornerPx=17;
         std::vector<Box> styles;
         Box s=base; styles.push_back(s);

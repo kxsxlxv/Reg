@@ -18,14 +18,27 @@ ImU32 rgba(Color c, float alpha = 1.0F) {
 }
 using Path=std::vector<ImVec2>;
 void paintLine(ImDrawList* d,const boxgeom::Line& line,ImU32 color,float width) {
+    if(boxgeom::orthogonal(line)) {
+        // Filled, integer-aligned rectangles are exact for horizontal and
+        // vertical strokes, including L joins. No baked line texture.
+        for(const auto& r:boxgeom::pixelRects(line,width))
+            d->AddRectFilled({static_cast<float>(r.x0),static_cast<float>(r.y0)},
+                {static_cast<float>(r.x1),static_cast<float>(r.y1)},color);
+        return;
+    }
     Path points;
     points.reserve(line.points.size());
     for(auto p:line.points) points.emplace_back(p.x,p.y);
     if(points.size()<2) return;
     // Closed paths have unique vertices, and open L corners have exactly
     // three non-coincident points: ImGui can generate a proper miter join.
+    // Keep geometric antialiasing for diagonals/curves. The software SDL
+    // backend can distort baked line textures; do not use them for OSD.
+    const ImDrawListFlags saved=d->Flags;
+    d->Flags &= ~ImDrawListFlags_AntiAliasedLinesUseTex;
     d->AddPolyline(points.data(),static_cast<int>(points.size()),color,width,
         line.closed?ImDrawFlags_Closed:ImDrawFlags_None);
+    d->Flags=saved;
 }
 void stroke(ImDrawList* d,ImVec2 a,ImVec2 b,ImU32 color,
             float width,std::string_view pattern) {
@@ -66,7 +79,7 @@ void rectangle(ImDrawList* d,const Box& s,ImVec2 a,ImVec2 b) {
     // must never erase an adjacent colored edge/corner/marker.
     if(s.outlineWidth>0)
         for(const auto& line:lines)
-            paintLine(d,line,IM_COL32(12,16,20,235),line.width+2*s.outlineWidth);
+            paintLine(d,line,IM_COL32(12,16,20,255),line.width+2*s.outlineWidth);
     for(const auto& line:lines) paintLine(d,line,rgba(s.stroke.color),line.width);
 }
 void drawLabel(ImDrawList* d,const Output& o,ImVec2 a,ImVec2 b,
@@ -159,7 +172,7 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
         const bool roi=o.semantic=="search_region";
         const ImVec2 lo=roi?img(50,10):a;
         const ImVec2 hi=roi?img(1191,735):b;
-        rectangle(d,o.box,lo,hi);
+        drawBbox(d,o.box,lo,hi);
         drawLabel(d,o,lo,hi,min,max);
     } else if (geometry=="line") {
         stroke(d,img(155,660),img(1105,65),ink,o.osd.stroke.width,
@@ -221,6 +234,10 @@ void preview(ImDrawList* d,const Output& o,ImVec2 min,ImVec2 max) {
     d->PopClipRect();
 }
 } // namespace
+
+void drawBbox(ImDrawList* draw,const Box& style,ImVec2 min,ImVec2 max) {
+    rectangle(draw,style,min,max);
+}
 
 LegendPage drawLegend(Catalog& catalog, std::string& error,
                 const std::filesystem::path& path, bool selectPrimitives) {

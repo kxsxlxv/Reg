@@ -6,6 +6,7 @@
 #include <cmath>
 #include <string_view>
 #include <vector>
+#include <utility>
 
 namespace reg::vtr::boxgeom {
 struct Point { float x{}, y{}; };
@@ -149,5 +150,65 @@ inline Lines build(const Box& s,Point a,Point b) {
     pattern(lines,{a,b},s.diagonalWidth,s.diagonals);
     pattern(lines,{{b.x,a.y},{a.x,b.y}},s.diagonalWidth,s.diagonals);
     return lines;
+}
+// Exact framebuffer-aligned orthogonal strokes. At 1x DPI the requested
+// width is rounded to a whole pixel (minimum one). Open ends are butt caps;
+// interior vertices have square miter joins. Non-overlapping rectangles are
+// returned so a translucent underlay cannot accumulate alpha at the joins.
+struct PixelRect { int x0{},y0{},x1{},y1{}; };
+inline bool orthogonal(const Line& line) {
+    if(line.points.size()<2) return false;
+    const std::size_t n=line.points.size();
+    for(std::size_t i=0;i<(line.closed?n:n-1);++i) {
+        const auto a=line.points[i],b=line.points[(i+1)%n];
+        if(std::abs(a.x-b.x)>0.001F&&std::abs(a.y-b.y)>0.001F) return false;
+    }
+    return true;
+}
+inline std::vector<PixelRect> pixelRects(const Line& line,float width) {
+    if(!orthogonal(line)) return {};
+    const int thick=std::max(1,static_cast<int>(std::round(width)));
+    const auto round=[](float x) { return static_cast<int>(std::floor(x+0.5F)); };
+    const auto lo=[&](float x) { return round(x-thick*0.5F); };
+    std::vector<PixelRect> source;
+    auto add=[&](PixelRect r) { if(r.x1>r.x0&&r.y1>r.y0) source.push_back(r); };
+    const auto n=line.points.size();
+    for(std::size_t i=0;i<(line.closed?n:n-1);++i) {
+        const Point a=line.points[i],b=line.points[(i+1)%n];
+        if(std::abs(a.y-b.y)<=0.001F)
+            add({round(std::min(a.x,b.x)),lo(a.y),
+                 round(std::max(a.x,b.x)),lo(a.y)+thick});
+        else
+            add({lo(a.x),round(std::min(a.y,b.y)),
+                 lo(a.x)+thick,round(std::max(a.y,b.y))});
+    }
+    // Square joins cover the entire outside quadrant without relying on
+    // a renderer-specific textured-line normal or triangle interpolation.
+    for(std::size_t i=line.closed?0:1;i<(line.closed?n:n-1);++i) {
+        const auto p=line.points[i];
+        add({lo(p.x),lo(p.y),lo(p.x)+thick,lo(p.y)+thick});
+    }
+    // Decompose the rectangle union into disjoint x-slabs, coalescing y
+    // intervals. This is bounded by the small number of path vertices.
+    std::vector<int> xs;
+    for(const auto& r:source) { xs.push_back(r.x0); xs.push_back(r.x1); }
+    std::sort(xs.begin(),xs.end());
+    xs.erase(std::unique(xs.begin(),xs.end()),xs.end());
+    std::vector<PixelRect> result;
+    for(std::size_t i=1;i<xs.size();++i) {
+        const int x0=xs[i-1],x1=xs[i];
+        std::vector<std::pair<int,int>> spans;
+        for(const auto& r:source)
+            if(r.x0<=x0&&r.x1>=x1) spans.emplace_back(r.y0,r.y1);
+        std::sort(spans.begin(),spans.end());
+        for(std::size_t j=0;j<spans.size();) {
+            const int y0=spans[j].first;
+            int y1=spans[j++].second;
+            while(j<spans.size()&&spans[j].first<=y1)
+                y1=std::max(y1,spans[j++].second);
+            result.push_back({x0,y0,x1,y1});
+        }
+    }
+    return result;
 }
 } // namespace reg::vtr::boxgeom
