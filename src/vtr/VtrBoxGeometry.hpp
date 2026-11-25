@@ -58,18 +58,38 @@ inline void pattern(Lines& out,const Path& raw,float width,std::string_view styl
     if(closed) append(p,p.front());
     float len=0;
     for(std::size_t i=1;i<p.size();++i) len+=distance(p[i-1],p[i]);
-    if(len<=0.001F) return;
+    if(!std::isfinite(len)||len<=0.001F) return;
     const bool dot=style=="dash_dot";
-    const float dash=dashPx>0?dashPx:(dot?10.0F:7.0F);
-    const float gap=gapPx>0?gapPx:(dot?4.0F:5.0F);
-    const float dotLen=dotPx>0?dotPx:2.0F;
+    float dash=dashPx>0?std::max(1.0F,dashPx):(dot?10.0F:7.0F);
+    float gap=gapPx>0?std::max(1.0F,gapPx):(dot?4.0F:5.0F);
+    float dotLen=dotPx>0?std::max(1.0F,dotPx):2.0F;
+    // Bounded VTR tessellation: stretch the cycle rather than drop
+    // remote dashes or allow tiny intervals to explode into millions.
+    const float initialPeriod=dot?dash+2*gap+dotLen:dash+gap;
+    const float scale=std::max(1.0F,len/(512*initialPeriod));
+    dash*=scale;gap*=scale;dotLen*=scale;
     const float period=dot?dash+2*gap+dotLen:dash+gap;
     const float edgeGap=std::min(2.0F,len*0.15F);
     const float mid=len*0.5F;
+    // Prefix arclength gives O(log N + covered segments) interval lookup
+    // rather than scanning the entire path for every dash.
+    std::vector<float> prefix(p.size(),0);
+    for(std::size_t i=1;i<p.size();++i)prefix[i]=prefix[i-1]+distance(p[i-1],p[i]);
     auto emit=[&](float center,float length) {
         const float a=center-length*0.5F,b=center+length*0.5F;
         if(a<edgeGap-0.001F||b>len-edgeGap+0.001F) return;
-        auto q=interval(p,a,b);
+        Path q;
+        auto i=std::size_t(std::upper_bound(prefix.begin(),prefix.end(),a)-prefix.begin());
+        i=std::max<std::size_t>(1,i);
+        for(;i<p.size()&&prefix[i-1]<b;++i) {
+            const float segment=prefix[i]-prefix[i-1];
+            if(segment<=0.001F)continue;
+            const float lo=std::max(a,prefix[i-1]),hi=std::min(b,prefix[i]);
+            if(hi-lo>0.001F){
+                append(q,interpolate(p[i-1],p[i],(lo-prefix[i-1])/segment));
+                append(q,interpolate(p[i-1],p[i],(hi-prefix[i-1])/segment));
+            }
+        }
         if(q.size()>=2) out.push_back({std::move(q),width,false});
     };
     emit(mid,std::min(dash,len-2*edgeGap));
@@ -273,7 +293,7 @@ inline std::vector<PixelRect> pixelRects(const Line& line,float width) {
 // entire stroke union before blending. Scan-convert convex stroke pieces
 // at 4x subpixel coverage; never blend each individual overlapping stroke.
 struct CoverageRun { int x0{},x1{},y{}; unsigned samples{}; };
-template<class Emit>
+template<bool Reference = false, class Emit>
 void mixedCoverage(const Lines& lines,float extra,PixelRect clip,Emit emit) {
     constexpr int S=4;
     const int width=clip.x1-clip.x0,height=clip.y1-clip.y0;
@@ -341,25 +361,69 @@ void mixedCoverage(const Lines& lines,float extra,PixelRect clip,Emit emit) {
             }
         }
     }
-    std::vector<unsigned> coverage(static_cast<std::size_t>(width));
-    for(int y=0;y<height;++y) {
-        std::fill(coverage.begin(),coverage.end(),0U);
-        for(int sy=0;sy<S;++sy) {
-            auto& spans=rows[static_cast<std::size_t>(y*S+sy)];
-            std::sort(spans.begin(),spans.end());
-            for(std::size_t j=0;j<spans.size();) {
-                const int x0=spans[j].first;
-                int x1=spans[j++].second;
-                while(j<spans.size()&&spans[j].first<=x1)
-                    x1=std::max(x1,spans[j++].second);
-                for(int x=x0;x<x1;++x) ++coverage[static_cast<std::size_t>(x/S)];
+    if constexpr (Reference) {
+        std::vector<unsigned> coverage(static_cast<std::size_t>(width));
+        for(int y=0;y<height;++y) {
+            std::fill(coverage.begin(),coverage.end(),0U);
+            for(int sy=0;sy<S;++sy) {
+                auto& spans=rows[static_cast<std::size_t>(y*S+sy)];
+                std::sort(spans.begin(),spans.end());
+                for(std::size_t j=0;j<spans.size();) {
+                    const int x0=spans[j].first;
+                    int x1=spans[j++].second;
+                    while(j<spans.size()&&spans[j].first<=x1)
+                        x1=std::max(x1,spans[j++].second);
+                    for(int x=x0;x<x1;++x) ++coverage[static_cast<std::size_t>(x/S)];
+                }
+            }
+            for(int x=0;x<width;) {
+                const int begin=x;
+                const unsigned value=coverage[static_cast<std::size_t>(x++)];
+                while(x<width&&coverage[static_cast<std::size_t>(x)]==value) ++x;
+                if(value) emit(CoverageRun{begin+clip.x0,x+clip.x0,y+clip.y0,value});
             }
         }
-        for(int x=0;x<width;) {
-            const int begin=x;
-            const unsigned value=coverage[static_cast<std::size_t>(x++)];
-            while(x<width&&coverage[static_cast<std::size_t>(x)]==value) ++x;
-            if(value) emit(CoverageRun{begin+clip.x0,x+clip.x0,y+clip.y0,value});
+    } else {
+        // The spans are disjoint per subpixel row after merging. Add fractional
+        // endpoints explicitly and accumulate complete pixels via a difference array.
+        std::vector<int> partial(width), delta(width + 1);
+        for (int y = 0; y < height; ++y) {
+            int first = width, last = -1;
+            for (int sy = 0; sy < S; ++sy) {
+                auto& spans = rows[static_cast<std::size_t>(y*S+sy)];
+                std::sort(spans.begin(), spans.end());
+                for (std::size_t j = 0; j < spans.size();) {
+                    const int x0 = spans[j].first;
+                    int x1 = spans[j++].second;
+                    while (j < spans.size() && spans[j].first <= x1)
+                        x1 = std::max(x1, spans[j++].second);
+                    const int a = x0/S, b = (x1-1)/S;
+                    first = std::min(first, a);
+                    last = std::max(last, b);
+                    if (a == b) {
+                        partial[a] += x1-x0;
+                    } else {
+                        partial[a] += (a+1)*S-x0;
+                        partial[b] += x1-b*S;
+                        delta[a+1] += S;
+                        delta[b] -= S;
+                    }
+                }
+            }
+            int carry = 0, value = 0, begin = first;
+            for (int x = first; x <= last; ++x) {
+                carry += delta[x];
+                const int next = partial[x] + carry;
+                partial[x] = delta[x] = 0;
+                if (next == value)
+                    continue;
+                if (value)
+                    emit(CoverageRun{begin+clip.x0,x+clip.x0,y+clip.y0,unsigned(value)});
+                begin = x;
+                value = next;
+            }
+            if (value)
+                emit(CoverageRun{begin+clip.x0,last+1+clip.x0,y+clip.y0,unsigned(value)});
         }
     }
 }

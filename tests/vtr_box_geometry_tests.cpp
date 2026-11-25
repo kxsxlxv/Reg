@@ -1,5 +1,7 @@
 #include "vtr/VtrBoxGeometry.hpp"
 #include <iostream>
+#include <random>
+#include <tuple>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -52,8 +54,46 @@ void testPixelRects() {
         }
     }
 }
+void testSparseCoverageParity() {
+    std::mt19937 random(0x619b82ad);
+    const auto next=[&](int n) { return int(random()%n); };
+    const PixelRect clip{-16,-9,72,57};
+    using Run=std::tuple<int,int,int,unsigned>;
+    const auto capture=[&]<bool Reference>(const Lines& lines, float extra) {
+        std::vector<Run> runs;
+        mixedCoverage<Reference>(lines,extra,clip,[&](CoverageRun r) {
+            runs.emplace_back(r.x0,r.x1,r.y,r.samples);
+        });
+        return runs;
+    };
+    for(int i=0;i<800;++i) {
+        Box style;
+        style.stroke.width=1.0F+next(8);
+        style.roundingPx=float(next(20));
+        style.stroke.pattern=i%3==0?"solid":i%3==1?"dashed":"dash_dot";
+        style.diagonals=i%2?"solid":"dashed";
+        style.corners=i%2?"solid":"none";
+        const Point a{float(next(84)-28)*0.75F,float(next(76)-20)*0.75F};
+        const Point b{a.x+1+next(80),a.y+1+next(70)};
+        auto lines=build(style,a,b);
+        for(int j=0;j<3;++j) {
+            const Point c{float(next(104)-36)*0.75F,float(next(92)-25)*0.75F};
+            const Point d{float(next(104)-36)*0.75F,float(next(92)-25)*0.75F};
+            lines.push_back({{c,d},0.5F+float(next(16))*0.5F,false});
+        }
+        const float extra=float(next(8))*0.5F;
+        require(capture.operator()<true>(lines,extra)==capture.operator()<false>(lines,extra),
+                "sparse clipped coverage changed reference runs");
+    }
+    Lines longPath;
+    pattern(longPath,{{0,0},{1000000,0}},2,"dash_dot",false,0.01F,0.01F,0.01F);
+    require(longPath.size()>500&&longPath.size()<=1025,"long dash path exceeds shared budget");
+    std::cout<<"VTR clipped sparse coverage: 800 exact cases PASS\n";
+}
+
 int main() {
     try {
+        testSparseCoverageParity();
         testPixelRects();
         Box labelBox;labelBox.stroke.width=4;labelBox.outlineWidth=1;
         auto bounds=labelBounds(labelBox,{20,30},{100,90});
